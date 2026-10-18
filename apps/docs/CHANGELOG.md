@@ -1,5 +1,17 @@
 # @spawnforge/docs
 
+## 0.2.5
+
+### Patch Changes
+
+- [#10309](https://github.com/Tristan578/project-forge/pull/10309) [`842b6cd`](https://github.com/Tristan578/project-forge/commit/842b6cddcd9ca9f33a9a08eadaa53169b360975d) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update runtime dependencies for AI providers, authentication, storage, rate limiting, analytics, the database client, the MCP SDK, and documentation. Refresh related development and test tooling. Raise the shared Clerk authentication library (`@clerk/shared`) to 4.36.0, the minimum the updated Clerk packages require.
+
+- [#10314](https://github.com/Tristan578/project-forge/pull/10314) [`b320d6f`](https://github.com/Tristan578/project-forge/commit/b320d6ff2aa0d1cea49c9c960393197e191da5d2) Thanks [@Tristan578](https://github.com/Tristan578)! - Security update: Next.js moves from 16.3.5 to 16.3.8 in the editor and the documentation site. It fixes a critical vulnerability in social-preview image generation (the share cards for published games and marketing pages) plus several smaller hardening fixes. Nothing about the editor, published games or the docs site looks or behaves differently.
+  
+  Details for maintainers: the Next.js advisory is GHSA-vcvr-r3jv-pc5j (`next/og` ImageResponse). The Next.js ESLint config and bundle analyzer move to the same version. The lockfile also relocks two transitive packages to their patched releases: `undici` 8.11.2 (GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3) and `brace-expansion` 1.1.21 / 5.0.12 (GHSA-6j4f-fj2g-mc7p, GHSA-qhr7-859c-m2p7). No application code changes.
+
+- [#10353](https://github.com/Tristan578/project-forge/pull/10353) [`a1d7180`](https://github.com/Tristan578/project-forge/commit/a1d7180a99e07153001c30a0ceb94545098fd074) Thanks [@Tristan578](https://github.com/Tristan578)! - Update two transitive dependencies to their patched releases so the npm audit gate passes again: `source-map-js` from 1.2.1 to 1.2.2 (GHSA-68fv-2mgg-jv7q, an event-loop denial of service through indexed source-map section offsets; reached through postcss in the web and docs builds) and `proxy-addr` from 2.0.7 to 2.0.8 (GHSA-jqcg-44mw-7w3h, IP spoofing through an IPv4-mapped IPv6 trust subnet; reached through express in the MCP server). Both bumps stay inside the ranges postcss and express already declare, so this is a lockfile-only change: no `package.json` range moves, nothing else in the tree resolves differently, and no application code changes. The only runtime change is the two patches themselves. `source-map-js` runs in the Tailwind/PostCSS build step and never ships in a bundle; `proxy-addr` is reached only through the MCP SDK's express dependency, whose OAuth router the MCP server does not import, so neither patched code path is exercised by first-party code.
+
 ## 0.2.4
 
 ### Patch Changes
