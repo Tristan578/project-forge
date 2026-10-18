@@ -60,12 +60,15 @@ function makeEntity(overrides: Partial<EntitySnapshotData> = {}): EntitySnapshot
   };
 }
 
-function makeTemplate(entities: EntitySnapshotData[]): GameTemplate {
+function makeTemplate(
+  entities: EntitySnapshotData[],
+  category: GameTemplate['category'] = 'platformer',
+): GameTemplate {
   return {
     id: 'test',
     name: 'Test Template',
     description: 'd',
-    category: 'platformer',
+    category,
     difficulty: 'beginner',
     thumbnail: { gradient: 'g', icon: 'i', accentColor: '#fff' },
     tags: [],
@@ -118,6 +121,42 @@ describe('buildTemplateSceneFile', () => {
   it('renames entityName to name', () => {
     const { sceneJson } = buildTemplateSceneFile(makeTemplate([makeEntity()]));
     expect(JSON.parse(sceneJson).entities[0].name).toBe('Entity One');
+  });
+
+  /**
+   * A 2D TEMPLATE MUST LOAD IN 2D MODE.
+   *
+   * Nothing in the template path ever set the engine's `ProjectType`: the
+   * translated file carried no dimension and no caller sent
+   * `set_project_type`, so every 2D template — ten sprites in the platformer
+   * alone — loaded in the default 3D mode with no 2D camera and nothing
+   * visible. The scene file now carries `metadata.projectType` and the
+   * engine restores it on `load_scene` (#10227); the template's category is
+   * the only statement of its dimension, so it is written from there.
+   */
+  describe('metadata.projectType', () => {
+    const TWO_D = ['2d_platformer', '2d_topdown', '2d_shmup', '2d_puzzle', '2d_fighter', '2d_metroidvania'] as const;
+    const THREE_D = ['platformer', 'runner', 'shooter', 'puzzle', 'explorer'] as const;
+
+    it.each(TWO_D)('%s writes 2d', (category) => {
+      const parsed = JSON.parse(buildTemplateSceneFile(makeTemplate([makeEntity()], category)).sceneJson);
+      expect(parsed.metadata.projectType).toBe('2d');
+    });
+
+    it.each(THREE_D)('%s writes 3d', (category) => {
+      const parsed = JSON.parse(buildTemplateSceneFile(makeTemplate([makeEntity()], category)).sceneJson);
+      expect(parsed.metadata.projectType).toBe('3d');
+    });
+
+    it('covers every category the type allows', () => {
+      // Non-vacuous: a new category added to `GameTemplate` must be sorted
+      // into one of the two lists above, or this fails at the type level AND here.
+      const all: ReadonlyArray<GameTemplate['category']> = [...TWO_D, ...THREE_D];
+      const _exhaustive: Record<GameTemplate['category'], true> = Object.fromEntries(
+        all.map((c) => [c, true]),
+      ) as Record<GameTemplate['category'], true>;
+      expect(Object.keys(_exhaustive)).toHaveLength(TWO_D.length + THREE_D.length);
+    });
   });
 
   /**
@@ -337,6 +376,8 @@ describe('every shipped template translates into a loadable SceneFile', () => {
 
       expect(parsed.entities.length).toBe(entityCount);
       expect(entityCount).toBeGreaterThan(0);
+      // Every shipped 2D template is one the engine will open in 2D (#10227).
+      expect(parsed.metadata.projectType).toBe(entry.category.startsWith('2d_') ? '2d' : '3d');
 
       const keptIds = new Set<string>(parsed.entities.map((e: { entityId: string }) => e.entityId));
       for (const entity of parsed.entities) {
