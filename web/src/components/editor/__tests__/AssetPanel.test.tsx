@@ -80,6 +80,7 @@ const mockDeleteAsset = vi.fn();
 function setupStore(overrides: {
   assets?: Record<string, { id: string; name: string; kind: string; fileSize: number }>;
   primaryId?: string | null;
+  sprites?: Record<string, unknown>;
 } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
@@ -91,6 +92,7 @@ function setupStore(overrides: {
       placeAsset: mockPlaceAsset,
       deleteAsset: mockDeleteAsset,
       primaryId: 'primaryId' in overrides ? overrides.primaryId : 'ent-1',
+      sprites: overrides.sprites ?? {},
     };
     return selector(state);
   });

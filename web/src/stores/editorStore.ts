@@ -214,6 +214,10 @@ const REJECTED_ACTION_LABELS: Readonly<Record<string, string>> = {
   save_scene: 'save the scene',
   spawn_entity: 'add the entity',
   delete_entity: 'delete the entity',
+  // A format refusal (`<command> refused: …`) is shown with its reason by
+  // assetSlice as well; this generic line covers every other rejection.
+  import_gltf: 'import the model',
+  load_texture: 'load the texture',
 };
 
 function rejectedActionMessage(command: string): string {
@@ -234,6 +238,23 @@ function rejectedActionMessage(command: string): string {
  * Monitoring must never break dispatch, so every step is guarded.
  */
 function reportCommandRejected(command: string, error: string | undefined): void {
+  // A refusal is the person's input being turned away, not an engine fault.
+  // This applies to ANY command that answers with its own `<command> refused: `
+  // prefix, present and future; the generic toast and the Sentry exception
+  // are for faults, so neither fires here, only a breadcrumb for the session
+  // trail. The contract that comes with the prefix: the CALLER must surface
+  // the refusal itself, because nothing else will. Today assetSlice does so
+  // for `load_texture` and `import_gltf` (the file and the reason, on every
+  // refused file - #10396); a command that adopts the prefix without a caller
+  // showing it would be refused silently.
+  if (error?.startsWith(`${command} refused: `)) {
+    try {
+      addBreadcrumb({ category: 'engine.command.refused', message: `${command}: ${error}`, level: 'info' });
+    } catch {
+      /* monitoring is best-effort */
+    }
+    return;
+  }
   const engineError = error ?? 'no error message';
   console.error(`Engine rejected command '${command}': ${engineError}`);
 

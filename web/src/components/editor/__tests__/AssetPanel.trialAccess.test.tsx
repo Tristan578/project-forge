@@ -66,6 +66,7 @@ function setupStore() {
       placeAsset: vi.fn(),
       deleteAsset: vi.fn(),
       primaryId: 'ent-1',
+      sprites: {},
     })
   );
 }

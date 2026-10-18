@@ -53,6 +53,8 @@ const mockSetCustomSkybox = vi.fn();
 const mockImportAudio = vi.fn();
 const mockSetAudio = vi.fn();
 const mockSetSpriteSheet = vi.fn();
+/** Per-entity sprite data, as the store's `sprites`: an entry marks a 2D sprite target. */
+const mockSprites: Record<string, unknown> = {};
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
@@ -63,6 +65,7 @@ vi.mock('@/stores/editorStore', () => ({
       importAudio: mockImportAudio,
       setAudio: mockSetAudio,
       setSpriteSheet: mockSetSpriteSheet,
+      sprites: mockSprites,
     }),
   },
 }));
@@ -132,6 +135,11 @@ vi.mock('@/lib/sprites/sheetImporter', () => ({
 }));
 
 import { useGenerationPolling } from '../useGenerationPolling';
+// The REAL asset slice, for the tests that drive the poller against the
+// store's own answer when no engine is attached (#10396): no dispatcher is
+// ever set in this file, which is exactly that state.
+import { createAssetSlice, ENGINE_NOT_ATTACHED } from '@/stores/slices/assetSlice';
+import { createSliceStore } from '@/stores/slices/__tests__/sliceTestTemplate';
 // Imported, not retyped: the guidance sentence is the catalogue's, and a test
 // that hardcoded it would pass while the two drifted apart.
 import { RETRY_GUIDANCE } from '@/lib/generate/retryGuidance';
@@ -176,6 +184,7 @@ describe('useGenerationPolling', () => {
     mockProcessFailedRefunds.mockResolvedValue(undefined);
     // Clear jobs
     Object.keys(mockJobs).forEach(k => delete mockJobs[k]);
+    Object.keys(mockSprites).forEach(k => delete mockSprites[k]);
     mockDurable.enabled = false;
   });
 
@@ -1519,78 +1528,79 @@ describe('useGenerationPolling', () => {
     });
 
     const OriginalImage = globalThis.Image;
-    globalThis.Image = class MockImage {
-      naturalWidth = 256;
-      naturalHeight = 64;
-      onload: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      set src(_url: string) {
-        queueMicrotask(() => this.onload?.());
-      }
-    } as unknown as typeof Image;
-
     const origCreateObjectURL = globalThis.URL.createObjectURL;
     const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
-    const mockCreateObjectURL = vi.fn(() => 'blob:mock-url');
-    const mockRevokeObjectURL = vi.fn();
-    globalThis.URL.createObjectURL = mockCreateObjectURL;
-    globalThis.URL.revokeObjectURL = mockRevokeObjectURL;
+    // Restored in a finally: a failing assertion must not leak these
+    // stubs into the tests that follow.
+    try {
+      globalThis.Image = class MockImage {
+        naturalWidth = 256;
+        naturalHeight = 64;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_url: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      } as unknown as typeof Image;
+      globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+      globalThis.URL.revokeObjectURL = vi.fn();
 
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-      const urlStr = typeof url === 'string' ? url : (url as Request).url;
-      if (urlStr.includes('/api/generate/sprite-sheet/status')) {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/api/generate/sprite-sheet/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-ss1',
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/spritesheet.png',
+            }),
+          } as Response;
+        }
         return {
           ok: true,
-          json: () => Promise.resolve({
-            jobId: 'job-ss1',
-            status: 'completed',
-            progress: 100,
-            resultUrl: 'https://example.com/spritesheet.png',
-          }),
+          blob: () => Promise.resolve(new Blob(['fake-png'], { type: 'image/png' })),
         } as Response;
-      }
-      return {
-        ok: true,
-        blob: () => Promise.resolve(new Blob(['fake-png'], { type: 'image/png' })),
-      } as Response;
-    });
+      });
 
-    renderHook(() => useGenerationPolling());
+      renderHook(() => useGenerationPolling());
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
-    });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
 
-    expect(mockLoadTexture).toHaveBeenCalledWith(
-      expect.any(String),
-      'TestAsset',
-      'entity-ss1',
-      'base_color',
-    );
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        expect.any(String),
+        'TestAsset',
+        'entity-ss1',
+        'base_color',
+      );
 
-    expect(mockSetSpriteSheet).toHaveBeenCalledWith(
-      'entity-ss1',
-      expect.objectContaining({
-        assetId: 'SpriteSheet_test',
-        frames: expect.arrayContaining([
-          expect.objectContaining({ index: 0, x: 0, y: 0 }),
-        ]),
-      }),
-    );
+      expect(mockSetSpriteSheet).toHaveBeenCalledWith(
+        'entity-ss1',
+        expect.objectContaining({
+          assetId: 'SpriteSheet_test',
+          frames: expect.arrayContaining([
+            expect.objectContaining({ index: 0, x: 0, y: 0 }),
+          ]),
+        }),
+      );
 
-    const completedCall = mockUpdateJob.mock.calls.find(
-      (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
-    );
-    expect(completedCall).toBeDefined();
-    const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
-    expect(meta).toHaveProperty('spriteSheet');
-
-    globalThis.Image = OriginalImage;
-    globalThis.URL.createObjectURL = origCreateObjectURL;
-    globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+      const completedCall = mockUpdateJob.mock.calls.find(
+        (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
+      );
+      expect(completedCall).toBeDefined();
+      const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
+      expect(meta).toHaveProperty('spriteSheet');
+    } finally {
+      globalThis.Image = OriginalImage;
+      globalThis.URL.createObjectURL = origCreateObjectURL;
+      globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+    }
   });
 
   // ---------------------------------------------------------------------------
@@ -1907,6 +1917,55 @@ describe('useGenerationPolling', () => {
 
       cleanup();
     });
+
+    it('records a refused import as not placed, with the reason, rather than autoPlaced: true', async () => {
+      // The engine inspects a model before queueing it and refuses one whose
+      // textures are KTX2 (#10396); the generation itself succeeded, so the
+      // job completes, but it must not claim the model was added.
+      const cleanup = setupModelCompletion({ autoPlace: true, targetEntityId: 'ent-1' });
+      const reason = 'image #0 is a KTX2 texture (declared by its mimeType); KTX2 textures are not supported, convert the model\'s textures to PNG or JPEG and import again';
+      mockImportGltf.mockReturnValueOnce({ success: false, error: reason });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: reason,
+          targetEntityId: 'ent-1',
+        }),
+      }));
+
+      cleanup();
+    });
+
+    it('records a model that completes while no engine is attached as not placed, with that reason', async () => {
+      // The real slice with no dispatcher used to answer `success: true`, so
+      // the job was recorded as placed when nothing had been queued (#10396).
+      const cleanup = setupModelCompletion({ autoPlace: true, targetEntityId: 'ent-1' });
+      mockImportGltf.mockImplementationOnce(createSliceStore(createAssetSlice).getState().importGltf);
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: ENGINE_NOT_ATTACHED,
+          targetEntityId: 'ent-1',
+        }),
+      }));
+      // A plain rejection: no refusal toast, and the job is not failed or refunded.
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+      expect(mockUpdateJob).not.toHaveBeenCalledWith('ap1', expect.objectContaining({ status: 'failed' }));
+
+      cleanup();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1980,6 +2039,48 @@ describe('useGenerationPolling', () => {
       cleanup();
     });
 
+    // A 2D sprite has one image and no material (#10399): the colour map
+    // becomes the sprite's image and the material-only maps are skipped and
+    // named, instead of each reaching the engine as "no material".
+    it('on a 2D sprite: the albedo map becomes the sprite image, the normal map is skipped and named', async () => {
+      mockSprites['ent-tex-sprite'] = { textureAssetId: null };
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-sprite' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).toHaveBeenCalledExactlyOnceWith(
+        'data:image/png;base64,AAAA',
+        expect.stringContaining('albedo'),
+        'ent-tex-sprite',
+        'sprite',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: true, skippedMaps: ['normal'] }),
+      }));
+      cleanup();
+    });
+
+    it('on a 2D sprite with only a material map requested: nothing is sent and the record says why', async () => {
+      mockSprites['ent-tex-sprite'] = { textureAssetId: null };
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-sprite', materialSlot: 'normal_map' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).not.toHaveBeenCalled();
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          skippedMaps: ['normal'],
+          placementError: 'a 2D sprite takes only the colour map, so normal could not be applied',
+        }),
+      }));
+      cleanup();
+    });
+
     it('applies only the specified materialSlot map', async () => {
       const cleanup = setupTextureCompletion({
         autoPlace: true,
@@ -2005,6 +2106,32 @@ describe('useGenerationPolling', () => {
           autoPlaced: true,
           targetEntityId: 'ent-tex-target',
           materialSlot: 'normal_map',
+        }),
+      }));
+
+      cleanup();
+    });
+
+    it('records a refused map as not placed, naming the map and the reason', async () => {
+      // A provider that returns a map in a format the engine has no decoder
+      // for is refused by the slice before the command is built (#10396).
+      // One refused map out of two means the material was NOT fully placed.
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-target' });
+      const reason = "unsupported texture format 'image/webp'; accepted formats are image/png, image/jpeg";
+      mockLoadTexture
+        .mockReturnValueOnce({ success: false, error: reason })
+        .mockReturnValueOnce({ success: true });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(2);
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: `albedo: ${reason}`,
+          targetEntityId: 'ent-tex-target',
         }),
       }));
 
@@ -2153,6 +2280,380 @@ describe('useGenerationPolling', () => {
 
       expect(mockLoadTexture).not.toHaveBeenCalled();
       globalThis.FileReader = origFileReader;
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // A refused placement is recorded at EVERY site that places an image (#10396)
+  // ---------------------------------------------------------------------------
+  describe('auto-place refusals', () => {
+    const REASON = "unsupported texture format 'image/webp'; accepted formats are image/png, image/jpeg";
+
+    /** A completed image job of `type`, whose download reads as a PNG data URL. */
+    function setupImageCompletion(id: string, type: string, jobOverrides: Record<string, unknown> = {}) {
+      mockJobs[id] = makeJob(id, {
+        type,
+        prompt: 'a thing',
+        autoPlace: true,
+        targetEntityId: 'ent-refused',
+        ...jobOverrides,
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,AAAA';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: `job-${id}`,
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/image.png',
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['img'], { type: 'image/png' })),
+        } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    async function runToCompletion() {
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+
+    it('sprite / tileset: a refused texture is recorded as not placed, with the reason', async () => {
+      const cleanup = setupImageCompletion('rs1', 'sprite', { materialSlot: 'emissive' });
+      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('rs1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: REASON,
+          targetEntityId: 'ent-refused',
+          materialSlot: 'emissive',
+        }),
+      }));
+      cleanup();
+    });
+
+    it('pixel-art: a refused texture is recorded as not placed, with the reason', async () => {
+      const cleanup = setupImageCompletion('rp1', 'pixel-art');
+      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('rp1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: REASON,
+          targetEntityId: 'ent-refused',
+          materialSlot: 'base_color',
+        }),
+      }));
+      cleanup();
+    });
+
+    it('sprite sheet: the sheet is still sliced, but a refused texture is recorded as not placed', async () => {
+      const cleanup = setupImageCompletion('rss1', 'sprite_sheet', { metadata: { frameCount: 4, frameSize: '64' } });
+      const OriginalImage = globalThis.Image;
+      const origCreateObjectURL = globalThis.URL.createObjectURL;
+      const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
+      // Restored in a finally: a failing assertion must not leak these
+      // stubs into the tests that follow.
+      try {
+        globalThis.Image = class MockImage {
+          naturalWidth = 256;
+          naturalHeight = 64;
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_url: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        } as unknown as typeof Image;
+        globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+        globalThis.URL.revokeObjectURL = vi.fn();
+        mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+        expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-refused', expect.anything());
+        expect(mockUpdateJob).toHaveBeenCalledWith('rss1', expect.objectContaining({
+          status: 'completed',
+          metadata: expect.objectContaining({
+            autoPlaced: false,
+            placementError: REASON,
+            targetEntityId: 'ent-refused',
+            spriteSheet: expect.objectContaining({ frameCount: 4 }),
+          }),
+        }));
+      } finally {
+        globalThis.Image = OriginalImage;
+        globalThis.URL.createObjectURL = origCreateObjectURL;
+        globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+        cleanup();
+      }
+    });
+
+    it('sprite sheet: aimed at a 2D sprite, the texture goes to the sprite slot (#10399)', async () => {
+      // The image now reaches the sprite instead of a material the sprite does
+      // not have. The sheet is still not cut into frames - it names its texture
+      // by the job's display name, which the engine never registers (#10408).
+      mockSprites['ent-sheet'] = { textureAssetId: null };
+      const cleanup = setupImageCompletion('rss2', 'sprite_sheet', {
+        targetEntityId: 'ent-sheet',
+        metadata: { frameCount: 4, frameSize: '64' },
+      });
+      const OriginalImage = globalThis.Image;
+      const origCreateObjectURL = globalThis.URL.createObjectURL;
+      const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
+      try {
+        globalThis.Image = class MockImage {
+          naturalWidth = 256;
+          naturalHeight = 64;
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_url: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        } as unknown as typeof Image;
+        globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+        globalThis.URL.revokeObjectURL = vi.fn();
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+        expect(mockLoadTexture).toHaveBeenCalledWith(expect.any(String), expect.any(String), 'ent-sheet', 'sprite');
+        expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-sheet', expect.anything());
+      } finally {
+        globalThis.Image = OriginalImage;
+        globalThis.URL.createObjectURL = origCreateObjectURL;
+        globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+        cleanup();
+      }
+    });
+
+    it('sprite: a job that completes while no engine is attached is recorded as not placed, with that reason', async () => {
+      // The real slice's answer with no dispatcher set, which is this file's
+      // state throughout: `{ success: false, error: ENGINE_NOT_ATTACHED }`,
+      // a rejection with no toast. It used to be `{ success: true }`.
+      const cleanup = setupImageCompletion('na1', 'sprite');
+      mockLoadTexture.mockImplementationOnce(createSliceStore(createAssetSlice).getState().loadTexture);
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(ENGINE_NOT_ATTACHED).toBe('the engine is not attached');
+      expect(mockUpdateJob).toHaveBeenCalledWith('na1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: ENGINE_NOT_ATTACHED,
+          targetEntityId: 'ent-refused',
+        }),
+      }));
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+      cleanup();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // A generated image served without a usable Content-Type (#10396)
+  // ---------------------------------------------------------------------------
+  describe('a generated image served without a usable type', () => {
+    /** The 8-byte PNG signature: what the poller sniffs. */
+    const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    /** A JPEG SOI marker plus the APP0 marker after it. */
+    const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+    /**
+     * A completed sprite job whose download is `blob`, which the FileReader
+     * stub reads as `dataUrl` - the header the real FileReader would write
+     * from the blob's type.
+     */
+    function setupUntypedCompletion(id: string, blob: Blob, dataUrl: string, jobOverrides: Record<string, unknown> = {}) {
+      mockJobs[id] = makeJob(id, {
+        type: 'sprite',
+        prompt: 'a thing',
+        autoPlace: true,
+        targetEntityId: 'ent-untyped',
+        ...jobOverrides,
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = dataUrl;
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: `job-${id}`,
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/image',
+            }),
+          } as Response;
+        }
+        return { ok: true, blob: () => Promise.resolve(blob) } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    async function runToCompletion() {
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+
+    it('a PNG served with an empty type is declared image/png before it is placed', async () => {
+      // `data:;base64,` is what the FileReader writes for a typeless blob, and
+      // the format gate refuses it as unrecognised: a correctly generated
+      // image was recorded as not placed.
+      const cleanup = setupUntypedCompletion('ut1', new Blob([PNG_BYTES], { type: '' }), 'data:;base64,iVBORw0KGgoAAAANSUhEUg==');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
+        'TestAsset',
+        'ent-untyped',
+        'base_color',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('ut1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: true, targetEntityId: 'ent-untyped' }),
+      }));
+      cleanup();
+    });
+
+    it('a JPEG served as application/octet-stream is declared image/jpeg', async () => {
+      const cleanup = setupUntypedCompletion(
+        'ut2',
+        new Blob([JPEG_BYTES], { type: 'application/octet-stream' }),
+        'data:application/octet-stream;base64,/9j/4A==',
+      );
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4A==', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('a typeless blob with neither signature is left as it is, so the gate still refuses it', async () => {
+      // RIFF....WEBP: a WebP the storage served untyped. Guessing a type for
+      // it would send it to a decoder that cannot read it.
+      const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+      const cleanup = setupUntypedCompletion('ut3', new Blob([webp], { type: '' }), 'data:;base64,UklGRgAAAABXRUJQ');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:;base64,UklGRgAAAABXRUJQ', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('the bytes outrank a wrong served type: a PNG served as image/webp is declared image/png', async () => {
+      // The engine picks its decoder from the header; a PNG declared WebP was
+      // refused by the gate although nothing about the image was wrong.
+      const cleanup = setupUntypedCompletion('ut4', new Blob([PNG_BYTES], { type: 'image/webp' }), 'data:image/webp;base64,iVBORw0KGgo=');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it.each([
+      ['binary/octet-stream', JPEG_BYTES, '/9j/4A==', 'image/jpeg'],
+      ['text/plain', PNG_BYTES, 'iVBORw0KGgo=', 'image/png'],
+    ] as const)('an image served as %s is declared by its bytes', async (served, bytes, body, expected) => {
+      const cleanup = setupUntypedCompletion('ut5', new Blob([bytes], { type: served }), `data:${served};base64,${body}`);
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith(`data:${expected};base64,${body}`, 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('a JPEG served as image/png is declared image/jpeg, so the engine does not decode it as a PNG', async () => {
+      const cleanup = setupUntypedCompletion('ut6', new Blob([JPEG_BYTES], { type: 'image/png' }), 'data:image/png;base64,/9j/4A==');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4A==', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    // A 2D sprite renders from its SpriteData, not from a material: with no
+    // slot named, a generated image aimed at a sprite entity goes to the
+    // `sprite` slot the engine now applies (#10399). Before, `base_color`
+    // found no material, changed nothing, and was recorded as placed.
+    describe('the default slot for a 2D sprite target', () => {
+      it.each(['sprite', 'tileset', 'pixel-art'])('a %s job aimed at a sprite entity goes to the sprite slot', async (type) => {
+        mockSprites['ent-untyped'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds1', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=', { type });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', expect.any(String), 'ent-untyped', 'sprite');
+        expect(mockUpdateJob).toHaveBeenCalledWith('ds1', expect.objectContaining({
+          metadata: expect.objectContaining({ materialSlot: 'sprite' }),
+        }));
+        cleanup();
+      });
+
+      it('a slot the job named still wins on a sprite entity', async () => {
+        mockSprites['ent-untyped'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds2', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=', { materialSlot: 'emissive' });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'emissive');
+        cleanup();
+      });
+
+      it('an entity with no sprite data keeps the base colour slot', async () => {
+        mockSprites['some-other-entity'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds3', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=');
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
+        cleanup();
+      });
     });
   });
 

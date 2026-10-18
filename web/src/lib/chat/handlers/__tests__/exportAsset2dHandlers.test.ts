@@ -437,17 +437,34 @@ describe('assetHandlers', () => {
   // load_texture
   // -------------------------------------------------------------------------
   describe('load_texture', () => {
+    // A raw body (no `data:` header) is typed by its first bytes before the
+    // store is touched (#10396); 'abc', which this block used to send, is
+    // neither PNG nor JPEG and is refused. 'iVBORw0KGgo=' is the PNG
+    // signature, so the missing-field tests can fail only for their field.
     it('calls store.loadTexture with all required args', async () => {
       const { result, store } = await invokeHandler(
         assetHandlers,
         'load_texture',
-        { dataBase64: 'abc', name: 'tex.png', entityId: 'ent-1', slot: 'base_color' },
+        { dataBase64: 'iVBORw0KGgo=', name: 'tex.png', entityId: 'ent-1', slot: 'base_color' },
         { loadTexture: vi.fn() },
       );
       expect(result.success).toBe(true);
-      expect(store.loadTexture).toHaveBeenCalledWith('abc', 'tex.png', 'ent-1', 'base_color');
+      expect(store.loadTexture).toHaveBeenCalledWith('iVBORw0KGgo=', 'tex.png', 'ent-1', 'base_color');
       expect(result.result).toMatchObject({ message: expect.stringContaining('tex.png') });
       expect(result.result).toMatchObject({ message: expect.stringContaining('base_color') });
+    });
+
+    it('forwards a raw body that starts with the JPEG SOI marker whole, as it does the PNG one', async () => {
+      // The sniff's other accepted signature. Forwarded as is - never
+      // rewrapped in a data URL - so the engine sniffs the same bytes.
+      const { result, store } = await invokeHandler(
+        assetHandlers,
+        'load_texture',
+        { dataBase64: '/9j/4AAQSkZJRg==', name: 'photo.jpg', entityId: 'ent-1', slot: 'base_color' },
+        { loadTexture: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(store.loadTexture).toHaveBeenCalledWith('/9j/4AAQSkZJRg==', 'photo.jpg', 'ent-1', 'base_color');
     });
 
     it('returns error when dataBase64 is missing', async () => {
@@ -459,21 +476,21 @@ describe('assetHandlers', () => {
 
     it('returns error when name is missing', async () => {
       const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-        dataBase64: 'abc', entityId: 'ent-1', slot: 'base_color',
+        dataBase64: 'iVBORw0KGgo=', entityId: 'ent-1', slot: 'base_color',
       });
       expect(result.success).toBe(false);
     });
 
     it('returns error when entityId is missing', async () => {
       const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-        dataBase64: 'abc', name: 'tex.png', slot: 'base_color',
+        dataBase64: 'iVBORw0KGgo=', name: 'tex.png', slot: 'base_color',
       });
       expect(result.success).toBe(false);
     });
 
     it('returns error when slot is missing', async () => {
       const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-        dataBase64: 'abc', name: 'tex.png', entityId: 'ent-1',
+        dataBase64: 'iVBORw0KGgo=', name: 'tex.png', entityId: 'ent-1',
       });
       expect(result.success).toBe(false);
     });
