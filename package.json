@@ -72,6 +72,7 @@
     "generate:command-index": "npx tsx apps/docs/scripts/generate-command-index.ts"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
     "@storybook/react": "^10.6.2",
