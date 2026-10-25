@@ -6,7 +6,7 @@
 # NOTE (PF-1060 / #9097): web's project config moved to `web/vercel.ts`, which
 # this guard does NOT cover — the `*vercel.json` match below only fires on the
 # JSON filename. That's not a gap for vercel.ts: its `config` export is a
-# literal assigned to the explicitly-typed `VercelConfig` (`@vercel/config/v1`),
+# literal assigned to the local, explicitly-typed `DeploymentConfig` subset,
 # so an invalid property fails `tsc --noEmit` on its own. If another project's
 # config ever needs this same JSON-only guard, extend the match rather than
 # assuming this hook silently covers it.

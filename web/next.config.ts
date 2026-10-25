@@ -90,9 +90,8 @@ const nextConfig: NextConfig = {
     // Inline prefetch payloads into the page HTML to reduce waterfall requests
     // on navigation, improving LCP for App Router navigations (16.2+).
     prefetchInlining: true,
-    // Use the new scroll restoration handler that correctly restores scroll
-    // position across App Router navigations (16.2+).
-    appNewScrollHandler: true,
+    // Next.js 16.4 removed appNewScrollHandler; the new handler is standard.
+    // https://github.com/vercel/next.js/pull/95602
     // Enable the 'use cache' directive for Server Components. Allows
     // cache-eligible components to declare cacheTag() and cacheLife() hints
     // so Next.js can skip re-rendering on subsequent requests.

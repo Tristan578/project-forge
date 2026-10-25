@@ -64,7 +64,9 @@ describe('CRON_MONITORS ↔ vercel.ts parity', () => {
   });
 
   it('every registry entry maps to a real vercel.ts cron', () => {
-    const vercelPaths = new Set(vercelCrons.map((c) => c.path));
+    // Accept arbitrary registry strings for membership checking; malformed
+    // paths must fail this assertion, not be cast to the config's path type.
+    const vercelPaths = new Set<string>(vercelCrons.map((c) => c.path));
     for (const m of CRON_MONITORS) {
       expect(
         vercelPaths.has(m.path),

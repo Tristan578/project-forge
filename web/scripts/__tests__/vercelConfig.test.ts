@@ -100,10 +100,77 @@ describe('vercel.ts config', () => {
     // no `npm ci` first. A value import such as `routes` from
     // `@vercel/config/v1` would fail every deploy with "Cannot find package".
     const refs = moduleReferences(readFileSync(join(__dirname, '../../vercel.ts'), 'utf8'));
-    // Vacuity guard: the typed `VercelConfig` import must be found, or this
+    // Vacuity guard: the typed `DeploymentConfig` import must be found, or this
     // walk is inspecting nothing and the assertion below proves nothing.
-    expect(refs).toContainEqual({ specifier: '@vercel/config/v1', typeOnly: true });
+    expect(refs).toContainEqual({ specifier: './vercel-config.types', typeOnly: true });
     expect(refs.filter((r) => !r.typeOnly)).toEqual([]);
+  });
+
+  it('type-checks the real config and rejects individual invalid edits', () => {
+    const webRoot = join(__dirname, '../..');
+    const source = readFileSync(join(webRoot, 'vercel.ts'), 'utf8');
+    // Compile each mutation separately: no other invalid edit may mask a
+    // missing guard. Virtual files avoid writes/races in parallel test runs.
+    const mutations: [string, string, string][] = [
+      ['unknown root property', "framework: 'nextjs',", "framework: 'nextjs', nodeVersion: '22.x',"],
+      ['unsupported framework', "framework: 'nextjs',", "framework: 'other',"],
+      ['wrong command type', "buildCommand: 'npm run build',", 'buildCommand: false,'],
+      ['wrong region type', "regions: ['iad1'],", 'regions: [1],'],
+      ['unknown git property', 'deploymentEnabled: false,', 'deploymentEnabled: false, enabled: true,'],
+      ['wrong git type', 'deploymentEnabled: false,', "deploymentEnabled: 'false',"],
+      ['missing git field', 'deploymentEnabled: false,', ''],
+      ['unknown cron property', "schedule: '*/15 * * * *',", "schedule: '*/15 * * * *', timezone: 'UTC',"],
+      ['wrong cron type', "schedule: '*/15 * * * *',", 'schedule: 15,'],
+      ['missing cron schedule', "schedule: '*/15 * * * *',", ''],
+      ['missing cron path', "path: '/api/cron/health-monitor',", ''],
+      ['relative cron path', "path: '/api/cron/health-monitor',", "path: 'api/cron/health-monitor',"],
+      ...[
+        "framework: 'nextjs',",
+        "installCommand: 'cd .. && npm ci && npm run build --workspace=packages/ui',",
+        "buildCommand: 'npm run build',",
+        "outputDirectory: '.next',",
+        "regions: ['iad1'],",
+        'git: {\n    deploymentEnabled: false,\n  },',
+        "crons: [\n    {\n      path: '/api/cron/health-monitor',\n      schedule: '*/15 * * * *',\n    },\n  ],",
+      ].map((field): [string, string, string] => [`missing ${field.split(':')[0]}`, field, '']),
+    ];
+    const cases = [{ name: 'valid config', source }, ...mutations.map(([name, before, after]) => {
+      expect(source, `mutation target: ${name}`).toContain(before);
+      return { name, source: source.replace(before, after) };
+    })];
+    const fixtures = new Map(cases.map((testCase, index) => [
+      join(webRoot, `__vercel_contract_${index}.ts`), testCase,
+    ]));
+    const options: ts.CompilerOptions = {
+      noEmit: true,
+      strict: true,
+      skipLibCheck: true,
+      types: [],
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+    };
+    const host = ts.createCompilerHost(options);
+    const originalGetSourceFile = host.getSourceFile.bind(host);
+    host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+      const fixture = fixtures.get(fileName);
+      return fixture
+        ? ts.createSourceFile(fileName, fixture.source, languageVersion, true)
+        : originalGetSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+    };
+    const program = ts.createProgram([...fixtures.keys()], options, host);
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    expect(diagnostics.filter((d) => !d.file || !fixtures.has(d.file.fileName))).toEqual([]);
+    for (const [fileName, fixture] of fixtures) {
+      const errors = diagnostics.filter((d) => d.file?.fileName === fileName);
+      if (fixture.name === 'valid config') {
+        expect(errors).toEqual([]);
+      } else {
+        expect(errors.length, fixture.name).toBeGreaterThan(0);
+        // Unresolved imports must not masquerade as a successful type guard.
+        expect(errors.some((d) => d.code === 2307), fixture.name).toBe(false);
+      }
+    }
   });
 
   it('does not keep a web/vercel.json beside vercel.ts', () => {

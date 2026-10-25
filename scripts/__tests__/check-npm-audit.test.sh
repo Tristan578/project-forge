@@ -19,14 +19,13 @@
 # eventually relocked away and pruned — and for a while a raw
 # `npm audit --audit-level=high` would have passed. The seam was kept for exactly
 # the day the next un-relockable high landed, and that day came on 2026-10-03:
-# braces GHSA-vfj7-8cjw-p6xm (no release outside its "<=3.0.3" range exists), now
-# the allowlist's one entry. This suite tests BOTH halves independently of what
+# braces GHSA-vfj7-8cjw-p6xm. That advisory was withdrawn on 2026-10-23 and its
+# waiver is now pruned. This suite tests BOTH halves independently of what
 # the tree happens to waive — the shipped configuration (section 0, running the
-# real gate, plus an empty-allowlist variant for the steady state the gate
-# returns to once braces is pruned) and the waiver machinery (every later
+# real gate, plus an empty-allowlist variant for the steady state) and the waiver machinery (every later
 # section, against a variant whose allowlist is REPLACED by one synthetic entry,
 # built by make_gate_variant). See ALLOWED_ADVISORIES in the gate for the history
-# of the three pruned entries, the braces justification, and what generalizes.
+# of the four pruned entries and what generalizes.
 #
 # MAP OF THIS FILE
 # ----------------
@@ -289,8 +288,8 @@ echo "=== shipped allowlist — the real gate, unmodified (plus its empty steady
 # entry), so the cases here are the ONLY ones that observe the gate as it ships.
 # What needs proving here:
 #
-#   (a) An EMPTY array works: the exact state the gate returns to when braces
-#       is pruned. $EMPTY_GATE is the real gate with its body replaced by the
+#   (a) An EMPTY array works: the shipped steady state. $EMPTY_GATE is the
+#       real gate with its body replaced by the
 #       placeholder comment, and it must pass a clean report and block an
 #       unwaived one. Under `set -u`, bash older than 4.4 — macOS ships 3.2, and
 #       `#!/usr/bin/env bash` resolves to it there — aborts on a plain
@@ -310,11 +309,6 @@ echo "=== shipped allowlist — the real gate, unmodified (plus its empty steady
 #       through a variant that carries a synthetic waiver, so without these the
 #       suite would never once assert what the shipped gate does to a real,
 #       unwaived advisory.
-#   (c) The shipped braces waiver does exactly what it claims and no more:
-#       GHSA-vfj7-8cjw-p6xm at its pinned node_modules/braces is WAIVED (exit 0),
-#       and the same id at any other path BLOCKS as a pin violation (exit 1).
-#       Deleting the entry turns the first case red; widening or dropping the pin
-#       turns the second one red.
 make_gate_variant gate-empty.sh '# (no waivers in effect)'
 EMPTY_GATE="$GATE_VARIANT"
 
@@ -342,35 +336,7 @@ res="$(run_gate_script "$EMPTY_GATE" "cat $f")"; rc="${res%%|*}"; out="${res#*|}
 if [ "$rc" = "1" ]; then pass "empty-allowlist gate: a high advisory blocks (exit 1)"; else fail "empty-allowlist gate should exit 1 on a high advisory, got $rc"; fi
 if grep -qF "::error::non-allowlisted advisory" <<<"$out"; then pass "empty-allowlist gate: the block is reported as non-allowlisted"; else fail "empty-allowlist gate: expected the non-allowlisted ::error:: annotation — output: $out"; fi
 
-# (c) The real report shape as of 2026-10-03 (`npm audit --json` in web): the
-# braces source advisory plus the four string-via propagation rows npm emits
-# for its chain (micromatch, fast-glob, @next/eslint-plugin-next and
-# eslint-config-next).
-f="$(fixture shipped-braces-pinned.json <<'JSON'
-{"auditReportVersion":2,"vulnerabilities":{
-  "braces":{"name":"braces","severity":"high","via":[
-    {"source":1240992,"name":"braces","title":"braces vulnerable to stack-exhaustion denial of service through deeply nested patterns","url":"https://github.com/advisories/GHSA-vfj7-8cjw-p6xm","severity":"high","range":"<=3.0.3"}],
-    "nodes":["node_modules/braces"]},
-  "micromatch":{"name":"micromatch","severity":"high","via":["braces"],"nodes":["node_modules/micromatch"]},
-  "fast-glob":{"name":"fast-glob","severity":"high","via":["micromatch"],"nodes":["node_modules/fast-glob"]},
-  "@next/eslint-plugin-next":{"name":"@next/eslint-plugin-next","severity":"high","via":["fast-glob"],"nodes":["node_modules/@next/eslint-plugin-next"]},
-  "eslint-config-next":{"name":"eslint-config-next","severity":"high","via":["@next/eslint-plugin-next"],"nodes":["node_modules/eslint-config-next"]}}}
-JSON
-)"
-res="$(run_gate_script "$SCRIPT" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
-if [ "$rc" = "0" ]; then pass "shipped gate: braces GHSA-vfj7-8cjw-p6xm at its pinned node_modules/braces is waived (exit 0)"; else fail "shipped gate should waive GHSA-vfj7-8cjw-p6xm at node_modules/braces (exit 0), got $rc — was the braces entry removed or re-pinned? output: $out"; fi
-if grep -qE '^ *WAIVED +\[high\] GHSA-vfj7-8cjw-p6xm .*\(at pinned location\(s\): node_modules/braces\)$' <<<"$out"; then pass "shipped gate: the braces advisory is reported WAIVED at exactly node_modules/braces"; else fail "shipped gate: no WAIVED line for GHSA-vfj7-8cjw-p6xm pinned to node_modules/braces — output: $out"; fi
 
-f="$(fixture shipped-braces-nested.json <<'JSON'
-{"auditReportVersion":2,"vulnerabilities":{
-  "braces":{"name":"braces","severity":"high","via":[
-    {"source":1240992,"name":"braces","title":"braces vulnerable to stack-exhaustion denial of service through deeply nested patterns","url":"https://github.com/advisories/GHSA-vfj7-8cjw-p6xm","severity":"high","range":"<=3.0.3"}],
-    "nodes":["node_modules/micromatch/node_modules/braces"]}}}
-JSON
-)"
-res="$(run_gate_script "$SCRIPT" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
-if [ "$rc" = "1" ]; then pass "shipped gate: braces GHSA-vfj7-8cjw-p6xm at an unpinned path blocks (exit 1)"; else fail "shipped gate should block GHSA-vfj7-8cjw-p6xm outside node_modules/braces (exit 1), got $rc — was the pin widened? output: $out"; fi
-if grep -qF "::error::allowlisted advisory GHSA-vfj7-8cjw-p6xm found outside its pinned location(s) in ws — unexpected: node_modules/micromatch/node_modules/braces; pinned: node_modules/braces." <<<"$out"; then pass "shipped gate: the unpinned braces copy is reported as a pin violation naming both paths"; else fail "shipped gate: expected the pin-violation ::error:: naming node_modules/micromatch/node_modules/braces — output: $out"; fi
 
 echo ""
 echo "=== check-npm-audit.sh contract (gate + one synthetic waiver) ==="
@@ -1109,17 +1075,15 @@ fi
 # waiver history is entries that were justified as un-relockable and then
 # quietly stopped being so. Adding an entry, widening a pin, or dropping one must
 # each be a deliberate, reviewed act — which is what failing here forces. The
-# set is EXPECTED to shrink back to empty: when braces is relocked away, set
-# the value below to '' (the empty reviewed set; do not delete the assignment)
-# in the same commit that prunes it, following the REMOVAL PATH checklist
-# beside the entry in the gate. If you are adding a genuinely un-relockable waiver, add its
+# reviewed set is empty (do not delete the assignment). Keep it synchronized
+# with the shipped gate when pruning a waiver. If adding a genuinely un-relockable waiver, add its
 # line here in the same commit and say in the PR body why a relock is impossible.
 #
 # Two reads, because each covers a spelling the other cannot: the body cut sees
 # every array ELEMENT (anything not blank or a comment, quoted or not), and the
 # whole-file count sees a quoted `"GHSA-` element line OUTSIDE the column-0 body
 # (a second declaration, an indented duplicate) that the cut never reaches.
-expected_allowlist_entries='  "GHSA-vfj7-8cjw-p6xm:node_modules/braces"'
+expected_allowlist_entries=''
 readonly expected_allowlist_entries
 allowlist_elements="$(grep -vE '^[[:space:]]*(#|$)' <<<"$allowlist_body" || true)"
 if [ "$allowlist_elements" = "$expected_allowlist_entries" ]; then
@@ -3646,7 +3610,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=700
+readonly SELF_EXEC_EXPECTED_DROP=684
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3760,8 +3724,6 @@ readonly suite_openers
 IFS= read -r -d '' expected_openers <<'STEPS_EOF' || true
 f="$(fixture shipped-clean.json @@'JSON'
 f="$(fixture shipped-high.json @@'JSON'
-f="$(fixture shipped-braces-pinned.json @@'JSON'
-f="$(fixture shipped-braces-nested.json @@'JSON'
 f="$(fixture clean.json @@'JSON'
 f="$(fixture waived.json @@'JSON'
 f="$(fixture block-high.json @@'JSON'
