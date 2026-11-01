@@ -3,8 +3,7 @@ import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 /** Curated marketing copy, feature examples, and call to action for one use case. */
 interface UseCaseData {

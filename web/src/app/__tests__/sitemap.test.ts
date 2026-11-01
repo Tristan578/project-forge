@@ -81,8 +81,8 @@ describe('sitemap', () => {
       const result = await sitemap();
       const urls = result.map((e) => e.url);
 
-      expect(urls).toContain('https://spawnforge.ai/play/user_abc/cool-game');
-      expect(urls).toContain('https://spawnforge.ai/play/user_xyz/another-game');
+      expect(urls).toContain('https://www.spawnforge.ai/play/user_abc/cool-game');
+      expect(urls).toContain('https://www.spawnforge.ai/play/user_xyz/another-game');
     });
 
     it('sets weekly changeFrequency and 0.6 priority for game entries', async () => {
