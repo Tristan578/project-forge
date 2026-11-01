@@ -382,7 +382,9 @@ for server in github github-local plugin_github_github GitHub; do
 done
 fixtures clean "$OPEN" "$GREEN"
 expect_mcp "MCP update_pull_request under a plugin server name is a ready call" 2 mcp__plugin_github_github__update_pull_request \
-  '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":false}' 'unresolved review threads' 
+  '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":false}' 'unresolved review threads'
+expect_mcp "MCP update_pull_request under .mcp.json's github-local server is a ready call (#10389)" 2 mcp__github-local__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":false}' 'unresolved review threads'
 if [ -n "$mcp_matcher" ] && ! grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__get_pull_request" \
   && ! grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__update_pull_request_branch"; then
   ok "...and not on a read-only GitHub MCP tool"
