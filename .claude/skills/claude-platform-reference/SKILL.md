@@ -25,7 +25,11 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 - `context7` — live library documentation for all 30+ dependencies
 - `neon` — direct Neon Postgres queries (needs `NEON_API_KEY`)
 - `playwright` — browser automation for E2E verification
-- `github` — GitHub API access for PR/issue/Actions operations
+- `github-local` — GitHub API access for PR/issue/Actions operations, for local sessions
+  that export `GITHUB_PERSONAL_ACCESS_TOKEN`. It is not named `github` on purpose: in a
+  claude.ai/code cloud session there is no token, and a server under that name hid the
+  account's authenticated GitHub server, so every write failed (#10389). Cloud sessions
+  use that authenticated server, whose tools are `mcp__github__*`.
 - `sentry` — error tracking, issue search, event analysis
 - `stripe` — payment processing, webhook debugging, test cards
 - `upstash` — Redis cache operations and rate limiting
@@ -35,7 +39,7 @@ Claude Code defers MCP tools behind Tool Search by default. Only `context7` sets
 `"alwaysLoad": true`, so its tools are in context from session start: it needs no
 credential, only reads documentation, and nearly every session uses it. Every other
 server stays deferred on purpose. `neon`, `sentry`, `stripe` and `upstash` read
-credentials from the environment, and `github` needs a GitHub token and can write to
+credentials from the environment, and `github-local` needs a GitHub token and can write to
 the repository (push, merge, create and delete files), so loading its tools into every
 context, reviewer seats included, is not worth the saved search. `alwaysLoad` also
 makes startup wait for the server. Add it to another server only if that server needs

@@ -38,9 +38,13 @@ command = "npx"
 args = ["-y", "@upstash/context7-mcp@latest"]
 default_tools_approval_mode = "prompt"
 
-[mcp_servers.github]
+# Named github-local, not github: in a claude.ai/code cloud session an unauthenticated
+# server under the name `github` hides the account's authenticated GitHub plugin
+# (#10389). Inert unless GITHUB_PERSONAL_ACCESS_TOKEN is exported.
+[mcp_servers.github-local]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
+env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN"]
 default_tools_approval_mode = "prompt"
 
 [mcp_servers.neon]
