@@ -442,6 +442,31 @@ function toError(caught: unknown): Error {
 
 const TERMINAL_STATES: ReadonlySet<ReplayRunState> = new Set(['completed', 'cancelled', 'failed']);
 
+/**
+ * Own pauses that runs which have ENDED dispatched and the engine has not yet
+ * reported, keyed by the engine-mode stream (`env.subscribeEngineMode`) they
+ * were dispatched on. A run that is cancelled while its Pause is still queued
+ * (the creator's Cancel lands between the dispatch and the next frame's
+ * drain) removes its watch at once, so that drain reports the 'paused' to
+ * whichever run is watching THEN: a run started straight after the cancel
+ * (the E2E engine gate's NFR loop, the chat tool replaying again) took it for
+ * a toolbar Pause and cancelled itself with 'engine-paused' during its
+ * warm-up frame. The ended run hands its unanswered count over here and the
+ * next run on the same stream settles a 'paused' against it before calling
+ * the pause the toolbar's. The hand-over is good only until that run sees
+ * its first play tick: the engine applies queued requests in the drain that
+ * starts a frame, so by the first tick every owed 'paused' has been reported,
+ * and a count still owed then is one the engine dropped (a Stop drained
+ * first) or reported before this run subscribed, which must not swallow a
+ * later toolbar Pause. Until that first tick, a toolbar Pause in the warm-up
+ * frame can still be settled against such a stale count; the run then ends
+ * on the boundary's stalled-tick timeout instead of 'engine-paused'. Keyed by the stream
+ * rather than held module-wide so independent engines (each test's fake)
+ * never settle against each other's pauses; the live editor's stream is one
+ * module-level subscription, so consecutive editor runs share it.
+ */
+const pausesOwedByEndedRuns = new WeakMap<object, number>();
+
 // ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
@@ -645,6 +670,8 @@ export function startReplay(
      * the flag clear, however the engine delivers it.
      */
     let ownPausesPending = 0;
+    /** The stream the owed count is keyed by; null for a boundary with no engine-mode watch. */
+    const modeStream: object | null = env.subscribeEngineMode ?? null;
     let pinnedByRunner = false;
     const engineInput: ReplayEngineInputEvidence = {
       available: false,
@@ -726,6 +753,14 @@ export function startReplay(
           ownPausesPending -= 1;
           return;
         }
+        const owed = modeStream ? (pausesOwedByEndedRuns.get(modeStream) ?? 0) : 0;
+        if (owed > 0 && modeStream) {
+          // A run that has ended paused the engine and was cancelled before
+          // the drain reported it (`pausesOwedByEndedRuns`): its 'paused',
+          // not the toolbar's. Its cancel's resume follows in the same drain.
+          pausesOwedByEndedRuns.set(modeStream, owed - 1);
+          return;
+        }
         // The creator paused the game from the toolbar: its ticks have
         // stopped, and the runner must not wait two seconds to call that a
         // stalled engine. The runtime is LEFT paused — `resumeRuntimeIfPaused`
@@ -763,6 +798,11 @@ export function startReplay(
       } finally {
         abandonFrame = null;
       }
+      // Not cancelled, so the frame won: a play tick was published, and the
+      // drain that opened its frame has reported every pause an ended run
+      // still owed. What is left the engine dropped, and it must not swallow
+      // a later toolbar Pause (`pausesOwedByEndedRuns`).
+      if (!cancelRequested && modeStream) pausesOwedByEndedRuns.delete(modeStream);
     };
 
     /**
@@ -1064,6 +1104,12 @@ export function startReplay(
         stopWatchingEngineMode?.();
       } catch (unsubscribeError) {
         console.error('[replayRunner] could not stop watching the engine mode', unsubscribeError);
+      }
+      // Hand the pauses the engine has not reported yet to the next run on
+      // this stream (`pausesOwedByEndedRuns`), now that this watch is gone.
+      if (ownPausesPending > 0 && modeStream) {
+        pausesOwedByEndedRuns.set(modeStream, (pausesOwedByEndedRuns.get(modeStream) ?? 0) + ownPausesPending);
+        ownPausesPending = 0;
       }
     }
   };
