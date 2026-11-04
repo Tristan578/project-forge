@@ -358,9 +358,12 @@ test.describe('Misc Routes @ui', () => {
     test('navigating to an unknown route renders the 404 page', async ({
       page,
     }) => {
-      await page.goto('/this-page-definitely-does-not-exist-xyz', {
+      const response = await page.goto('/this-page-definitely-does-not-exist-xyz', {
         timeout: E2E_TIMEOUT_NAV_MS,
       });
+      // The status, not only the copy: a soft 404 (200 with this body) is what
+      // a crawler would index (#10448).
+      expect(response?.status()).toBe(404);
 
       await expect(page.getByText('404')).toBeVisible({
         timeout: E2E_TIMEOUT_ELEMENT_MS,
