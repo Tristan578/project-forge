@@ -29,7 +29,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createRouteMatcher } from '@clerk/nextjs/server';
 
-import { buildPublicRoutes, applyAuthDecision, buildAuthorizedParties, passthroughMiddleware, config } from '../proxy';
+import { buildPublicRoutes, buildProtectedPageSegments, requiresAuthentication, applyAuthDecision, buildAuthorizedParties, passthroughMiddleware, config } from '../proxy';
 import { readFileSync } from 'node:fs';
 // isPlayPath lives with the route source it is derived from; the proxy imports it
 // from there so the nonce minter and the static rule cannot disagree on scope.
@@ -145,8 +145,10 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
    * The gap #9060 was filed for: five page routes rendered for anonymous
    * visitors by design — `/docs`, `/health`, `/robots.txt`, `/sitemap.xml`,
    * `/opengraph-image` — and every one of them was redirected to sign-in
-   * because nothing listed them here. A page needs no auth code of its own to
-   * be protected; the proxy's default is to protect, so an omission IS the bug.
+   * because nothing listed them here. Pages are now protected by an explicit
+   * list (buildProtectedPageSegments), but a public route still has to be
+   * listed here: the API default-deny and the route classification below both
+   * read this list.
    */
   it.each(PUBLIC_PAGE_ROUTES)('treats the declared public page route %s as public (#9060)', (route) => {
     expect(
@@ -225,6 +227,7 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
 describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
   // The real matcher the production proxy uses (production gating: /dev protected).
   const isPublicRoute = createRouteMatcher(buildPublicRoutes({ includeDev: false }));
+  const protectedPageSegments = buildProtectedPageSegments({ includeDev: false });
 
   const redirectToSignIn = vi.fn(
     (opts: { returnBackUrl: string }) =>
@@ -236,7 +239,7 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
   const authed = async () => ({ userId: 'user_123', redirectToSignIn });
 
   it('lets an unauthenticated request through to a public cron route (#8605)', async () => {
-    const res = await applyAuthDecision(unauthed, reqFor('/api/cron/health-monitor'), isPublicRoute);
+    const res = await applyAuthDecision(unauthed, reqFor('/api/cron/health-monitor'), isPublicRoute, protectedPageSegments);
     expect(res.status).toBe(200);
     // Never asked Clerk to redirect — the route was treated as public.
     expect(redirectToSignIn).not.toHaveBeenCalled();
@@ -247,13 +250,14 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
       unauthed,
       reqFor('/api/waitlist', { method: 'POST' }),
       isPublicRoute,
+      protectedPageSegments,
     );
     expect(res.status).toBe(200);
     expect(redirectToSignIn).not.toHaveBeenCalled();
   });
 
   it('returns 401 (not a redirect) for an unauthenticated protected API request (#8529)', async () => {
-    const res = await applyAuthDecision(unauthed, reqFor('/api/generate/gdd'), isPublicRoute);
+    const res = await applyAuthDecision(unauthed, reqFor('/api/generate/gdd'), isPublicRoute, protectedPageSegments);
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error).toBe('Unauthorized');
@@ -261,7 +265,7 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
 
   it('redirects an unauthenticated protected page nav to sign-in, never /404 (#8529)', async () => {
     redirectToSignIn.mockClear();
-    const res = await applyAuthDecision(unauthed, reqFor('/dashboard'), isPublicRoute);
+    const res = await applyAuthDecision(unauthed, reqFor('/dashboard'), isPublicRoute, protectedPageSegments);
     expect(res.status).toBe(307);
     // Must preserve the original URL so the user lands back where they started.
     expect(redirectToSignIn).toHaveBeenCalledWith({ returnBackUrl: 'https://spawnforge.ai/dashboard' });
@@ -276,7 +280,7 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
     [`/editor/p1?${MCP_TOKEN_PARAM}=secret-token&${MCP_TOKEN_PARAM}=secret-token-2`, 'https://spawnforge.ai/editor/p1'],
   ])('drops the mcp relay token from the sign-in return URL (%s)', async (path, expected) => {
     redirectToSignIn.mockClear();
-    const res = await applyAuthDecision(unauthed, reqFor(path), isPublicRoute);
+    const res = await applyAuthDecision(unauthed, reqFor(path), isPublicRoute, protectedPageSegments);
     expect(res.status).toBe(307);
     expect(redirectToSignIn).toHaveBeenCalledTimes(1);
     const { returnBackUrl } = redirectToSignIn.mock.calls[0][0];
@@ -288,21 +292,143 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
     redirectToSignIn.mockClear();
     // URLSearchParams would rewrite this query to `q=a+b&flag=`: proof the
     // common case is passed through as-is rather than parsed and rebuilt.
-    await applyAuthDecision(unauthed, reqFor('/editor/p1?q=a%20b&flag'), isPublicRoute);
+    await applyAuthDecision(unauthed, reqFor('/editor/p1?q=a%20b&flag'), isPublicRoute, protectedPageSegments);
     expect(redirectToSignIn).toHaveBeenCalledWith({
       returnBackUrl: 'https://spawnforge.ai/editor/p1?q=a%20b&flag',
     });
   });
 
   it('redirects an authenticated user away from the landing page to the dashboard', async () => {
-    const res = await applyAuthDecision(authed, reqFor('/'), isPublicRoute);
+    const res = await applyAuthDecision(authed, reqFor('/'), isPublicRoute, protectedPageSegments);
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toBe('https://spawnforge.ai/dashboard');
+  });
+
+  // Before this fix every non-public path redirected to sign-in, including paths
+  // no route serves: `/refunds` and `/contact` answered 307 instead of the 404 page.
+  it.each(['/refunds', '/contact', '/does-not-exist', '/does-not-exist/deeper/still', '/trpc/x'])(
+    'lets an unknown page path %s fall through to Next.js (which renders the 404 page)',
+    async (pathname) => {
+      redirectToSignIn.mockClear();
+      const res = await applyAuthDecision(unauthed, reqFor(pathname), isPublicRoute, protectedPageSegments);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-middleware-next')).toBe('1');
+      expect(redirectToSignIn).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    '/dashboard',
+    '/dashboard/analytics',
+    '/editor/p1',
+    '/settings',
+    '/admin/economics',
+    '/dev', // production gating: includeDev is false in this suite
+    // Spellings Next.js may route to the same page must not read as "unknown".
+    '/%65ditor/p1',
+    '/Editor/p1',
+    '//editor/p1',
+    '/dashboard/',
+  ])('still redirects an unauthenticated request for the protected page %s', async (pathname) => {
+    redirectToSignIn.mockClear();
+    const res = await applyAuthDecision(unauthed, reqFor(pathname), isPublicRoute, protectedPageSegments);
+    expect(res.status).toBe(307);
+    expect(redirectToSignIn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['/api/does-not-exist', '/api/projects', '/api', '/%61pi/projects'])(
+    'keeps the API default-deny: %s still needs a session',
+    (pathname) => {
+      expect(requiresAuthentication(reqFor(pathname), isPublicRoute, protectedPageSegments)).toBe(true);
+    },
+  );
+
+  it('answers 401, not a 404 or a redirect, for an unknown API path', async () => {
+    const res = await applyAuthDecision(unauthed, reqFor('/api/does-not-exist'), isPublicRoute, protectedPageSegments);
+    expect(res.status).toBe(401);
+  });
+
+  it('leaves malformed percent-encoding to Clerk, which answers 400 for MalformedURLError', () => {
+    // Unchanged behaviour: the real matcher throws, and clerkMiddleware's
+    // handleControlFlowErrors turns that into a 400.
+    expect(() => requiresAuthentication(reqFor('/%E0%A4%A'), isPublicRoute, protectedPageSegments))
+      .toThrow(expect.objectContaining({ name: 'MalformedURLError' }));
+    // With a matcher that does not throw, the proxy's own decode fails closed.
+    expect(requiresAuthentication(reqFor('/%E0%A4%A'), () => false, protectedPageSegments)).toBe(true);
+  });
+
+  it('lets the public routes through untouched', () => {
+    for (const pathname of ['/', '/pricing', '/play/u/slug', '/community', '/terms', '/privacy', '/docs', '/sitemap.xml', '/robots.txt']) {
+      expect(requiresAuthentication(reqFor(pathname), isPublicRoute, protectedPageSegments), pathname).toBe(false);
+    }
+  });
+
+  it('protects /dev only in production (#7915)', () => {
+    expect(buildProtectedPageSegments({ includeDev: false })).toContain('dev');
+    expect(buildProtectedPageSegments({ includeDev: true })).not.toContain('dev');
+  });
+});
+
+/**
+ * Pages are protected by an explicit list now, so a NEW authenticated page that
+ * nobody adds to buildProtectedPageSegments() would be served to anonymous
+ * visitors. This walks `src/app` (the subject, read at run time) and fails on any
+ * top-level route segment that is neither public nor protected.
+ */
+describe('classifies every top-level app route as public or protected', () => {
+  const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../app');
+  const isPublic = createRouteMatcher(buildPublicRoutes({ includeDev: false }));
+  const protectedSegments = buildProtectedPageSegments({ includeDev: false });
+
+  /** Top-level URL segments, with route groups `(x)` flattened and private `_x` folders skipped. */
+  function topLevelSegments(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const name = entry.name;
+      if (name === '__tests__' || name.startsWith('_') || name.startsWith('@')) continue;
+      if (name.startsWith('(') && name.endsWith(')')) {
+        out.push(...topLevelSegments(path.join(dir, name)));
+        continue;
+      }
+      out.push(name);
+    }
+    return out;
+  }
+
+  const segments = topLevelSegments(appDir).filter((s) => s !== 'api');
+
+  it('finds the app routes it is meant to classify (vacuity guard)', () => {
+    expect(segments.length).toBeGreaterThan(15);
+    for (const known of ['dashboard', 'editor', 'play', 'pricing', 'terms']) {
+      expect(segments).toContain(known);
+    }
+  });
+
+  it.each(segments)('/%s is public or listed as protected', (segment) => {
+    expect(
+      segment.startsWith('['),
+      `A dynamic top-level segment (${segment}) would capture every unknown path. Decide its auth rule in proxy.ts first.`,
+    ).toBe(false);
+    const pub = isPublic(reqFor(`/${segment}`));
+    const prot = protectedSegments.includes(segment);
+    expect(
+      pub || prot,
+      `src/app/${segment} is neither matched by buildPublicRoutes() nor listed in buildProtectedPageSegments(). An unlisted page is served without a session check at the proxy.`,
+    ).toBe(true);
+    expect(pub && prot, `/${segment} is listed as both public and protected`).toBe(false);
+  });
+
+  it('lists no protected segment that has no route behind it', () => {
+    for (const segment of protectedSegments) {
+      expect(segments, `buildProtectedPageSegments() names "${segment}" but src/app has no such route`).toContain(segment);
+    }
   });
 });
 
 describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
   const isPublicRoute = createRouteMatcher(buildPublicRoutes({ includeDev: false }));
+  const protectedPageSegments = buildProtectedPageSegments({ includeDev: false });
   const unauthed = async () => ({
     userId: null,
     redirectToSignIn: () => new Response(null, { status: 307 }),
@@ -352,7 +478,7 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
   const play = (init?: { headers?: Record<string, string> }) => {
     const req = reqFor('/play/user_abc/my-game');
     for (const [k, v] of Object.entries(init?.headers ?? {})) req.headers.set(k, v);
-    return applyAuthDecision(unauthed, req, isPublicRoute);
+    return applyAuthDecision(unauthed, req, isPublicRoute, protectedPageSegments);
   };
 
   it('identifies the play routes without matching a sibling prefix', () => {
@@ -421,7 +547,7 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     const req = reqFor('/community/games/1');
     req.headers.set('x-nonce', 'attacker-chosen');
     expect(
-      strippedState(await applyAuthDecision(unauthed, req, isPublicRoute), 'x-nonce'),
+      strippedState(await applyAuthDecision(unauthed, req, isPublicRoute, protectedPageSegments), 'x-nonce'),
     ).toEqual(STRIPPED);
   });
 
@@ -434,7 +560,7 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     const req = reqFor('/community/games/1');
     req.headers.set('content-security-policy', 'script-src *');
     expect(
-      strippedState(await applyAuthDecision(unauthed, req, isPublicRoute), 'content-security-policy'),
+      strippedState(await applyAuthDecision(unauthed, req, isPublicRoute, protectedPageSegments), 'content-security-policy'),
     ).toEqual(STRIPPED);
   });
 
@@ -448,7 +574,7 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     req.headers.set('content-security-policy-report-only', "script-src 'nonce-attacker'");
     expect(
       strippedState(
-        await applyAuthDecision(unauthed, req, isPublicRoute),
+        await applyAuthDecision(unauthed, req, isPublicRoute, protectedPageSegments),
         'content-security-policy-report-only',
       ),
     ).toEqual(STRIPPED);
@@ -487,7 +613,7 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
   it('leaves ordinary non-play requests untouched (no nonce, no CSP header)', async () => {
     // The static next.config.ts rules own CSP everywhere else; the proxy must
     // not start overriding them as a side effect of this fix.
-    const res = await applyAuthDecision(unauthed, reqFor('/community/games/1'), isPublicRoute);
+    const res = await applyAuthDecision(unauthed, reqFor('/community/games/1'), isPublicRoute, protectedPageSegments);
     expect(res.headers.get('Content-Security-Policy')).toBeNull();
     expect(res.headers.get('x-middleware-override-headers')).toBeNull();
   });

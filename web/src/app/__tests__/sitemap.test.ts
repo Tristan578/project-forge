@@ -22,7 +22,10 @@ vi.mock('@/lib/db/client', () => ({
   queryWithResilience: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
+import { createRouteMatcher } from '@clerk/nextjs/server';
+import { NextRequest } from 'next/server';
 import sitemap from '../sitemap';
+import { buildProtectedPageSegments, buildPublicRoutes, requiresAuthentication } from '@/proxy';
 
 describe('sitemap', () => {
   it('returns an array of sitemap entries', async () => {
@@ -64,6 +67,20 @@ describe('sitemap', () => {
     expect(urls.some((u: string) => u.includes('/dev'))).toBe(false);
     expect(urls.some((u: string) => u.includes('/editor'))).toBe(false);
     expect(urls.some((u: string) => u.includes('/settings'))).toBe(false);
+  });
+
+  // The proxy now protects pages by an explicit list (#10448). Every URL the
+  // sitemap advertises must still reach its page without a session, or a
+  // crawler is sent to sign-in for a URL we asked it to index.
+  it('advertises only URLs the proxy serves without a session', async () => {
+    mockWhere.mockResolvedValueOnce([{ slug: 'cool-game', clerkId: 'user_abc', updatedAt: new Date() }]);
+    const result = await sitemap();
+    const isPublicRoute = createRouteMatcher(buildPublicRoutes({ includeDev: false }));
+    const protectedSegments = buildProtectedPageSegments({ includeDev: false });
+    expect(result.some((e) => e.url.includes('/play/user_abc/cool-game'))).toBe(true);
+    for (const { url } of result) {
+      expect(requiresAuthentication(new NextRequest(url), isPublicRoute, protectedSegments), url).toBe(false);
+    }
   });
 
   describe('dynamic game entries', () => {
