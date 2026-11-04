@@ -30,11 +30,16 @@ That is no longer the state of production. Evidence, read 2026-11-04:
   HTTP status, so they show the schedule firing and do not by themselves show a 200.
 
 What this does not establish: when `CRON_SECRET` was set, how it was set, or
-anything about service health. The probe caveats below (AI Providers and
-Payments grading on configuration presence) still apply to what a green
-check-in means. `vercel crons ls` and a quoted 200 log line were not available
-to the session that wrote this; if you want that line on #9118, the dashboard
-filter in "Evidence: one successful run" step 2 produces it.
+anything about service health. A green check-in means the cron ran and
+authenticated; the Sentry issues it raises speak to health. On `main` today
+`checkPayments` makes an authenticated `GET https://api.stripe.com/v1/balance`
+and grades the result, so the "Payments (Stripe)" bullet below describes the
+2026-09-05 behaviour and is out of date. `checkAiProviders` is still a
+configuration check (it grades chat backend resolution and reports generation
+key presence as detail), not a request to a provider. `vercel crons ls` and a
+quoted 200 log line were not available to the session that wrote this; if you
+want that line on #9118, the dashboard filter in "Evidence: one successful run"
+step 2 produces it.
 
 The remaining sections stay as the activation and rotation procedure.
 
