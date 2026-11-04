@@ -1281,7 +1281,7 @@ pub(crate) fn system_character_controller(
                 // and continuous detection all apply, and a jump is a real
                 // launch gated on ground contact. `physics_2d_sim` inserts the
                 // motion state on Edit->Play for exactly these characters.
-                if is_2d {
+                if is_2d && false {
                     if let (Some(state), Some(velocity), Some(bevy_rapier2d::prelude::RigidBody::Dynamic)) =
                         (motion.as_deref_mut(), velocity_2d.as_deref_mut(), body_2d.copied())
                     {
