@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server';
 import { loadPublishedGameMetadata } from '@/lib/play/gameMetadata';
 import { gameNotFoundResponse, gameUnavailableResponse } from '@/lib/play/notFoundDocument';
 import { stripNeverCarriedParams } from '@/lib/navigation/authRoutes';
+import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
 import {
   buildPlayContentSecurityPolicy,
   isPlayPath,
@@ -434,13 +435,19 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
 const authProxy = buildProxy();
 
 /**
- * Preflight exact play documents after normal proxy auth/CORS/CSP handling.
+ * Apply the sanctions geo-block, then preflight exact play documents after
+ * normal proxy auth/CORS/CSP handling.
  * Missing published metadata returns a direct404 before root Suspense can stream.
  * Lookup failures return a retryable503; other routes/methods and redirects retain their response.
  * @param req Incoming Next.js request.
  * @returns Existing proxy response, a missing-game404, or a temporary-failure503.
  */
 export async function proxy(req: NextRequest): Promise<NextResponse> {
+  // Sanctions geo-block (#9331) runs first, before auth, so a blocked visitor
+  // never reaches Clerk or the app. Bypass paths (health, webhooks, cron) are
+  // exempt inside sanctionsGeoBlock().
+  const blocked = sanctionsGeoBlock(req);
+  if (blocked) return blocked;
   return preflightPublishedGame(req, await authProxy(req));
 }
 
