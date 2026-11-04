@@ -47,13 +47,13 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 | Tier | Price | AI tokens | Limits and key features | Target Persona |
 |------|-------|-----------|-------------------------|----------------|
 | **Free** (billing key `starter`) | $0 | 50 trial tokens, granted once at signup; no monthly tokens | Full editor and local export; 3 cloud projects; 1 published game | Trial users, students |
-| **Starter** (billing key `hobbyist`) | $9/mo | 300/mo | 10 cloud projects; 3 published games; AI chat; bring-your-own-key (BYOK) asset generation | Hobbyists, jam participants |
+| **Starter** (billing key `hobbyist`) | $9/mo | 300/mo | 10 cloud projects; 3 published games; AI chat; 3D model, texture, sound, voice and music generation only with your own Meshy or ElevenLabs key (BYOK) | Hobbyists, jam participants |
 | **Creator** | $29/mo | 1,000/mo | 50 cloud projects; 10 published games; advanced AI panels; external MCP access is not delivered yet | Indie developers |
 | **Studio** (billing key `pro`) | $79/mo | 3,000/mo | Unlimited cloud projects; 100 published games; Pro AI panels; platform-managed AI keys are not delivered yet | Teams, content creators |
 
 Add-on token packs (one-off, `TOKEN_PACKAGES` in `pricing.ts`): Spark $12 for 1,000 tokens, Blaze $49 for 5,000, Inferno $149 for 20,000.
 
-Earlier drafts of this table listed $29/$79/$199, a watermark on free exports, "Platform AI (Claude, Meshy, etc.)" on Creator, and priority generation and collaboration on Pro. None of those matches the code: there are four paid-or-free plans, not three paid tiers above Free; no watermark gate exists; production has no platform generation keys (#9117), so generation is BYOK-only today; and there is no collaboration or priority-generation feature. Do not market them until they ship.
+Earlier drafts of this table listed $29/$79/$199, a watermark on free exports, "Platform AI (Claude, Meshy, etc.)" on Creator, and priority generation and collaboration on Pro. None of those matches the code: there are four paid-or-free plans, not three paid tiers above Free; no watermark gate exists; production has no platform generation keys (#9117). Per `docs/capability-matrix.md`: chat runs on platform credentials (AI Gateway or platform Anthropic key) and needs no user key; 3D model, texture, sound, voice and music generation work only with a user's own Meshy or ElevenLabs key (BYOK, implemented but unverified); sprite, pixel-art, image and background-removal generation have no BYOK route at all (`BYOK_PROVIDERS` takes only Anthropic, Meshy, Hyper3D and ElevenLabs keys) and stay unavailable until the platform OpenAI, Replicate or remove.bg keys are provisioned; and there is no collaboration or priority-generation feature. Do not market them until they ship.
 
 ### Revenue Model Analysis
 
