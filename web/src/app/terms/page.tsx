@@ -496,7 +496,7 @@ export default async function TermsOfServicePage() {
         <h2>14. Governing Law</h2>
         <p>
           These Terms shall be governed by and construed in accordance with the laws of
-          the State of Delaware, United States, without regard to its conflict of law
+          the State of Iowa, United States, without regard to its conflict of law
           provisions.
         </p>
         <p>
