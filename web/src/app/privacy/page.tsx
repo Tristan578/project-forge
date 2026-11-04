@@ -31,17 +31,20 @@ export default async function PrivacyPolicyPage() {
   return (
     <LegalLayout
       title="Privacy Policy"
-      lastUpdated="February 27, 2026"
+      lastUpdated="November 4, 2026 (draft, pending legal review)"
       tableOfContents={tableOfContents}
     >
       {/* 1. Introduction */}
       <section id="introduction">
         <h2>1. Introduction</h2>
         <p>
-          SpawnForge (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;) respects your privacy and is committed
-          to protecting the personal information you share with us. This Privacy Policy
-          explains how we collect, use, disclose, and safeguard your information when
-          you use our web-based game creation platform (&quot;the Service&quot;).
+          SpawnForge is operated by Nolan Consulting LLC, an Iowa limited liability
+          company (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;). Nolan Consulting LLC is the
+          controller of the personal information described in this policy. We respect
+          your privacy and are committed to protecting the personal information you
+          share with us. This Privacy Policy explains how we collect, use, disclose, and
+          safeguard your information when you use our web-based game creation platform
+          (&quot;the Service&quot;).
         </p>
         <p>
           By using the Service, you consent to the data practices described in this
@@ -106,6 +109,10 @@ export default async function PrivacyPolicyPage() {
           <li>AI feature usage and token consumption</li>
           <li>Error logs and performance metrics</li>
           <li>IP address</li>
+          <li>Recordings of how you use the Service, if your session is sampled for
+            session replay (see Section 5.3)</li>
+          <li>An anonymous analytics identifier stored in your browser, if you accept
+            analytics cookies</li>
         </ul>
 
         <h3>2.5 AI Interaction Data</h3>
@@ -192,30 +199,100 @@ export default async function PrivacyPolicyPage() {
           .
         </p>
 
-        <h3>4.3 AI Service Providers (Asset Generation)</h3>
+        <h3>4.3 AI Service Providers</h3>
         <p>
-          When you use AI asset generation features, your prompts and certain project
-          context may be sent to third-party AI providers for processing. These
-          providers include services for:
+          When you use AI features, your prompts and project context (for example the
+          names and settings of objects in your scene, and scripts the assistant needs
+          to read) are sent to third-party AI providers for processing. Which provider
+          receives your data depends on the feature:
         </p>
         <ul>
-          <li>3D model and texture generation</li>
-          <li>Sound effect and voice generation</li>
-          <li>Music generation</li>
-          <li>Natural language scene editing</li>
+          <li>
+            <strong>AI chat and game-creation assistant:</strong> processed through the
+            Vercel AI Gateway, which routes to Anthropic. Other routes the Service can
+            be configured to use are OpenRouter, GitHub Models and Cloudflare AI.
+          </li>
+          <li>
+            <strong>3D model and texture generation:</strong> Meshy (and Hyper3D if you
+            add your own Hyper3D key).
+          </li>
+          <li>
+            <strong>Sound effect, voice and music generation:</strong> ElevenLabs.
+          </li>
+          <li>
+            <strong>Image, sprite and background-removal features:</strong> OpenAI,
+            Replicate and remove.bg. These are not currently available in the Service;
+            they are listed because the Service is built to send data to them when
+            enabled.
+          </li>
         </ul>
         <p>
           Each AI provider has its own privacy practices and data retention policies. We
-          send only the minimum information necessary to fulfill your generation
-          requests. When using BYOK, requests are made directly with the provider under
-          your own account and API terms.
+          send only the minimum information necessary to fulfill your request. When you
+          use BYOK, the request is made with your own key and under your own account and
+          terms with the provider.
         </p>
 
-        <h3>4.4 Cloud Infrastructure</h3>
+        <h3>4.4 Hosting and Infrastructure Providers</h3>
         <p>
-          The Service is hosted on cloud infrastructure providers. Your data may be
-          processed and stored on servers operated by our hosting providers, subject to
-          their security practices and certifications.
+          The following providers process personal data on our behalf to run the
+          Service:
+        </p>
+        <ul>
+          <li>
+            <strong>Vercel:</strong> hosts the Service and its AI Gateway, and provides
+            Vercel Web Analytics, Vercel Speed Insights and Vercel BotID (bot detection).
+            Vercel receives your IP address and request data. Web Analytics and Speed
+            Insights record page views and performance measurements without cookies.
+          </li>
+          <li>
+            <strong>Neon:</strong> hosts our PostgreSQL database, which stores your
+            account record, projects, token balances, usage records, API-key records
+            (keys are encrypted) and AI interaction records.
+          </li>
+          <li>
+            <strong>Cloudflare R2:</strong> stores uploaded assets, AI-generated assets
+            and published game snapshots.
+          </li>
+          <li>
+            <strong>Upstash:</strong> Redis for rate limiting, which keys limits to your
+            IP address or account identifier, and QStash for delivering background
+            generation callbacks (which carry your account identifier and a provider job
+            identifier).
+          </li>
+        </ul>
+
+        <h3>4.5 Sentry (Error Monitoring and Session Replay)</h3>
+        <p>
+          We use Sentry to detect and diagnose errors and performance problems. Sentry
+          receives error reports, performance traces and browser diagnostics. We configure
+          it not to send user identity, cookies, request bodies or query strings, and
+          we scrub secrets and personal data from events before they are sent. Sentry
+          also records session replays: in production about 10% of sessions are
+          recorded, and every session in which an error occurs is recorded. Replay
+          masks all on-screen text and does not block images or other media. Sentry is
+          not controlled by the analytics cookie choice described in Section 5.3.
+        </p>
+
+        <h3>4.6 PostHog (Product Analytics)</h3>
+        <p>
+          If you accept analytics cookies, we load PostHog, which records page views,
+          product events (for example creating, exporting or publishing a game, and AI
+          generation usage), web-performance measurements and, subject to PostHog
+          project settings, session recordings with all input fields masked. PostHog
+          assigns an anonymous identifier stored in your browser. We do not currently
+          link that identifier to your account in the browser. If the server-side AI
+          usage measurement is switched on, PostHog also receives an event for each AI
+          request containing your account identifier, the model, token counts and
+          latency, but not your prompt or the AI response, and only if you accepted
+          analytics cookies. If you decline, PostHog is not loaded.
+        </p>
+
+        <h3>4.7 Email</h3>
+        <p>
+          The Service does not currently send email through its own email provider.
+          Account emails (such as sign-in verification) are sent by Clerk, and payment
+          receipts are sent by Stripe, each under its own privacy policy.
         </p>
       </section>
 
@@ -247,12 +324,35 @@ export default async function PrivacyPolicyPage() {
           <li>Theme and display settings</li>
         </ul>
 
-        <h3>5.3 Analytics</h3>
+        <h3>5.3 Analytics and Session Replay</h3>
         <p>
-          We may use analytics tools to understand how the Service is used. This data
-          is collected in aggregate form and does not personally identify individual
-          users. You may opt out of non-essential analytics through your browser
-          settings.
+          We use analytics and monitoring tools to understand how the Service is used
+          and to fix problems. Some of this data can relate to an individual session or
+          browser, so we do not describe it as anonymous:
+        </p>
+        <ul>
+          <li>
+            <strong>Vercel Web Analytics and Speed Insights</strong> run for all visitors
+            without cookies and record page views and performance data.
+          </li>
+          <li>
+            <strong>Sentry</strong> runs for all visitors, whatever your cookie choice,
+            and records errors and performance traces. It also records session replays
+            for about 10% of production sessions and for every session with an error. Text
+            on screen is masked in replays.
+          </li>
+          <li>
+            <strong>PostHog</strong> loads only after you click Accept on the cookie
+            banner. It uses a browser identifier, records product events and may record
+            session replays with inputs masked. Choosing Decline stops PostHog from
+            loading; you can change your choice by clearing the site data stored in your
+            browser.
+          </li>
+        </ul>
+        <p>
+          Browser settings alone do not turn off Vercel, Sentry or the other measures
+          above. To object to this processing, contact us at{' '}
+          <a href="mailto:privacy@spawnforge.ai">privacy@spawnforge.ai</a>.
         </p>
       </section>
 

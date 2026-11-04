@@ -42,7 +42,7 @@ export default async function TermsOfServicePage() {
       <section id="acceptance">
         <h2>1. Acceptance of Terms</h2>
         <p>
-          By accessing or using SpawnForge (&quot;the Service&quot;), operated by SpawnForge
+          By accessing or using SpawnForge (&quot;the Service&quot;), operated by Nolan Consulting LLC, an Iowa limited liability company
           (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;), you agree to be bound by these Terms of
           Service (&quot;Terms&quot;). If you do not agree to all of these Terms, you may not
           access or use the Service.
