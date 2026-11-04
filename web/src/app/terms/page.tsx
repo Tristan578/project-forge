@@ -540,7 +540,7 @@ export default async function TermsOfServicePage() {
           </li>
           <li>
             <strong>Website:</strong>{' '}
-            <a href="https://spawnforge.ai">https://spawnforge.ai</a>
+            <a href="https://www.spawnforge.ai">https://www.spawnforge.ai</a>
           </li>
         </ul>
       </section>
