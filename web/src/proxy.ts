@@ -489,8 +489,10 @@ export async function preflightPublishedGame(req: NextRequest, response: NextRes
 /** Next.js static proxy matchers, including every user-controlled play slug. */
 export const config = {
   matcher: [
-    // Skip Next.js internals, engine WASM, and the static files in public/,
-    // which all sit at the top level. The extension exclusion is anchored to a
+    // Skip Next.js internals, Vercel's own `/_vercel/*` endpoints (the Web
+    // Analytics and Speed Insights scripts and their beacons, which the layout
+    // loads on every page and which must not meet the auth redirect), engine
+    // WASM, and the static files in public/, which all sit at the top level. The extension exclusion is anchored to a
     // SINGLE top-level segment (`[^/?]*` ... `$`): it used to be `[^?]*`, which
     // skipped ANY path containing `.html`, `.js`, ... anywhere, so a dynamic page
     // such as `/editor/abc.html` or `/blog/x.html` rendered with no proxy at all:
@@ -499,7 +501,7 @@ export const config = {
     // so a top-level extension-suffixed path is only ever a public file or a 404.
     // proxyGeoBlock.test.ts evaluates this array with Next.js's own matcher
     // compiler against every dynamic route and every file in public/.
-    '/((?!_next|monitoring|engine-pkg-webgl2|engine-pkg-webgpu|[^/?]*\\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)$).*)',
+    '/((?!_next|_vercel|monitoring|engine-pkg-webgl2|engine-pkg-webgpu|[^/?]*\\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)$).*)',
     // Always run for API routes
     '/(api|trpc)/:path*',
     // Always run for /play. The first entry now matches every nested

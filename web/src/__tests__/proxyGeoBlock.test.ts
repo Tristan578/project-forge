@@ -117,8 +117,15 @@ describe('proxy matcher reaches every page the geo-block must cover (#9331)', ()
     expect(runsProxy(pathname)).toBe(true);
   });
 
-  it('still skips Next.js assets, engine WASM, and the static files in public/', () => {
+  it('still skips Next.js assets, Vercel endpoints, engine WASM, and the static files in public/', () => {
     expect(runsProxy('/_next/static/chunks/a.js')).toBe(false);
+    expect(runsProxy('/_next/image')).toBe(false);
+    // Loaded by the root layout on every page (Web Analytics, Speed Insights)
+    // and their beacons: an auth redirect here would break both for anonymous
+    // visitors. The top-level-only extension rule no longer covers these.
+    for (const p of ['/_vercel/insights/script.js', '/_vercel/speed-insights/script.js', '/_vercel/insights/view', '/_vercel/speed-insights/vitals']) {
+      expect(runsProxy(p), p).toBe(false);
+    }
     expect(runsProxy('/engine-pkg-webgpu/forge_engine.js')).toBe(false);
     const extensionFiles = publicFiles.filter((n) => /\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico)$/.test(n));
     expect(extensionFiles.length).toBeGreaterThan(3);
