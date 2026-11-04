@@ -461,7 +461,7 @@ pub fn step_character_2d(state: &mut CharacterMotionState, input: CharacterStep2
     if state.rising_from_jump && vertical_speed <= 0.0 {
         state.rising_from_jump = false;
     }
-    let grounded = input.contact_grounded && !state.rising_from_jump;
+    let grounded = input.contact_grounded;
 
     state.grounded = grounded;
     state.vertical_velocity = vertical_speed;
