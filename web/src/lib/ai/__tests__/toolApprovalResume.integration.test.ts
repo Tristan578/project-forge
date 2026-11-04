@@ -312,8 +312,12 @@ describe('tool approval — real SDK', () => {
       } as unknown as ModelMessage,
     ]);
 
+    // ai <= 7.0.114 rejected this in standardizePrompt's modelMessageSchema
+    // check (InvalidPromptError). ai 7.0.159 dropped that runtime check, so the
+    // same array now fails later, in prompt conversion, with a plain Error.
+    // What this pins is that the old shape never streams successfully.
     expect(errors.length).toBeGreaterThan(0);
-    expect(errorNames(errors).join(' ')).toContain('InvalidPrompt');
+    expect(errorNames(errors).join(' ')).toMatch(/InvalidPrompt|Media type is missing for file part/);
   });
 
   it('accepts the new ungated follow-up format', async () => {
