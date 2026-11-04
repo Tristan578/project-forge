@@ -10,8 +10,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('../sign-in/[[...sign-in]]/SignInClient', () => ({ SignInClient: () => null }));
-vi.mock('../sign-up/[[...sign-up]]/SignUpClient', () => ({ SignUpClient: () => null }));
+vi.mock('@/app/sign-in/[[...sign-in]]/SignInClient', () => ({ SignInClient: () => null }));
+vi.mock('@/app/sign-up/[[...sign-up]]/SignUpClient', () => ({ SignUpClient: () => null }));
 vi.mock('@/components/docs/DocsPage', () => ({ DocsPage: () => null }));
 vi.mock('next/cache', () => ({ cacheLife: vi.fn(), cacheTag: vi.fn() }));
 
