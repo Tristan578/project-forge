@@ -11,6 +11,7 @@ import { withTimeout } from '@/lib/async/withTimeout';
 import { describeOrigin, isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
 import { loadSceneWhenReady, refusalOf, settleDelay, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
 import { readProjectTypeFromSceneData } from '@/lib/scenes/sceneProjectType';
+import { guessLegacyPublicationProjectType } from '@/lib/scenes/legacyPublicationProjectType';
 import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
 import {
   RENDER_ERROR_CLASS_LABEL,
@@ -315,9 +316,25 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       // engine queues it on `load_scene`; it is ALSO sent here, after the scene
       // is accepted and before `play`, so the step is observable without an
       // engine and a refusal is a failed start, like `play`'s, rather than a
-      // blank canvas. A 3D or legacy scene (no key) needs nothing: 3D is the
-      // engine's default.
-      if (readProjectTypeFromSceneData(gameData.sceneData) === '2d') {
+      // blank canvas. A 3D scene needs nothing: 3D is the engine's default.
+      //
+      // A game published before the key existed states no type (#10368).
+      // When every entity in it is unmistakably 2D it is played as 2D — a
+      // guess the scene format itself never makes, confined to this page and
+      // reported each time, until those publications carry the key. Anything
+      // ambiguous stays 3D, as before.
+      const statedType = readProjectTypeFromSceneData(gameData.sceneData);
+      const guessed2d = statedType === null && guessLegacyPublicationProjectType(gameData.sceneData) === '2d';
+      if (guessed2d) {
+        console.info('[SpawnForge Play] This game was published before scenes recorded 2D or 3D; its content is 2D, so it is played in 2D.');
+        addBreadcrumb({
+          category: 'play',
+          level: 'info',
+          message: 'legacy publication with no projectType played as 2d (#10368)',
+          data: { userId, slug },
+        });
+      }
+      if (statedType === '2d' || guessed2d) {
         const refusal = refusalOf(runtime.handle_command('set_project_type', { projectType: '2d' }));
         if (refusal !== null) {
           throw new Error(`The game could not start: 2D mode was refused: ${refusal}`);
