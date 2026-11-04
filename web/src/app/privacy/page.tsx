@@ -2,6 +2,7 @@ import { cacheLife, cacheTag } from 'next/cache';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalLayout } from '@/components/legal/LegalLayout';
+import { PRIVACY_LAST_UPDATED } from '@/components/legal/lastUpdated';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy - SpawnForge',
@@ -31,7 +32,7 @@ export default async function PrivacyPolicyPage() {
   return (
     <LegalLayout
       title="Privacy Policy"
-      lastUpdated="November 4, 2026 (draft, pending legal review)"
+      lastUpdated={PRIVACY_LAST_UPDATED}
       tableOfContents={tableOfContents}
     >
       {/* 1. Introduction */}

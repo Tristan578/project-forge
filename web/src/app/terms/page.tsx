@@ -2,6 +2,7 @@ import { cacheLife, cacheTag } from 'next/cache';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalLayout } from '@/components/legal/LegalLayout';
+import { TERMS_LAST_UPDATED } from '@/components/legal/lastUpdated';
 
 export const metadata: Metadata = {
   title: 'Terms of Service - SpawnForge',
@@ -35,7 +36,7 @@ export default async function TermsOfServicePage() {
   return (
     <LegalLayout
       title="Terms of Service"
-      lastUpdated="February 27, 2026"
+      lastUpdated={TERMS_LAST_UPDATED}
       tableOfContents={tableOfContents}
     >
       {/* 1. Acceptance of Terms */}
