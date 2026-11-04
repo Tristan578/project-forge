@@ -81,8 +81,10 @@ export const BLOCKED_JURISDICTIONS: readonly BlockedJurisdiction[] = [
   { country: 'SO', name: 'Somalia', basis: 'ofac-country-program', program: 'Somalia Sanctions' },
   { country: 'SS', name: 'South Sudan', basis: 'ofac-country-program', program: 'South Sudan-Related Sanctions' },
   { country: 'SD', name: 'Sudan', basis: 'ofac-country-program', program: 'Sudan and Darfur Sanctions' },
-  // Syria is not in OFAC FAQ 10's comprehensive list; its program on the page
-  // is PAARSS (Promoting Accountability for Assad and Regional Stabilization).
+  // Syria is NOT comprehensively sanctioned: OFAC FAQ 10 does not name it and
+  // the programs page has no "Syria Sanctions" program any more. The only
+  // active program tied to it is PAARSS, a targeted program named for Assad.
+  // Blocked under the owner's "any sanctioned country" rule, basis (c).
   { country: 'SY', name: 'Syria', basis: 'ofac-country-program', program: 'Promoting Accountability for Assad and Regional Stabilization Sanctions (PAARSS)' },
   { country: 'VE', name: 'Venezuela', basis: 'ofac-country-program', program: 'Venezuela-Related Sanctions' },
   { country: 'YE', name: 'Yemen', basis: 'ofac-country-program', program: 'Yemen-related Sanctions' },

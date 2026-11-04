@@ -31,7 +31,7 @@ Both fetched 2026-11-04:
 
 ### 2.1 What changed against the request
 
-- **Syria is not comprehensively sanctioned any more.** FAQ 10 does not name it, and the programs page lists no "Syria Sanctions" program; Syria's program there is *Promoting Accountability for Assad and Regional Stabilization Sanctions (PAARSS)*. Syria stays blocked, under basis (c).
+- **Syria is not comprehensively sanctioned any more.** FAQ 10 does not name it among the broad-sanctions jurisdictions, and the programs page (re-checked 2026-11-04) lists no "Syria Sanctions" or "Syria-Related Sanctions" program. The only active program there tied to Syria is *Promoting Accountability for Assad and Regional Stabilization Sanctions (PAARSS)*, a targeted program named for Assad rather than for the country. Syria stays blocked under Tristan's "any sanctioned country" rule, labelled basis (c) with PAARSS as its program, and is not described anywhere in this change as comprehensively embargoed.
 - **Ethiopia and Zimbabwe are not on the programs page,** so they are not on the list. Add them by hand if wanted.
 - **Hong Kong** has its own program (*Hong Kong-Related Sanctions*) and its own ISO code (`HK`), so it is listed separately from China.
 
