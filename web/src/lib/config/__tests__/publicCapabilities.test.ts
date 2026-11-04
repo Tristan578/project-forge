@@ -40,7 +40,7 @@ afterEach(() => {
 describe('tier capability bullets follow the flags', () => {
   it('with both flags off, no bullet promises platform keys, hosted MCP or platform asset generation', () => {
     const caps = buildTierCapabilities(OFF);
-    expect(caps.hobbyist).toEqual(['AI chat', 'Asset generation with your own API keys (BYOK)']);
+    expect(caps.hobbyist).toEqual(['AI chat', '3D, texture and audio generation with your own API keys (BYOK)']);
     expect(caps.creator[0]).toBe(`MCP access for external AI tools ${COMING_AFTER_LAUNCH}`);
     expect(caps.pro[0]).toBe(`Platform AI keys, no balance required ${COMING_AFTER_LAUNCH}`);
     for (const key of TIER_KEYS) {

@@ -77,7 +77,7 @@ const competitors: Record<string, CompetitorData> = {
       { feature: 'Dimensions', spawnforge: 'Full 2D + 3D engine', competitor: 'Primarily 2D (limited 3D support)' },
       { feature: 'Language', spawnforge: 'Natural language + visual scripting', competitor: 'GML (GameMaker Language)' },
       { feature: 'Web Export', spawnforge: 'Native browser engine', competitor: 'HTML5 export (paid tier required)' },
-      { feature: 'AI Assistance', spawnforge: '25+ AI modules, asset generation (bring your own key)', competitor: 'No built-in AI' },
+      { feature: 'AI Assistance', spawnforge: '25+ AI modules, 3D/audio generation (bring your own key)', competitor: 'No built-in AI' },
       { feature: 'Rendering', spawnforge: 'WebGPU + WebGL2', competitor: 'OpenGL (desktop), WebGL (export)' },
       { feature: 'Pricing', spawnforge: 'Free tier available', competitor: 'Free tier, $9.99/mo for exports' },
       { feature: 'Tilemap Editor', spawnforge: 'Built-in with AI placement', competitor: 'Built-in room editor' },

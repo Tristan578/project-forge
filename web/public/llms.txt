@@ -20,7 +20,7 @@ SpawnForge is a browser-based 2D and 3D game engine that lets anyone create, edi
 ## Pricing
 
 - Free: $0/month — full editor and local export, 3 cloud projects, 1 published game, 50 trial AI tokens at signup
-- Starter: $9/month — 10 cloud projects, 3 published games, 300 AI tokens/month, AI chat, bring-your-own-key asset generation
+- Starter: $9/month — 10 cloud projects, 3 published games, 300 AI tokens/month, AI chat, 3D/texture/audio generation with your own Meshy or ElevenLabs key
 - Creator: $29/month — 50 cloud projects, 10 published games, 1,000 AI tokens/month, advanced AI panels (external MCP access coming after launch)
 - Studio: $79/month — unlimited cloud projects, 100 published games, 3,000 AI tokens/month, Pro AI panels (platform AI keys coming after launch)
 

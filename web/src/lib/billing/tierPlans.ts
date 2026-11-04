@@ -119,7 +119,7 @@ export function buildTierCapabilities(
     ],
     hobbyist: flags.platformGenerationKeys
       ? ['AI chat and asset generation', 'Bring your own AI keys (BYOK)']
-      : ['AI chat', 'Asset generation with your own API keys (BYOK)'],
+      : ['AI chat', '3D, texture and audio generation with your own API keys (BYOK)'],
     creator: [
       flags.hostedMcp
         ? 'MCP access for external AI tools'
