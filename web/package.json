@@ -99,7 +99,7 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.14.0",
+    "@axe-core/playwright": "^4.13.0",
     "@electric-sql/pglite": "^0.5.14",
     "@electric-sql/pglite-pgvector": "0.0.15",
     "@next/bundle-analyzer": "^16.4.5",
