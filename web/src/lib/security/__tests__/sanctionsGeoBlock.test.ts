@@ -154,7 +154,7 @@ describe('the 451 response', () => {
     const html = await res.text();
     expect(html).toContain('not available in your region');
     expect(html).toContain('<meta name="robots" content="noindex">');
-    expect(html).not.toMatch(/<script|<link|<img|<iframe|src=|@import|url\(/i);
+    expect(html).not.toMatch(/<script|<link|<img|<iframe|<style|style=|src=|@import|url\(/i);
   });
 
   it('sends no body for HEAD', async () => {

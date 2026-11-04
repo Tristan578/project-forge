@@ -202,7 +202,7 @@ const BLOCKED_HTML = `<!doctype html>
 <meta name="robots" content="noindex">
 <title>Not available in your region</title>
 </head>
-<body style="font-family: system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5;">
+<body>
 <h1>SpawnForge is not available in your region</h1>
 <p>We do not offer SpawnForge, or accept payment for it, in countries and regions subject to sanctions.</p>
 <p>If you think this is a mistake, contact us at support@spawnforge.ai.</p>
