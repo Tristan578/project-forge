@@ -312,12 +312,16 @@ describe('tool approval — real SDK', () => {
       } as unknown as ModelMessage,
     ]);
 
-    // ai <= 7.0.114 rejected this in standardizePrompt's modelMessageSchema
-    // check (InvalidPromptError). ai 7.0.159 dropped that runtime check, so the
-    // same array now fails later, in prompt conversion, with a plain Error.
-    // What this pins is that the old shape never streams successfully.
+    // Up to ai 7.0.114 this died in standardizePrompt's modelMessageSchema
+    // check (InvalidPromptError). ai 7.0.159 removed that runtime check, so the
+    // array now reaches prompt conversion, where the unknown `tool_result` part
+    // inside a user message falls through to the file-part branch
+    // (convertPartToLanguageModelPart) and throws a plain Error because it has
+    // no mediaType. Pinned to that exact reason: if the SDK changes it again,
+    // re-derive this rather than widening the match.
     expect(errors.length).toBeGreaterThan(0);
-    expect(errorNames(errors).join(' ')).toMatch(/InvalidPrompt|Media type is missing for file part/);
+    expect(errorNames(errors).join(' ')).toContain('Error: Media type is missing for file part');
+    expect(errorNames(errors).join(' ')).not.toContain('InvalidPrompt');
   });
 
   it('accepts the new ungated follow-up format', async () => {
