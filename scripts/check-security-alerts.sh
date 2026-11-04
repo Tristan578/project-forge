@@ -53,12 +53,6 @@ set -uo pipefail
 # elements plain double-quoted ids: check-npm-audit.test.sh reads this array
 # for its lockstep pin and refuses (fails) on any other shape.
 ALLOWED_GHSA=(
-  # braces <=3.0.3: stack-exhaustion DoS through deeply nested brace patterns.
-  # Dev-only, via eslint-config-next -> @next/eslint-plugin-next (pins fast-glob
-  # 3.3.1) -> micromatch -> braces 3.0.3; no braces release outside the range
-  # exists. Full justification, re-check trigger and removal path beside the
-  # same id in scripts/check-npm-audit.sh. Prune both together. Tracking: #10323.
-  "GHSA-vfj7-8cjw-p6xm"
   # esbuild: Deno-module binary integrity RCE via NPM_CONFIG_REGISTRY.
   # Dev/install-time only; we never use esbuild's Deno install path.
   "GHSA-gv7w-rqvm-qjhr"
