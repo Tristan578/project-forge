@@ -86,7 +86,7 @@ const jsonLdString = JSON.stringify([
       `${MCP_COMMAND_COUNT} MCP commands for AI-assisted editing`,
       "One-click browser game publishing",
       "Real-time physics simulation (Rapier)",
-      "AI asset generation (3D models, textures, audio, music)",
+      "AI-assisted asset generation with your own provider API keys (3D models, textures, audio)",
     ],
   },
   {

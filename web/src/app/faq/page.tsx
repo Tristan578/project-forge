@@ -8,6 +8,7 @@ import {
 } from '@/lib/billing/tierPlans';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
+import { currentPublicCapabilities } from '@/lib/config/publicCapabilities';
 
 export const metadata: Metadata = {
   title: 'FAQ — SpawnForge',
@@ -28,6 +29,20 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 const FREE = getTierPlan('starter');
 const ENTRY = getTierPlan('hobbyist');
 const TOP = getTierPlan('pro');
+const CAPS = currentPublicCapabilities();
+
+// Claims about platform AI keys and hosted MCP follow the flags in
+// `publicCapabilities.ts`: production holds no platform generation keys (#9117)
+// and the hosted MCP bridge is off (#9722), so the copy says so until they ship.
+const TOP_PLAN_AI_SENTENCE = CAPS.platformGenerationKeys
+  ? `which reaches the platform AI keys without needing a token balance`
+  : `which lifts the cloud project limit to ${PROJECT_LIMITS.pro === Infinity ? 'unlimited' : PROJECT_LIMITS.pro} and adds the Pro AI panels (platform-managed AI keys are coming after launch)`;
+const GENERATION_SENTENCE = CAPS.platformGenerationKeys
+  ? ''
+  : ' Generating 3D models, textures and audio currently needs your own provider API key (Meshy or ElevenLabs).';
+const MCP_AVAILABILITY_SENTENCE = CAPS.hostedMcp
+  ? ''
+  : ' External MCP clients can drive a local build today; attaching one to the hosted editor is coming after launch.';
 
 const faqs = [
   {
@@ -38,7 +53,7 @@ const faqs = [
   {
     question: 'Is SpawnForge free?',
     answer:
-      `Yes. The ${FREE.name} tier includes the full editor, local export, ${countLabel(PROJECT_LIMITS.starter, 'cloud project', 'cloud projects')}, and ${countLabel(PUBLISH_LIMITS.starter, 'published game', 'published games')} — plus a one-time grant of ${TRIAL_GRANT_TOKENS} AI tokens at signup, so you can try AI chat and generation before adding a card. Once the trial tokens are spent, ongoing AI access starts on the ${ENTRY.name} plan at ${ENTRY.price}/month, which adds a monthly AI token allowance and bring-your-own-key support. Plans go up to ${TOP.price}/month (${TOP.name}), which reaches the platform AI keys without needing a token balance.`,
+      `Yes. The ${FREE.name} tier includes the full editor, local export, ${countLabel(PROJECT_LIMITS.starter, 'cloud project', 'cloud projects')}, and ${countLabel(PUBLISH_LIMITS.starter, 'published game', 'published games')} — plus a one-time grant of ${TRIAL_GRANT_TOKENS} AI tokens at signup, so you can try AI chat before adding a card. Once the trial tokens are spent, ongoing AI access starts on the ${ENTRY.name} plan at ${ENTRY.price}/month, which adds a monthly AI token allowance and bring-your-own-key support. Plans go up to ${TOP.price}/month (${TOP.name}), ${TOP_PLAN_AI_SENTENCE}.`,
   },
   {
     question: 'What browsers does SpawnForge support?',
@@ -58,12 +73,12 @@ const faqs = [
   {
     question: 'How does AI game creation work?',
     answer:
-      'You describe what you want in natural language — for example, "create a platformer with a jumping character and moving platforms." Multi-agent AI interprets your prompt and executes commands to build the scene, add physics, configure scripting, generate assets, and set up game logic. You can then refine everything manually in the visual editor.',
+      `You describe what you want in natural language — for example, "create a platformer with a jumping character and moving platforms." Multi-agent AI interprets your prompt and executes commands to build the scene, add physics, configure scripting, and set up game logic. You can then refine everything manually in the visual editor.${GENERATION_SENTENCE}`,
   },
   {
     question: 'What is MCP for game development?',
     answer:
-      `MCP (Model Context Protocol) is the command interface between the AI and the game engine. SpawnForge exposes ${MCP_COMMAND_COUNT} MCP commands across ${MCP_CATEGORY_COUNT} categories — from spawning entities and applying materials to configuring physics, audio, animation, scripting, and game components. This gives the AI precise, fine-grained control over every aspect of game creation.`,
+      `MCP (Model Context Protocol) is the command interface between the AI and the game engine. SpawnForge exposes ${MCP_COMMAND_COUNT} MCP commands across ${MCP_CATEGORY_COUNT} categories — from spawning entities and applying materials to configuring physics, audio, animation, scripting, and game components. This gives the AI precise, fine-grained control over every aspect of game creation.${MCP_AVAILABILITY_SENTENCE}`,
   },
   {
     question: 'How does SpawnForge compare to Unity or Godot?',

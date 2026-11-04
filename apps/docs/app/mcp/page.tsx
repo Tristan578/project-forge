@@ -31,8 +31,9 @@ export default async function McpIndexPage() {
           fontSize: '1rem',
         }}
       >
-        Browse the SpawnForge MCP command reference. Control SpawnForge from AI tools — use these
-        commands with Claude and other MCP-compatible clients.
+        Browse the SpawnForge MCP command reference. These commands work with Claude and other
+        MCP-compatible clients attached to a local build; attaching to the hosted editor at spawnforge.ai is
+        coming after launch.
       </p>
 
       {/* Partial listing notice — per spec Section 7.3 */}

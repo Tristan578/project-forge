@@ -10,19 +10,19 @@ SpawnForge is a browser-based 2D and 3D game engine that lets anyone create, edi
 - 2D and 3D game engine (Rust compiled to WASM)
 - WebGPU primary rendering with WebGL2 fallback
 - Visual scripting (73 node types) and TypeScript scripting
-- 350 MCP commands for AI-assisted editing across 41 categories
+- 383 MCP commands for AI-assisted editing across 41 categories (external MCP clients work against a local build; hosted access is coming after launch)
 - Real-time physics simulation (Rapier 3D and 2D)
-- AI asset generation: 3D models, textures, audio, music, voice
+- AI asset generation with your own provider API keys (BYOK): 3D models, textures, audio, music, voice. Platform-provided generation is coming after launch
 - One-click browser game publishing
 - PBR materials (56 presets), skeletal animation, GPU particles
 - Tilemap editor, dialogue system, economy designer, leaderboards
 
 ## Pricing
 
-- Free: $0/month — AI chat (limited), 1 published game
-- Hobbyist: $9/month — unlimited AI, 5 published games, asset generation
-- Creator: $29/month — unlimited publishing, custom domain, advanced AI
-- Pro: $99/month — team collaboration, API access, dedicated support
+- Free: $0/month — full editor and local export, 3 cloud projects, 1 published game, 50 trial AI tokens at signup
+- Starter: $9/month — 10 cloud projects, 3 published games, 300 AI tokens/month, AI chat, bring-your-own-key asset generation
+- Creator: $29/month — 50 cloud projects, 10 published games, 1,000 AI tokens/month, advanced AI panels (external MCP access coming after launch)
+- Studio: $79/month — unlimited cloud projects, 100 published games, 3,000 AI tokens/month, Pro AI panels (platform AI keys coming after launch)
 
 ## Links
 

@@ -17,6 +17,7 @@
 
 import { PROJECT_LIMITS, ENTITY_LIMITS, PUBLISH_LIMITS } from '@/lib/projects/limits';
 import { TIER_MONTHLY_TOKENS, TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
+import { currentPublicCapabilities, type PublicCapabilityFlags } from '@/lib/config/publicCapabilities';
 
 export { PROJECT_LIMITS, ENTITY_LIMITS, PUBLISH_LIMITS, TIER_MONTHLY_TOKENS };
 
@@ -72,6 +73,9 @@ export function countLabel(limit: number, singular: string, plural: string): str
   return `${formatLimit(limit)} ${limit === 1 ? singular : plural}`;
 }
 
+/** Suffix marking a bullet for a capability production does not deliver yet. */
+export const COMING_AFTER_LAUNCH = '(coming after launch)';
+
 /**
  * What each tier can do, beyond the numbers.
  *
@@ -93,17 +97,45 @@ export function countLabel(limit: number, singular: string, plural: string): str
  *   creator-gated panels in `PANEL_TIER_REQUIREMENTS`.
  * - `pro` reaches platform keys without a token balance (`resolver.ts` exempts
  *   it from the balance check) and the four pro-only panels.
+ *
+ * What production can deliver TODAY is a separate question from what the gates
+ * allow: production holds no platform generation keys (#9117) and the hosted MCP
+ * bridge is off (#9722), so those bullets are flag-driven below.
  */
-const TIER_CAPABILITIES: Record<TierKey, readonly string[]> = {
-  starter: [
-    'Full editor and local export',
-    `${TRIAL_GRANT_TOKENS} trial AI tokens at signup`,
-    'No monthly AI tokens',
-  ],
-  hobbyist: ['AI chat and asset generation', 'Bring your own AI keys (BYOK)'],
-  creator: ['MCP access for external AI tools', 'Advanced AI panels'],
-  pro: ['Platform AI keys, no balance required', 'Pro AI panels'],
-};
+/**
+ * The capability bullets for each tier, written against the flags in
+ * `lib/config/publicCapabilities.ts`. With a flag off, the bullet says what is
+ * true today ("bring your own key", "coming after launch") instead of what the
+ * plan will eventually include. Exported so the test can render both states.
+ */
+export function buildTierCapabilities(
+  flags: PublicCapabilityFlags,
+): Record<TierKey, readonly string[]> {
+  return {
+    starter: [
+      'Full editor and local export',
+      `${TRIAL_GRANT_TOKENS} trial AI tokens at signup`,
+      'No monthly AI tokens',
+    ],
+    hobbyist: flags.platformGenerationKeys
+      ? ['AI chat and asset generation', 'Bring your own AI keys (BYOK)']
+      : ['AI chat', 'Asset generation with your own API keys (BYOK)'],
+    creator: [
+      flags.hostedMcp
+        ? 'MCP access for external AI tools'
+        : `MCP access for external AI tools ${COMING_AFTER_LAUNCH}`,
+      'Advanced AI panels',
+    ],
+    pro: [
+      flags.platformGenerationKeys
+        ? 'Platform AI keys, no balance required'
+        : `Platform AI keys, no balance required ${COMING_AFTER_LAUNCH}`,
+      'Pro AI panels',
+    ],
+  };
+}
+
+const TIER_CAPABILITIES = buildTierCapabilities(currentPublicCapabilities());
 
 /** A plan exactly as it should be presented to a user. */
 export interface TierPlan {
@@ -142,13 +174,14 @@ export const TIER_PLANS: readonly TierPlan[] = TIER_KEYS.map((key) => ({
 }));
 
 /**
- * True when a feature bullet states an absence ("No monthly AI tokens") rather
+ * True when a feature bullet states an absence ("No monthly AI tokens") or a
+ * capability that is not delivered yet ("... (coming after launch)") rather
  * than an inclusion. Every surface that lists these bullets must mark them as
  * a constraint — a green check beside "No monthly AI tokens" reads as the
  * opposite of what it says.
  */
 export function isExclusionFeature(feature: string): boolean {
-  return feature.startsWith('No ');
+  return feature.startsWith('No ') || feature.endsWith(COMING_AFTER_LAUNCH);
 }
 
 /** Looks a plan up by its internal billing key. */

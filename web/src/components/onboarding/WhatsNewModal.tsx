@@ -27,7 +27,7 @@ const recentFeatures = [
   },
   {
     title: 'AI Asset Generation',
-    description: 'Generate 3D models, textures, audio, and music with AI',
+    description: 'Generate 3D models, textures, audio, and music with AI using your own provider API keys',
   },
 ];
 

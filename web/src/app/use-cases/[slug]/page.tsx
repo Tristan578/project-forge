@@ -29,7 +29,7 @@ const useCases: Record<string, UseCaseData> = {
     description:
       'Build platformer games in the browser with AI assistance — side-scrollers, precision platformers, and metroidvanias.',
     intro:
-      'SpawnForge gives you everything you need to build platformers directly in the browser. Use the built-in 2D physics, tilemap editor, and AI-powered sprite generation to go from concept to playable game without leaving your browser tab.',
+      'SpawnForge gives you everything you need to build platformers directly in the browser. Use the built-in 2D physics, tilemap editor, and sprite animation tools to go from concept to playable game without leaving your browser tab.',
     features: [
       {
         title: '2D Physics',
@@ -48,8 +48,8 @@ const useCases: Record<string, UseCaseData> = {
         text: 'The Platformer starter bundle pre-configures a side-scroller camera, character controller, and gravity — ready in one click.',
       },
       {
-        title: 'AI Pixel Art',
-        text: 'Generate pixel art characters, tilesets, and sprite sheets with AI. Describe "a red robot character with idle and run animations" and get assets instantly.',
+        title: 'Sprite Import',
+        text: 'Bring your own pixel art characters, tilesets, and sprite sheets and slice them into animation clips. AI sprite generation is coming after launch.',
       },
     ],
     cta: 'Build a platformer in minutes',
@@ -120,17 +120,17 @@ const useCases: Record<string, UseCaseData> = {
     name: 'Game Jams',
     slug: 'game-jam',
     description:
-      'SpawnForge is the fastest way to prototype and ship game jam entries — AI asset generation, starter bundles, and instant publish.',
+      'SpawnForge is the fastest way to prototype and ship game jam entries — starter bundles, AI-assisted scene building, and instant publish.',
     intro:
-      'Game jams reward speed and creativity. SpawnForge removes the setup friction — no install, no compile step, no deployment pipeline. Open your browser, describe your game, and start building. AI generates assets while you focus on mechanics.',
+      'Game jams reward speed and creativity. SpawnForge removes the setup friction — no install, no compile step, no deployment pipeline. Open your browser, describe your game, and start building. The AI builds scenes while you focus on mechanics.',
     features: [
       {
         title: 'Zero Setup',
         text: 'Open a URL and start creating. No IDE download, no project configuration, no build system to fight. Your first entity can exist in under 30 seconds.',
       },
       {
-        title: 'AI Asset Pipeline',
-        text: 'Generate 3D models, textures, sound effects, voice lines, and music through natural language prompts. Skip the asset hunt entirely.',
+        title: 'AI Asset Pipeline (bring your own key)',
+        text: 'With your own Meshy or ElevenLabs API key, generate 3D models, textures, sound effects, voice lines, and music from natural language prompts. Platform-provided generation is coming after launch.',
       },
       {
         title: 'Starter Bundles',

@@ -59,7 +59,7 @@ export default function SpawnForgeVsUnityVsGodot() {
       <p>
         <strong>SpawnForge:</strong> 25+ AI modules built into the editor from day one.{' '}
         {MCP_COMMAND_COUNT} MCP
-        commands let any LLM drive the full engine. AI generates 3D models, textures, sound
+        commands are published for LLM control (external clients attach to a local build today; hosted access is coming after launch). With your own provider API keys, AI can generate 3D models, textures, sound
         effects, voice lines, and music. The chat panel executes multi-turn compound actions.
       </p>
       <p>
