@@ -14,13 +14,13 @@ const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 
 describe.each(['llms.txt', 'llms-full.txt'])('%s', (file) => {
   const text = readFileSync(path.join(publicDir, file), 'utf8');
-  const siteUrls = text.match(/https?:\/\/[^\s)>\]]*spawnforge\.ai[^\s)>\]]*/g) ?? [];
+  const hosts = (text.match(/https?:\/\/[^\s)>\]]+/g) ?? []).map((u) => new URL(u).host);
 
   it('links to the site at all (vacuity guard)', () => {
-    expect(siteUrls.some((u) => u.startsWith('https://www.spawnforge.ai'))).toBe(true);
+    expect(hosts).toContain('www.spawnforge.ai');
   });
 
   it('never links the apex host, which redirects to www', () => {
-    expect(siteUrls.filter((u) => /^https?:\/\/spawnforge\.ai(?:[/?#]|$)/.test(u))).toEqual([]);
+    expect(hosts.filter((h) => h === 'spawnforge.ai')).toEqual([]);
   });
 });
