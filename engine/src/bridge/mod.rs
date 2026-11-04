@@ -590,7 +590,13 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, physics::apply_force_applications2d)
             .add_systems(Update, (
                 physics::apply_impulse_applications2d,
-                physics::apply_linear_velocity2d_sets,
+                // After the character controller, which writes the same 2D
+                // `Velocity` on a dynamic 2D character every frame (#10378):
+                // a script's explicit `setVelocity` lands on top of the
+                // controller's for that frame instead of the two resolving in
+                // an unspecified order.
+                physics::apply_linear_velocity2d_sets
+                    .after(crate::core::game_components::system_character_controller),
                 physics::apply_angular_velocity2d_sets,
                 physics::apply_raycast2d_requests,
             ))
