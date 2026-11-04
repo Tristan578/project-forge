@@ -21,6 +21,7 @@ import { isStripeTaxEnabled } from '@/lib/billing/stripe-tax';
 import { checkBotIdGate } from '@/lib/security/botId';
 import type Stripe from 'stripe';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
 
 const checkoutSchema = z.object({
   tier: z.enum(['hobbyist', 'creator', 'pro']),
@@ -40,6 +41,11 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * Body: { tier: 'hobbyist' | 'creator' | 'pro' }
  */
 async function POST_impl(req: NextRequest) {
+  // Sanctions geo-block (#9331): refuse payment from a blocked jurisdiction
+  // here too, so it holds even on a path the proxy matcher stops covering.
+  const geoBlocked = sanctionsGeoBlock(req);
+  if (geoBlocked) return geoBlocked;
+
   // BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
   // step-up/auth work, so a blocked bot never spends that budget.
   const botIdResponse = await checkBotIdGate();

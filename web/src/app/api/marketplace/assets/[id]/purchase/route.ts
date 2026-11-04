@@ -6,11 +6,17 @@ import { eq, and, sql } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { validationError, conflict, forbidden, paymentRequired, internalError } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
 
 async function POST_impl(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  // Sanctions geo-block (#9331): refuse payment from a blocked jurisdiction
+  // here too, so it holds even on a path the proxy matcher stops covering.
+  const geoBlocked = sanctionsGeoBlock(req);
+  if (geoBlocked) return geoBlocked;
+
   const { id: assetId } = await context.params;
 
   try {
