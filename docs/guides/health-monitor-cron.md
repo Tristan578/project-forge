@@ -9,6 +9,35 @@ expired webhook-idempotency rows, reports any non-healthy service to Sentry as
 a structured exception, and registers a Sentry Cron check-in on the monitor
 slug `spawnforge-health-monitor` (`web/src/lib/monitoring/cronMonitors.ts`).
 
+## Status (2026-11-04): authenticating since at least 2026-10-26
+
+The sections below were written on 2026-09-05, when `CRON_SECRET` was unset.
+That is no longer the state of production. Evidence, read 2026-11-04:
+
+- Sentry Crons, `spawnforge-health-monitor` (org `tristan-nolan`, project
+  `spawnforge-ai`, environment `production`): 94-96 `ok` check-ins a day for
+  every day from 2026-10-26 through 2026-11-03, plus 54 on 2026-11-04 up to
+  13:15 UTC. Over that span: 0 `error`, 1 `missed` (2026-11-03), 3 `timeout`
+  (1 on 2026-10-26, 2 on 2026-10-31). The query was
+  `get_monitor_details` with a 30d period and a one-day rollup; the earlier
+  history was not read.
+- `GET_impl` calls `withCronMonitor` only after `isAuthorizedCron(req)` has
+  passed, so a check-in is evidence of an authenticated request. A 401 never
+  registers one.
+- Vercel runtime logs (project `spawnforge`, production) show invocations of
+  `/api/cron/health-monitor` on deployment `dpl_GK5vnkpJr4Ef1FKT53Dpo8Hg37ju`
+  at 12:45, 13:00 and 13:15 UTC on 2026-11-04. Those log lines carry no
+  HTTP status, so they show the schedule firing and do not by themselves show a 200.
+
+What this does not establish: when `CRON_SECRET` was set, how it was set, or
+anything about service health. The probe caveats below (AI Providers and
+Payments grading on configuration presence) still apply to what a green
+check-in means. `vercel crons ls` and a quoted 200 log line were not available
+to the session that wrote this; if you want that line on #9118, the dashboard
+filter in "Evidence: one successful run" step 2 produces it.
+
+The remaining sections stay as the activation and rotation procedure.
+
 ## Why it has never run
 
 `isAuthorizedCron()` in `web/src/app/api/cron/health-monitor/route.ts` compares
