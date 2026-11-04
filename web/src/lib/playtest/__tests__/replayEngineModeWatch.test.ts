@@ -842,6 +842,36 @@ describe('the runner watches the editor engine mode (#10007)', () => {
       expect(engine.mode()).toBe('play');
       expect(handle.getProgress().state).toBe('cancelled');
     });
+
+    it("a run started before the drain that reports the previous run's queued Pause and its cancel's Resume: that 'paused' is the previous run's own, not a toolbar Pause — the new run is not cancelled", async () => {
+      // The E2E engine gate's NFR loop (inputReplay.spec.ts): pause at a
+      // boundary, Cancel, and start the next run at once. The previous run's
+      // Pause and its cancel's Resume are still queued, and its watch is
+      // gone, so the next frame's drain reports 'paused' then 'play' to the
+      // NEW run's watch, during its warm-up frame.
+      const engine = makeQueuedEngine();
+      const first = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 2 });
+      await framesUntil(engine, first, 'paused');
+      expect(first.cancel()).toBe(true);
+      expect(await settlesWithin(first, 500)).toEqual({ status: 'cancelled', ticksReplayed: 2 });
+      expect(engine.queued()).toEqual(['pause', 'resume']);
+
+      const second = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 2 });
+      await vi.waitFor(() => expect(engine.listenerCount()).toBe(1));
+      await framesUntil(engine, second, 'paused');
+      expect(engine.delivered.slice(0, 2), "the first run's modes reached the second run's watch").toEqual(['paused', 'play']);
+      expect(second.getProgress().tick).toBe(2);
+
+      // The second run's own Pause is still attributed to it, and a toolbar
+      // Pause after that is still the toolbar's.
+      expect(second.resume()).toBe(true);
+      await engine.frame();
+      expect(second.getProgress().state).toBe('running');
+      engine.toolbar.pause();
+      await engine.frame();
+      expect(await settlesWithin(second, 500)).toEqual({ status: 'cancelled', ticksReplayed: 2, reason: 'engine-paused' });
+      expect(engine.listenerCount()).toBe(0);
+    });
   });
 
   it("the creator's own cancel carries no reason; a runner's cancel is reported with its reason, in words", async () => {
