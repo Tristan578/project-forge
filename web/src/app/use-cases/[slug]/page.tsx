@@ -129,8 +129,8 @@ const useCases: Record<string, UseCaseData> = {
         text: 'Open a URL and start creating. No IDE download, no project configuration, no build system to fight. Your first entity can exist in under 30 seconds.',
       },
       {
-        title: 'AI Asset Pipeline (bring your own key)',
-        text: 'With your own Meshy or ElevenLabs API key, generate 3D models, textures, sound effects, voice lines, and music from natural language prompts. Platform-provided generation is coming after launch.',
+        title: 'AI Asset Pipeline (coming after launch)',
+        text: 'Generating 3D models, textures, sound effects, voice lines, and music from natural language prompts is coming after launch. Until then, import your own models, sprites and audio.',
       },
       {
         title: 'Starter Bundles',

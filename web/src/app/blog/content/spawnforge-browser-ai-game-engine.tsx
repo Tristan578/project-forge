@@ -41,7 +41,7 @@ export default function SpawnForgeBrowserAiGameEngine() {
         The built-in chat panel lets you describe what you want in plain language. The AI executes
         compound actions — spawning entities, configuring materials, writing scripts — iterating
         across multiple turns until the scene matches your description. 25+ AI modules handle
-        everything from scene generation to asset creation (generating 3D models, textures and audio uses your own provider API keys today).
+        everything from scene generation to asset creation (AI generation of 3D models, textures and audio is coming after launch).
       </p>
 
       <h2>{MCP_COMMAND_COUNT} MCP Commands</h2>

@@ -99,7 +99,9 @@ export const COMING_AFTER_LAUNCH = '(coming after launch)';
  *   it from the balance check) and the four pro-only panels.
  *
  * What production can deliver TODAY is a separate question from what the gates
- * allow: production holds no platform generation keys (#9117) and the hosted MCP
+ * allow: production holds no platform generation keys (#9117), generation
+ * through a user's own key has never been shown working in production
+ * (implemented-unverified in `docs/capability-matrix.md`), and the hosted MCP
  * bridge is off (#9722), so those bullets are flag-driven below.
  */
 /**
@@ -117,9 +119,16 @@ export function buildTierCapabilities(
       `${TRIAL_GRANT_TOKENS} trial AI tokens at signup`,
       'No monthly AI tokens',
     ],
-    hobbyist: flags.platformGenerationKeys
-      ? ['AI chat and asset generation', 'Bring your own AI keys (BYOK)']
-      : ['AI chat', '3D, texture and audio generation with your own API keys (BYOK)'],
+    hobbyist: [
+      flags.platformGenerationKeys ? 'AI chat and asset generation' : 'AI chat',
+      flags.platformGenerationKeys
+        ? flags.byokGeneration
+          ? 'Bring your own AI keys (BYOK)'
+          : `Bring your own AI keys (BYOK) ${COMING_AFTER_LAUNCH}`
+        : flags.byokGeneration
+          ? '3D, texture and audio generation with your own API keys (BYOK)'
+          : `AI asset generation ${COMING_AFTER_LAUNCH}`,
+    ],
     creator: [
       flags.hostedMcp
         ? 'MCP access for external AI tools'
@@ -136,6 +145,45 @@ export function buildTierCapabilities(
 }
 
 const TIER_CAPABILITIES = buildTierCapabilities(currentPublicCapabilities());
+
+/** The flag-driven sentences of the FAQ's plan, generation and MCP answers. */
+export interface FaqCapabilitySentences {
+  /** What the entry paid plan adds, after "which adds ...". */
+  entryPlanAi: string;
+  /** What the top plan adds, after "Plans go up to $79/month (Studio), ". */
+  topPlanAi: string;
+  /** Appended to the AI game creation answer; empty when there is nothing to qualify. */
+  generation: string;
+  /** Appended to the MCP answer; empty when hosted MCP is live. */
+  mcpAvailability: string;
+}
+
+/**
+ * The FAQ sentences that make a capability claim, written against the same
+ * flags as the tier bullets. They live here rather than as ternaries in
+ * `app/faq/page.tsx` so the test can render every flag state and scan the
+ * text a visitor actually reads: a scan of the page SOURCE sees both branches
+ * of a ternary at once and cannot tell which one ships.
+ */
+export function buildFaqCapabilitySentences(flags: PublicCapabilityFlags): FaqCapabilitySentences {
+  const entryPlanAi = flags.byokGeneration
+    ? 'a monthly AI token allowance and bring-your-own-key support'
+    : flags.platformGenerationKeys
+      ? 'a monthly AI token allowance (bringing your own provider key is coming after launch)'
+      : 'a monthly AI token allowance for AI chat (AI asset generation is coming after launch)';
+  const topPlanAi = flags.platformGenerationKeys
+    ? 'which reaches the platform AI keys without needing a token balance'
+    : `which lifts the cloud project limit to ${formatLimit(PROJECT_LIMITS.pro).toLowerCase()} and adds the Pro AI panels (platform-managed AI keys are coming after launch)`;
+  const generation = flags.platformGenerationKeys
+    ? ''
+    : flags.byokGeneration
+      ? ' Generating 3D models, textures and audio currently needs your own provider API key (Meshy or ElevenLabs).'
+      : ' AI asset generation (3D models, textures and audio) is coming after launch.';
+  const mcpAvailability = flags.hostedMcp
+    ? ''
+    : ' External MCP clients can drive a local build today; attaching one to the hosted editor is coming after launch.';
+  return { entryPlanAi, topPlanAi, generation, mcpAvailability };
+}
 
 /** A plan exactly as it should be presented to a user. */
 export interface TierPlan {

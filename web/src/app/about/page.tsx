@@ -92,8 +92,8 @@ export default async function AboutPage() {
           </p>
           <p>
             <strong className="text-white">AI:</strong> Multi-agent orchestration with{' '}
-            {MCP_COMMAND_COUNT} MCP commands across {MCP_CATEGORY_COUNT} categories. With your own Meshy or ElevenLabs API key, AI can generate 3D models, textures, sound effects,
-            music, and voice, then use MCP commands to place and configure them in the scene.
+            {MCP_COMMAND_COUNT} MCP commands across {MCP_CATEGORY_COUNT} categories. AI asset generation (3D models, textures, sound effects, music and voice, placed and
+            configured in the scene through MCP commands) is coming after launch.
           </p>
         </div>
       </section>
