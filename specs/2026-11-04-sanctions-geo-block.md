@@ -51,6 +51,8 @@ Country is ISO 3166-1 alpha-2. Region is the region part of ISO 3166-2, which is
 | UA | 40 | Sevastopol (Crimea region of Ukraine) | ofac-comprehensive | OFAC FAQ 10; Ukraine-/Russia-related Sanctions (EO 13685) |
 | UA | 14 | Donetsk region of Ukraine | ofac-comprehensive | OFAC FAQ 10; Ukraine-/Russia-related Sanctions (EO 14065) |
 | UA | 09 | Luhansk region of Ukraine | ofac-comprehensive | OFAC FAQ 10; Ukraine-/Russia-related Sanctions (EO 14065) |
+| UA | 23 | Zaporizhzhia region of Ukraine | owner-named | EU Council Regulation (EU) 2022/263, extended by (EU) 2022/1903 |
+| UA | 65 | Kherson region of Ukraine | owner-named | EU Council Regulation (EU) 2022/263, extended by (EU) 2022/1903 |
 | RU | - | Russia | owner-named | Russian Harmful Foreign Activities Sanctions; Ukraine-/Russia-related Sanctions |
 | BY | - | Belarus | owner-named | Belarus Sanctions |
 | CN | - | China | owner-named | Chinese Military Companies Sanctions |
@@ -82,9 +84,9 @@ Counter Narcotics Trafficking; Counter Terrorism; Countering America's Adversari
 
 The programs page lists *Balkans-Related Sanctions* (EO 14140, EO 14033, EO 13219) but names no countries, and the page does not define "Western Balkans". It is **not on the list** until Tristan says which countries it means. An attempt to fetch the official definition from the eCFR (31 CFR part 588) and the Federal Register text of EO 14033 was not permitted in this session, so this spec does not assert a country list for it.
 
-### 2.5 Open: other occupied regions of Ukraine
+### 2.5 Decided: Zaporizhzhia and Kherson (Tristan, 2026-11-05)
 
-FAQ 10 names Crimea, Donetsk and Luhansk only. Zaporizhzhia (UA-23) and Kherson (UA-65) are not on the list. Tristan's call.
+FAQ 10 names Crimea, Donetsk and Luhansk only, so OFAC does not require blocking Zaporizhzhia (UA-23) or Kherson (UA-65). The EU restricts the non-government-controlled areas of both (Council Regulation (EU) 2022/263, extended to them by Regulation (EU) 2022/1903 from 2022-10-07; https://finance.ec.europa.eu/publications/donetsk-kherson-luhansk-and-zaporizhzhia-oblasts_en). Tristan may sell in the EU, so both are on the list as `owner-named`. IP geolocation reports the oblast, not the front line, so the whole oblast is blocked, including the Ukrainian-held cities of Zaporizhzhia and Kherson.
 
 ## 3. What a blocked visitor sees
 
@@ -117,12 +119,11 @@ No country rule applies to these paths, matched as whole decoded path segments (
 
 Vercel's request headers (https://vercel.com/docs/headers/request-headers): `x-vercel-ip-country` is the ISO 3166-1 alpha-2 code for the requester's public IP; `x-vercel-ip-country-region` is up to three characters, the region part of ISO 3166-2 for the first-level region. Values are trimmed and upper-cased; a country that is not two letters is treated as missing.
 
-**Missing header — Tristan's call.** The header is absent outside Vercel (local dev, CI, `next start`) and may be absent for an IP Vercel cannot geolocate.
+**Missing header — decided: fail closed (Tristan, 2026-11-05).** `MISSING_COUNTRY_POLICY = 'block'`: on a Vercel deployment, a request with no usable country header gets the 451, so a visitor Vercel cannot place is refused (bypass paths excepted).
 
-- **Fail open (current default, `MISSING_COUNTRY_POLICY = 'allow'`):** local dev and CI keep working with no setup; a visitor Vercel cannot place is served. Recommended, because the header is present on Vercel for geolocated traffic and the other choice blocks real visitors on a lookup miss.
-- **Fail closed (`'block'`):** a visitor Vercel cannot place gets the 451. Stricter, but would also 451 every local and CI request unless they inject a country header.
+It applies only where Vercel geolocates requests: `geolocationExpected()` is `process.env.VERCEL === '1'`, which Vercel sets on every deployment, preview included. Off Vercel (`next dev`, CI's `next start`, Playwright, Lighthouse) no request carries the header at all, so the check is skipped (`reason: 'not-geolocated'`) rather than refusing every request. A self-hosted production deployment would therefore fail open; production runs only on Vercel.
 
-Changing it is a one-word edit to `MISSING_COUNTRY_POLICY`; the tests cover both values.
+**Not verified:** that `VERCEL` reads as `1` inside the proxy's Edge bundle on a deployment. `app/layout.tsx` relies on the same variable. If it read unset, a missing header would be served, as before this decision, and nothing on the site would show it.
 
 **Not verified:** whether Vercel overwrites a client-supplied `x-vercel-ip-country` header. Vercel's page documents that it overwrites `X-Forwarded-For` to prevent spoofing but says nothing either way about the geo headers. If it does not, a visitor could send `x-vercel-ip-country: US` to get past the block. A VPN gets past it regardless. Check by sending the header to a deployed route that echoes it, once one exists.
 

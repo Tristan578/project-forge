@@ -8,7 +8,9 @@
  * broader than what US sanctions law requires of a US person, and it is not a
  * substitute for screening against the SDN list or for counsel's review.
  *
- * Last reviewed: 2026-11-04 (see {@link SANCTIONS_POLICY_LAST_REVIEWED}).
+ * Last reviewed: 2026-11-05 (see {@link SANCTIONS_POLICY_LAST_REVIEWED}). On
+ * 2026-11-05 the owner added Ukraine's Zaporizhzhia and Kherson regions (an EU
+ * measure, not an OFAC one) and chose to refuse a visitor Vercel cannot place.
  * Sources, fetched 2026-11-04:
  *  - OFAC, Sanctions Programs and Country Information:
  *    https://ofac.treasury.gov/sanctions-programs-and-country-information
@@ -27,7 +29,7 @@
  */
 import { NextResponse } from 'next/server';
 
-export const SANCTIONS_POLICY_LAST_REVIEWED = '2026-11-04';
+export const SANCTIONS_POLICY_LAST_REVIEWED = '2026-11-05';
 
 /** Why a jurisdiction is on the list. */
 export type BlockBasis =
@@ -61,6 +63,13 @@ export const BLOCKED_JURISDICTIONS: readonly BlockedJurisdiction[] = [
   { country: 'UA', region: '40', name: 'Sevastopol (Crimea region of Ukraine)', basis: 'ofac-comprehensive', program: 'OFAC FAQ 10; Ukraine-/Russia-related Sanctions (EO 13685)' },
   { country: 'UA', region: '14', name: 'Donetsk region of Ukraine', basis: 'ofac-comprehensive', program: 'OFAC FAQ 10; Ukraine-/Russia-related Sanctions (EO 14065)' },
   { country: 'UA', region: '09', name: 'Luhansk region of Ukraine', basis: 'ofac-comprehensive', program: 'OFAC FAQ 10; Ukraine-/Russia-related Sanctions (EO 14065)' },
+  // Not on any OFAC list. The EU restricts the non-government-controlled areas
+  // of these two regions (Council Regulation (EU) 2022/263, extended to them by
+  // Regulation (EU) 2022/1903 from 2022-10-07), and the owner may sell in the EU
+  // (decision 2026-11-05). IP geolocation reports the oblast, not the front
+  // line, so the whole oblast is blocked, Ukrainian-held cities included.
+  { country: 'UA', region: '23', name: 'Zaporizhzhia region of Ukraine', basis: 'owner-named', program: 'EU Council Regulation (EU) 2022/263, extended by (EU) 2022/1903' },
+  { country: 'UA', region: '65', name: 'Kherson region of Ukraine', basis: 'owner-named', program: 'EU Council Regulation (EU) 2022/263, extended by (EU) 2022/1903' },
 
   // (b) Named by the owner. Each also has a country-based OFAC program.
   { country: 'RU', name: 'Russia', basis: 'owner-named', program: 'Russian Harmful Foreign Activities Sanctions; Ukraine-/Russia-related Sanctions' },
@@ -94,12 +103,26 @@ export const BLOCKED_JURISDICTIONS: readonly BlockedJurisdiction[] = [
 ];
 
 /**
- * What to do when Vercel sends no usable country header. `'allow'` (fail open)
- * is the default pending the owner's decision; see the spec. The header is
- * absent outside Vercel (local dev, CI, `next start`) and may be absent for an
- * IP Vercel cannot geolocate.
+ * What to do when Vercel sends no usable country header: `'block'` (fail
+ * closed), the owner's decision of 2026-11-05. A visitor Vercel cannot place
+ * gets the 451.
+ *
+ * It applies only where Vercel geolocates requests at all, i.e. on a Vercel
+ * deployment ({@link geolocationExpected}). Off Vercel (`next dev`, CI's
+ * `next start`, Playwright, Lighthouse) no request ever carries the header, so
+ * failing closed there would refuse every request and decide nothing.
  */
-export const MISSING_COUNTRY_POLICY: 'allow' | 'block' = 'allow';
+export const MISSING_COUNTRY_POLICY: 'allow' | 'block' = 'block';
+
+/**
+ * True on a Vercel deployment, the only place `x-vercel-ip-country` exists.
+ * Vercel sets `VERCEL=1` at build and at runtime (the same signal
+ * `app/layout.tsx` uses to mount Analytics). Written as a literal member
+ * expression so Next.js can substitute it in the Edge bundle.
+ */
+export function geolocationExpected(): boolean {
+  return process.env.VERCEL === '1';
+}
 
 /**
  * Paths no country rule applies to: machine callers that carry their own
@@ -120,7 +143,7 @@ export const COUNTRY_HEADER = 'x-vercel-ip-country';
 export const REGION_HEADER = 'x-vercel-ip-country-region';
 
 export type GeoBlockDecision =
-  | { blocked: false; reason: 'allowed' | 'bypass' | 'missing-country' }
+  | { blocked: false; reason: 'allowed' | 'bypass' | 'missing-country' | 'not-geolocated' }
   | { blocked: true; reason: 'jurisdiction' | 'missing-country'; jurisdiction?: BlockedJurisdiction };
 
 function segmentsOf(pathname: string): string[] | null {
@@ -176,11 +199,14 @@ export function geoBlockDecision(
   options: {
     list?: readonly BlockedJurisdiction[];
     missingCountryPolicy?: 'allow' | 'block';
+    /** Whether a country header is expected here; defaults to {@link geolocationExpected}. */
+    geolocated?: boolean;
   } = {},
 ): GeoBlockDecision {
   if (isGeoBlockBypassPath(pathname)) return { blocked: false, reason: 'bypass' };
   const country = normalizeCode(headers.get(COUNTRY_HEADER), /^[A-Z]{2}$/);
   if (country === null) {
+    if (!(options.geolocated ?? geolocationExpected())) return { blocked: false, reason: 'not-geolocated' };
     return (options.missingCountryPolicy ?? MISSING_COUNTRY_POLICY) === 'block'
       ? { blocked: true, reason: 'missing-country' }
       : { blocked: false, reason: 'missing-country' };

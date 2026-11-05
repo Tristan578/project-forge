@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   BLOCKED_JURISDICTIONS,
   COUNTRY_HEADER,
@@ -12,6 +12,7 @@ import {
   SANCTIONS_BLOCK_CODE,
   SANCTIONS_POLICY_LAST_REVIEWED,
   geoBlockDecision,
+  geolocationExpected,
   isGeoBlockBypassPath,
   sanctionsBlockedResponse,
   sanctionsGeoBlock,
@@ -90,8 +91,16 @@ describe('geoBlockDecision', () => {
   it('blocks only the listed regions of Ukraine', () => {
     expect(geoBlockDecision('/', geo('UA')).blocked).toBe(false);
     expect(geoBlockDecision('/', geo('UA', '30')).blocked).toBe(false); // Kyiv
-    expect(geoBlockDecision('/', geo('UA', '23')).blocked).toBe(false); // Zaporizhzhia: open decision
-    for (const r of ['43', '40', '14', '09']) expect(geoBlockDecision('/', geo('UA', r)).blocked).toBe(true);
+    expect(geoBlockDecision('/', geo('UA', '46')).blocked).toBe(false); // Lviv
+    for (const r of ['43', '40', '14', '09', '23', '65']) expect(geoBlockDecision('/', geo('UA', r)).blocked).toBe(true);
+  });
+
+  it('lists Zaporizhzhia and Kherson as the owner-named EU measure, not as an OFAC program', () => {
+    for (const region of ['23', '65']) {
+      const j = BLOCKED_JURISDICTIONS.find((e) => e.country === 'UA' && e.region === region);
+      expect(j?.basis, `UA-${region}`).toBe('owner-named');
+      expect(j?.program, `UA-${region}`).toMatch(/^EU Council Regulation \(EU\) 2022\/263, extended by \(EU\) 2022\/1903$/);
+    }
   });
 
   it('normalises case and whitespace in the headers', () => {
@@ -99,22 +108,55 @@ describe('geoBlockDecision', () => {
     expect(geoBlockDecision('/', geo('ua', ' 43')).blocked).toBe(true);
   });
 
-  it('treats an absent or malformed country as missing, and follows the missing-country policy', () => {
+  it('treats an absent or malformed country as missing, and follows the missing-country policy where requests are geolocated', () => {
     for (const h of [geo(), geo(''), geo('X'), geo('IRN'), geo('1R')]) {
-      expect(geoBlockDecision('/', h, { missingCountryPolicy: 'allow' })).toEqual({ blocked: false, reason: 'missing-country' });
-      expect(geoBlockDecision('/', h, { missingCountryPolicy: 'block' })).toEqual({ blocked: true, reason: 'missing-country' });
+      expect(geoBlockDecision('/', h, { missingCountryPolicy: 'allow', geolocated: true })).toEqual({ blocked: false, reason: 'missing-country' });
+      expect(geoBlockDecision('/', h, { missingCountryPolicy: 'block', geolocated: true })).toEqual({ blocked: true, reason: 'missing-country' });
+      // off Vercel no request carries the header, so neither policy applies
+      expect(geoBlockDecision('/', h, { missingCountryPolicy: 'block', geolocated: false })).toEqual({ blocked: false, reason: 'not-geolocated' });
+    }
+    // a listed country is blocked whether or not the deployment geolocates
+    expect(geoBlockDecision('/', geo('IR'), { geolocated: false }).blocked).toBe(true);
+  });
+
+  it('fails closed on a missing country by default (owner decision, 2026-11-05), on a Vercel deployment', () => {
+    expect(MISSING_COUNTRY_POLICY).toBe('block');
+    vi.stubEnv('VERCEL', '1');
+    try {
+      expect(geolocationExpected()).toBe(true);
+      expect(geoBlockDecision('/', geo())).toEqual({ blocked: true, reason: 'missing-country' });
+      expect(geoBlockDecision('/api/billing/checkout', geo()).blocked).toBe(true);
+      expect(geoBlockDecision('/pricing', geo('US')).blocked).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 
-  it('fails open on a missing country by default (pending the owner decision in the spec)', () => {
-    expect(MISSING_COUNTRY_POLICY).toBe('allow');
-    expect(geoBlockDecision('/', geo()).blocked).toBe(false);
+  it('does not apply the missing-country policy off Vercel (next dev, CI, Playwright)', () => {
+    for (const v of [undefined, '', '0', 'true']) {
+      if (v === undefined) vi.stubEnv('VERCEL', undefined as unknown as string);
+      else vi.stubEnv('VERCEL', v);
+      try {
+        expect(geolocationExpected(), `VERCEL=${String(v)}`).toBe(false);
+        expect(geoBlockDecision('/', geo()), `VERCEL=${String(v)}`).toEqual({ blocked: false, reason: 'not-geolocated' });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
+  });
+
+  it('reads VERCEL as a literal member expression on an executable line', () => {
+    // Next.js substitutes process.env.X only when spelled out in full, and no runtime test here can see the
+    // Edge bundle, so the source shape is pinned. Counted on non-comment lines, so a commented-out copy fails.
+    const src = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../sanctionsGeoBlock.ts'), 'utf8');
+    const live = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l) && /process\.env\.VERCEL\b/.test(l));
+    expect(live).toEqual(["  return process.env.VERCEL === '1';"]);
   });
 
   it('never blocks a bypass path, even from a listed country or under fail-closed', () => {
     for (const p of GEO_BLOCK_BYPASS_PATHS) {
       expect(geoBlockDecision(p, geo('IR')), p).toEqual({ blocked: false, reason: 'bypass' });
-      expect(geoBlockDecision(`${p}/sub`, geo(), { missingCountryPolicy: 'block' }).blocked, p).toBe(false);
+      expect(geoBlockDecision(`${p}/sub`, geo(), { missingCountryPolicy: 'block', geolocated: true }).blocked, p).toBe(false);
     }
   });
 });
