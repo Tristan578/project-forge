@@ -9,8 +9,30 @@ import { withEgressGuard } from '@/lib/security/egressGuard';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
 import { readPublishedGameBundle, isPublishedSceneData } from '@/lib/storage/publishedGameStorage';
+import { readProjectTypeFromSceneData, SCENE_PROJECT_TYPE_KEY } from '@/lib/scenes/sceneProjectType';
 
 export const dynamic = 'force-dynamic';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * An R2 bundle is immutable, so one written before #10358 can never gain
+ * `metadata.projectType`; the identical Postgres snapshot can, through
+ * `web/scripts/backfill-publication-project-type.ts` (#10368). When the bundle
+ * states no type and the Postgres snapshot of the same publication states a
+ * valid one, serve the bundle with that one key added. A bundle that states
+ * any value (valid or not) is served exactly as stored.
+ */
+function withBackfilledProjectType(bundleScene: unknown, postgresScene: unknown): unknown {
+  if (!isRecord(bundleScene) || !isRecord(bundleScene.metadata)) return bundleScene;
+  const own = bundleScene.metadata[SCENE_PROJECT_TYPE_KEY];
+  if (own !== undefined && own !== null) return bundleScene;
+  const stored = readProjectTypeFromSceneData(postgresScene);
+  if (stored === null) return bundleScene;
+  return { ...bundleScene, metadata: { ...bundleScene.metadata, [SCENE_PROJECT_TYPE_KEY]: stored } };
+}
 
 /**
  * GET /api/play/[userId]/[slug]
@@ -70,7 +92,7 @@ async function GET_impl(
     if (game.cdnBundleKey && isPublishToR2Enabled()) {
       try {
         const bundle = await readPublishedGameBundle(game.cdnBundleKey, clerkId, slug, game.version);
-        sceneData = bundle.sceneData;
+        sceneData = withBackfilledProjectType(bundle.sceneData, game.publishedSceneData);
         servedFromR2 = true;
       } catch (err) {
         captureException(err, {

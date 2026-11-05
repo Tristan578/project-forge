@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   guessLegacyPublicationProjectType,
   NEUTRAL_ENTITY_TYPES,
+  sceneHasThreeDOnlyContent,
   THREE_D_ONLY_ENTITY_TYPES,
   THREE_D_ONLY_FIELDS,
   TWO_D_FIELDS,
@@ -91,6 +92,30 @@ describe('guessLegacyPublicationProjectType (#10368)', () => {
     const entities: unknown[] = [sprite('a')];
     entities[2] = sprite('c');
     expect(guessLegacyPublicationProjectType(legacyScene(entities))).toBeNull();
+  });
+});
+
+describe('sceneHasThreeDOnlyContent (the backfill contradiction check, #10368)', () => {
+  it('is true for a 3D-only entity type or field anywhere in the list, whatever the key says', () => {
+    expect(sceneHasThreeDOnlyContent(legacyScene([sprite('a'), { entityId: 'l', entityType: 'terrain' }]))).toBe(true);
+    expect(sceneHasThreeDOnlyContent(legacyScene([{ ...sprite('a'), assetRef: { assetId: 'x' } }]))).toBe(true);
+    const stated = { ...legacyScene([{ entityId: 'm', entityType: 'gltf_model' }]), metadata: { projectType: '2d' } };
+    expect(sceneHasThreeDOnlyContent(stated)).toBe(true);
+  });
+
+  it('is false for 2D content, plain meshes, lights and malformed scenes', () => {
+    expect(sceneHasThreeDOnlyContent(legacyScene([sprite('a'), physics2dCube('b'), meshCube, light]))).toBe(false);
+    for (const value of [null, 'scene', {}, legacyScene([]), legacyScene([null])]) {
+      expect(sceneHasThreeDOnlyContent(value)).toBe(false);
+    }
+  });
+
+  // The hole is the input under test: it is not an entity, so it must neither
+  // throw nor end the walk before the entity after it.
+  it('sees a 3D-only entity that sits after a hole', () => {
+    const entities: unknown[] = [sprite('a')];
+    entities[2] = { entityId: 't', entityType: 'terrain' };
+    expect(sceneHasThreeDOnlyContent(legacyScene(entities))).toBe(true);
   });
 });
 

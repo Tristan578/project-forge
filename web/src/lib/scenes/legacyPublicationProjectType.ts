@@ -60,13 +60,37 @@ function hasValue(entity: Record<string, unknown>, field: string): boolean {
   return value !== undefined && value !== null;
 }
 
+function hasThreeDOnlyContent(entity: Record<string, unknown>): boolean {
+  const entityType = typeof entity.entityType === 'string' ? entity.entityType : null;
+  if (entityType !== null && THREE_D_ONLY_ENTITY_TYPES.has(entityType)) return true;
+  return THREE_D_ONLY_FIELDS.some((field) => hasValue(entity, field));
+}
+
+/**
+ * Whether any entity in a scene carries content that only a 3D scene can hold
+ * (the same vocabulary the guess refuses on). Used by the stored-snapshot
+ * backfill (#10368) to refuse a stated `'2d'` that the scene contradicts.
+ * @param sceneData A parsed, untrusted scene object.
+ * @returns True only when the entity list exists and some entity is 3D-only.
+ */
+export function sceneHasThreeDOnlyContent(sceneData: unknown): boolean {
+  if (!isRecord(sceneData) || !Array.isArray(sceneData.entities)) return false;
+  const entities: unknown[] = sceneData.entities;
+  // Indexed, not `.some`: a callback form skips an array hole, and a hole must
+  // not hide the entity after it.
+  for (let i = 0; i < entities.length; i += 1) {
+    const entity = entities[i];
+    if (isRecord(entity) && hasThreeDOnlyContent(entity)) return true;
+  }
+  return false;
+}
+
 type EntityDimension = '2d' | 'neutral' | 'not-2d';
 
 function classifyEntity(entity: unknown): EntityDimension {
   if (!isRecord(entity)) return 'not-2d';
   const entityType = typeof entity.entityType === 'string' ? entity.entityType : null;
-  if (entityType !== null && THREE_D_ONLY_ENTITY_TYPES.has(entityType)) return 'not-2d';
-  if (THREE_D_ONLY_FIELDS.some((field) => hasValue(entity, field))) return 'not-2d';
+  if (hasThreeDOnlyContent(entity)) return 'not-2d';
   if (
     entityType === 'sprite' ||
     TWO_D_FIELDS.some((field) => hasValue(entity, field)) ||
