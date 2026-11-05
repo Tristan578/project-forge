@@ -75,7 +75,21 @@ Earlier drafts of this table listed $29/$79/$199, a watermark on free exports, "
 | Churn rate | N/A | 8% | 5% |
 | NPS | N/A | 40+ | 50+ |
 
-> The MRR row above implies about $50 average revenue per paying customer (10 customers = $500). Real prices are $9, $29 and $79, so the blended figure depends on the plan mix. These targets have not been re-derived from the real prices; treat them as unreconciled.
+> The MRR row above implies about $50 average revenue per paying customer (10 customers = $500). Real prices are $9, $29 and $79. Reaching $50 needs nobody on Starter and a 58% Creator / 42% Studio mix. These targets are superseded by the re-derivation below.
+
+#### Re-derived at the real prices (2026-11-05)
+
+Gross MRR from a 12-month margin model (attached to PR #10459). Each scenario holds conversion and plan mix constant; churn is not modeled.
+
+| Scenario | Levers | Month 1 | Month 6 | Month 12 |
+|----------|--------|---------|---------|----------|
+| Conservative | 100 MAU, +15%/month, 2% paid, 70/20/10 Starter/Creator/Studio | $40 | $80 | $186 |
+| Base | 300 MAU, +25%/month, 3% paid, 50/30/20 | $261 | $797 | $3,038 |
+| This doc's levers | 500 MAU, +40%/month, 5% paid, 0/58/42 | $1,250 | $6,723 | $50,620 |
+
+The month-12 figure in the doc's own levers is below the $80,000 target because the model holds conversion at 5%; the target assumes 8%. The Year 1 subscription target above ($50K ARR, about $4,200 MRR) and the month-12 MRR target ($80,000, a $960K run rate) contradict each other; the Base scenario is closer to the first.
+
+**Profit depends on chat metering, not on growth.** In today's code, chat on the Vercel AI Gateway path deducts no tokens (#10462), so every free and paid user chats at the platform's expense. Over 12 months the model then loses money in every scenario: Base loses about $164,000 at high provider cost and about $4,700 at low cost. With chat charged in tokens at the current flat price, Base turns positive (about +$1,500 at high cost, +$11,900 at low), and Conservative stays near break-even because fixed infrastructure ($20–250 a month) exceeds its revenue. Even metered, one heavy Studio account can cost more than it pays, because chat's 5/15-token price does not scale with what a request costs (#10462). **Sign-up should stay closed until #10462 is fixed.**
 
 ---
 
