@@ -15,10 +15,11 @@
 //! * [`manage_character_controller_lifecycle`] is the thin ECS wrapper that
 //!   attaches/detaches the Rapier components on the Edit↔Play transition.
 //!
-//! The controller only exists in 3D projects. A 2D project keeps the legacy
-//! direct-translation path in `game_components::system_character_controller`
-//! (its movement is authored in the XY plane against `physics_2d_sim`, which is
-//! a completely separate simulation).
+//! The kinematic controller only exists in 3D projects. A 2D character on a
+//! DYNAMIC `bevy_rapier2d` body is instead moved through that body's velocity
+//! by [`step_character_2d`] and `game_components::system_character_controller`
+//! (#10378): `physics_2d_sim` is a separate simulation that owns its gravity and
+//! collisions. Any other 2D character keeps the legacy direct-translation path.
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
@@ -196,6 +197,17 @@ pub struct CharacterMotionState {
     /// twice — with `canDoubleJump` a single press would otherwise be re-tried
     /// on the next frame and consume the air jump too.
     pub jump_buffer_timer: f32,
+    /// 2D dynamic-body path only ([`step_character_2d`]): a jump launched by
+    /// this controller is still rising.
+    ///
+    /// The 2D path cannot use `vertical_velocity <= 0.0` the way
+    /// [`step_character`] does to tell a landing from the frame after a jump,
+    /// because a dynamic body walking up a slope also rises while standing on
+    /// it. So the 2D path remembers its own launch instead: while this is set,
+    /// a contact below the character is the floor it just left and does not
+    /// refill the jump budget. Cleared once the body stops rising. Never set on
+    /// the kinematic path.
+    pub rising_from_jump: bool,
 }
 
 impl Default for CharacterMotionState {
@@ -214,6 +226,7 @@ impl Default for CharacterMotionState {
             // ground jump.
             coyote_timer: 0.0,
             jump_buffer_timer: 0.0,
+            rising_from_jump: false,
         }
     }
 }
@@ -366,6 +379,129 @@ pub fn jump_speed_for_height(height: f32, gravity_scale: f32) -> f32 {
     let scale = if gravity_scale.is_finite() && gravity_scale > 0.0 { gravity_scale } else { 1.0 };
     let h = if height.is_finite() { height.max(0.0) } else { 0.0 };
     (2.0 * GRAVITY_ACCEL.abs() * scale * h).sqrt()
+}
+
+// ---------------------------------------------------------------------------
+// 2D dynamic-body path (#10378)
+// ---------------------------------------------------------------------------
+//
+// A 2D character is a `bevy_rapier2d` DYNAMIC body (`physics_2d_sim.rs`): the
+// 2D simulation owns gravity, collision response and continuous detection, so
+// the controller must not integrate gravity itself the way [`step_character`]
+// does for the kinematic 3D body. It only decides two things each frame — the
+// horizontal speed, and whether a jump launches — and writes them into the
+// body's velocity. The jump budget, coyote time and input buffer are the SAME
+// rules as the kinematic path, reusing [`CharacterMotionState`] and its
+// constants, so a creator tuning `canDoubleJump` gets one behaviour in both
+// project types.
+
+/// Upward speed, in units/s, that carries a body to `height` units under a
+/// downward acceleration of `gravity` units/s² (`v = sqrt(2·g·h)`).
+///
+/// The 2D counterpart of [`jump_speed_for_height`]. There the gravity is the
+/// controller's own (`GRAVITY_ACCEL × gravityScale`); on the 2D path it is the
+/// gravity the 2D simulation actually applies to the body — the world's 2D
+/// gravity times the body's own `GravityScale` — because that is what pulls the
+/// character back down, so it is the only number that makes the authored
+/// `jumpHeight` the apex. `gravity` is a magnitude: a non-finite or
+/// non-positive value has no finite apex and yields no jump, as does a
+/// non-finite or negative height.
+pub fn jump_speed_for_apex_2d(height: f32, gravity: f32) -> f32 {
+    if !gravity.is_finite() || gravity <= 0.0 {
+        return 0.0;
+    }
+    let h = if height.is_finite() { height.max(0.0) } else { 0.0 };
+    (2.0 * gravity * h).sqrt()
+}
+
+/// Whether a contact normal is a floor the character is standing on.
+///
+/// `normal_toward_character` points out of the OTHER collider toward the
+/// character; `up` is the unit vector opposite the body's gravity. A surface
+/// counts as ground at the same angle the kinematic path walks up
+/// ([`GROUND_NORMAL_MIN_Y`], 45°), so a wall or a ceiling never grants a jump.
+pub fn is_ground_normal_2d(normal_toward_character: Vec2, up: Vec2) -> bool {
+    let n = normal_toward_character.normalize_or_zero();
+    n.dot(up) >= GROUND_NORMAL_MIN_Y
+}
+
+/// Everything one frame of the 2D jump decision depends on.
+#[derive(Debug, Clone, Copy)]
+pub struct CharacterStep2dInput {
+    /// Frame delta in seconds.
+    pub dt: f32,
+    /// Whether the simulation reported a ground contact (see
+    /// [`is_ground_normal_2d`]). Read from the previous physics step, so it
+    /// carries the same one-frame latency as the kinematic path's flag.
+    pub contact_grounded: bool,
+    /// The body's current velocity along `up`, in units/s.
+    pub vertical_speed: f32,
+    /// True only on the frame the jump action went down.
+    pub jump_just_pressed: bool,
+    /// Launch speed along `up` for a jump, from [`jump_speed_for_apex_2d`].
+    pub jump_speed: f32,
+    /// Whether one extra mid-air jump is allowed.
+    pub can_double_jump: bool,
+}
+
+/// Advances one frame of the 2D jump state and returns the launch speed along
+/// `up` when a jump is accepted this frame, `None` otherwise.
+///
+/// Pure, like [`step_character`], so the grounded gating and the jump budget
+/// are testable without stepping a simulation. It does NOT touch vertical
+/// velocity on a frame with no jump: the 2D simulation's gravity owns it.
+pub fn step_character_2d(state: &mut CharacterMotionState, input: CharacterStep2dInput) -> Option<f32> {
+    let dt = if input.dt.is_finite() && input.dt > 0.0 { input.dt } else { 0.0 };
+    let vertical_speed = if input.vertical_speed.is_finite() { input.vertical_speed } else { 0.0 };
+
+    // A launch stays "rising" until the body stops moving up. While it is, a
+    // contact below is the floor the jump just left — the contact report is a
+    // step old — and must not refill the budget, or every jump would be
+    // followed by a free second ground jump.
+    if state.rising_from_jump && vertical_speed <= 0.0 {
+        state.rising_from_jump = false;
+    }
+    let grounded = input.contact_grounded && !state.rising_from_jump;
+
+    state.grounded = grounded;
+    state.vertical_velocity = vertical_speed;
+
+    if grounded {
+        state.jumps_used = 0;
+        state.coyote_timer = COYOTE_TIME_SECONDS;
+    } else {
+        state.coyote_timer = (state.coyote_timer - dt).max(0.0);
+        if state.jumps_used == 0 && state.coyote_timer <= 0.0 {
+            state.jumps_used = 1;
+        }
+    }
+
+    if input.jump_just_pressed {
+        state.jump_buffer_timer = JUMP_BUFFER_SECONDS;
+    } else {
+        state.jump_buffer_timer = (state.jump_buffer_timer - dt).max(0.0);
+    }
+
+    if state.jump_buffer_timer <= 0.0 {
+        return None;
+    }
+    let max_jumps = if input.can_double_jump { 2 } else { 1 };
+    if state.jumps_used >= max_jumps {
+        return None;
+    }
+    let launch = if input.jump_speed.is_finite() { input.jump_speed.max(0.0) } else { 0.0 };
+    if launch <= 0.0 {
+        // No usable launch (zero gravity, zero height): spend nothing, so the
+        // press is not silently consumed against a jump that cannot happen.
+        return None;
+    }
+    state.jumps_used += 1;
+    state.vertical_velocity = launch;
+    state.grounded = false;
+    state.rising_from_jump = true;
+    state.jump_buffer_timer = 0.0;
+    state.coyote_timer = 0.0;
+    Some(launch)
 }
 
 /// True when the entity carries a character-controller game component.
@@ -1908,5 +2044,214 @@ mod tests {
             Some(vec!["player".to_string()]),
             "a restart must re-report the same skipped character"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // 2D dynamic-body jump (#10378). The stepped-simulation tests that prove
+    // the apex and the grounded gate end to end live in `physics_2d_sim.rs`
+    // (`dynamic_character_jump`); these pin the pure rules one at a time.
+    // -----------------------------------------------------------------------
+
+    fn input_2d() -> CharacterStep2dInput {
+        CharacterStep2dInput {
+            dt: 1.0 / 60.0,
+            contact_grounded: false,
+            vertical_speed: 0.0,
+            jump_just_pressed: false,
+            jump_speed: 6.0,
+            can_double_jump: false,
+        }
+    }
+
+    /// Semi-implicit Euler from the launch speed peaks at the authored height,
+    /// for several gravities, and a zero/negative/non-finite gravity yields no
+    /// launch rather than an infinite or NaN one.
+    #[test]
+    fn jump_speed_for_apex_2d_reaches_the_authored_height() {
+        for (height, gravity) in [(2.0_f32, 9.81_f32), (6.0, 9.81), (1.0, 19.62), (3.0, 4.9)] {
+            let dt = 1.0 / 240.0;
+            let mut v = jump_speed_for_apex_2d(height, gravity);
+            let mut y = 0.0_f32;
+            while v > 0.0 {
+                v -= gravity * dt;
+                y += v.max(0.0) * dt;
+            }
+            let tolerance = jump_speed_for_apex_2d(height, gravity) * dt + 1e-3;
+            assert!((y - height).abs() <= tolerance, "h={height} g={gravity}: apex {y}");
+        }
+        assert_eq!(jump_speed_for_apex_2d(2.0, 0.0), 0.0);
+        assert_eq!(jump_speed_for_apex_2d(2.0, -9.81), 0.0);
+        assert_eq!(jump_speed_for_apex_2d(2.0, f32::NAN), 0.0);
+        assert_eq!(jump_speed_for_apex_2d(-1.0, 9.81), 0.0);
+        assert_eq!(jump_speed_for_apex_2d(f32::INFINITY, 9.81), 0.0);
+    }
+
+    #[test]
+    fn only_an_upward_facing_contact_is_ground() {
+        assert!(is_ground_normal_2d(Vec2::Y, Vec2::Y), "a floor");
+        assert!(is_ground_normal_2d(Vec2::new(0.6, 0.8), Vec2::Y), "a walkable slope");
+        assert!(!is_ground_normal_2d(Vec2::X, Vec2::Y), "a wall");
+        assert!(!is_ground_normal_2d(Vec2::NEG_Y, Vec2::Y), "a ceiling");
+        assert!(!is_ground_normal_2d(Vec2::new(0.8, 0.6), Vec2::Y), "too steep (>45°)");
+        assert!(is_ground_normal_2d(Vec2::NEG_Y, Vec2::NEG_Y), "inverted gravity: the ceiling is the floor");
+        assert!(!is_ground_normal_2d(Vec2::ZERO, Vec2::Y), "a degenerate normal is not ground");
+    }
+
+    #[test]
+    fn a_grounded_press_launches_at_the_given_speed() {
+        let mut state = CharacterMotionState::default();
+        let launch = step_character_2d(
+            &mut state,
+            CharacterStep2dInput { contact_grounded: true, jump_just_pressed: true, ..input_2d() },
+        );
+        assert_eq!(launch, Some(6.0));
+        assert!(!state.grounded, "a launched character is airborne at once");
+        assert!(state.rising_from_jump);
+        assert_eq!(state.jumps_used, 1);
+    }
+
+    /// The #10378 gate: a press with no ground under the character (and no
+    /// coyote grace left) does nothing.
+    #[test]
+    fn an_airborne_press_does_not_launch() {
+        let mut state = CharacterMotionState::default();
+        let launch = step_character_2d(
+            &mut state,
+            CharacterStep2dInput { jump_just_pressed: true, vertical_speed: -3.0, ..input_2d() },
+        );
+        assert_eq!(launch, None);
+    }
+
+    /// The contact report is a step old, so the frame after a launch can still
+    /// show the floor. While the body is rising from its own jump that contact
+    /// must not refill the budget, or every jump would allow a second.
+    #[test]
+    fn a_stale_floor_contact_while_rising_does_not_refill_the_jump() {
+        let mut state = CharacterMotionState::default();
+        step_character_2d(
+            &mut state,
+            CharacterStep2dInput { contact_grounded: true, jump_just_pressed: true, ..input_2d() },
+        );
+        let again = step_character_2d(
+            &mut state,
+            CharacterStep2dInput {
+                contact_grounded: true,
+                vertical_speed: 5.8,
+                jump_just_pressed: true,
+                ..input_2d()
+            },
+        );
+        assert_eq!(again, None, "no second ground jump off a stale contact");
+        assert!(!state.grounded);
+    }
+
+    /// Walking UP a slope rises while standing on it, which is why the 2D path
+    /// cannot gate on `vertical_speed <= 0` the way the kinematic path does.
+    #[test]
+    fn rising_without_having_jumped_still_counts_as_grounded() {
+        let mut state = CharacterMotionState::default();
+        let launch = step_character_2d(
+            &mut state,
+            CharacterStep2dInput {
+                contact_grounded: true,
+                vertical_speed: 2.5,
+                jump_just_pressed: true,
+                ..input_2d()
+            },
+        );
+        assert_eq!(launch, Some(6.0));
+    }
+
+    #[test]
+    fn landing_after_the_apex_refills_the_budget() {
+        let mut state = CharacterMotionState::default();
+        step_character_2d(
+            &mut state,
+            CharacterStep2dInput { contact_grounded: true, jump_just_pressed: true, ..input_2d() },
+        );
+        // Falling, then touching down.
+        step_character_2d(&mut state, CharacterStep2dInput { vertical_speed: -4.0, ..input_2d() });
+        assert!(!state.rising_from_jump, "past the apex the launch is over");
+        let launch = step_character_2d(
+            &mut state,
+            CharacterStep2dInput { contact_grounded: true, jump_just_pressed: true, ..input_2d() },
+        );
+        assert_eq!(launch, Some(6.0));
+    }
+
+    #[test]
+    fn can_double_jump_allows_exactly_one_air_jump() {
+        let mut state = CharacterMotionState::default();
+        let jump = |state: &mut CharacterMotionState, grounded: bool, vy: f32| {
+            step_character_2d(
+                state,
+                CharacterStep2dInput {
+                    contact_grounded: grounded,
+                    vertical_speed: vy,
+                    jump_just_pressed: true,
+                    can_double_jump: true,
+                    ..input_2d()
+                },
+            )
+        };
+        assert_eq!(jump(&mut state, true, 0.0), Some(6.0), "ground jump");
+        assert_eq!(jump(&mut state, false, 3.0), Some(6.0), "the one air jump");
+        assert_eq!(jump(&mut state, false, 3.0), None, "no third");
+    }
+
+    /// Walking off a ledge keeps the ground jump for `COYOTE_TIME_SECONDS`.
+    #[test]
+    fn coyote_time_keeps_the_ground_jump_briefly_after_leaving_a_ledge() {
+        let mut state = CharacterMotionState::default();
+        step_character_2d(&mut state, CharacterStep2dInput { contact_grounded: true, ..input_2d() });
+        // Two airborne frames (~33 ms) is inside the 100 ms window.
+        step_character_2d(&mut state, CharacterStep2dInput { vertical_speed: -0.2, ..input_2d() });
+        let late = step_character_2d(
+            &mut state,
+            CharacterStep2dInput { vertical_speed: -0.4, jump_just_pressed: true, ..input_2d() },
+        );
+        assert_eq!(late, Some(6.0));
+
+        let mut state = CharacterMotionState::default();
+        step_character_2d(&mut state, CharacterStep2dInput { contact_grounded: true, ..input_2d() });
+        for _ in 0..10 {
+            step_character_2d(&mut state, CharacterStep2dInput { vertical_speed: -1.0, ..input_2d() });
+        }
+        let too_late = step_character_2d(
+            &mut state,
+            CharacterStep2dInput { vertical_speed: -1.0, jump_just_pressed: true, ..input_2d() },
+        );
+        assert_eq!(too_late, None, "~180 ms after the ledge the ground jump is spent");
+    }
+
+    /// A press just before touching down is remembered and spent on landing.
+    #[test]
+    fn a_press_just_before_landing_is_buffered() {
+        let mut state = CharacterMotionState { jumps_used: 1, ..Default::default() };
+        let early = step_character_2d(
+            &mut state,
+            CharacterStep2dInput { vertical_speed: -3.0, jump_just_pressed: true, ..input_2d() },
+        );
+        assert_eq!(early, None);
+        let landed = step_character_2d(&mut state, CharacterStep2dInput { contact_grounded: true, ..input_2d() });
+        assert_eq!(landed, Some(6.0));
+    }
+
+    /// No usable launch (a gravity-free body, a zero height) must not spend
+    /// the jump: the budget is still there when a real launch is possible.
+    #[test]
+    fn a_zero_launch_speed_spends_nothing() {
+        let mut state = CharacterMotionState::default();
+        let none = step_character_2d(
+            &mut state,
+            CharacterStep2dInput {
+                contact_grounded: true,
+                jump_just_pressed: true,
+                jump_speed: 0.0,
+                ..input_2d()
+            },
+        );
+        assert_eq!(none, None);
+        assert_eq!(state.jumps_used, 0);
     }
 }
