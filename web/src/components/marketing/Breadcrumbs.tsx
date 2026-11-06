@@ -1,6 +1,5 @@
 import Link from 'next/link';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 export interface BreadcrumbItem {
   label: string;

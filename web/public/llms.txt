@@ -26,7 +26,7 @@ SpawnForge is a browser-based 2D and 3D game engine that lets anyone create, edi
 
 ## Links
 
-- Website: https://spawnforge.ai
-- Pricing: https://spawnforge.ai/pricing
-- Community: https://spawnforge.ai/community
+- Website: https://www.spawnforge.ai
+- Pricing: https://www.spawnforge.ai/pricing
+- Community: https://www.spawnforge.ai/community
 - Documentation: https://docs.spawnforge.ai

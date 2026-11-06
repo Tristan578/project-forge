@@ -5,8 +5,7 @@ import { notFound } from 'next/navigation';
 import { getBlogPost, getAllBlogSlugs } from '@/lib/blog';
 import SpawnForgeBrowserAiGameEngine from '../content/spawnforge-browser-ai-game-engine';
 import SpawnForgeVsUnityVsGodot from '../content/spawnforge-vs-unity-vs-godot';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 const contentComponents: Record<string, React.ComponentType> = {
   'spawnforge-browser-ai-game-engine': SpawnForgeBrowserAiGameEngine,
