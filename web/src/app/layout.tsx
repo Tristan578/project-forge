@@ -158,8 +158,7 @@ export default function RootLayout({
             // publicly exported, so derived structurally below) types the
             // same field as plain `string`. Both packages come from Clerk —
             // this is a vendor-internal type disagreement, not our code, and
-            // there is no narrower fix than this cast (same shape as the
-            // `as Transport` gap documented for the MCP SDK in #10278).
+            // there is no narrower fix than this cast.
             appearance={{ theme: dark as NonNullable<NonNullable<ComponentProps<typeof ClerkProvider>['appearance']>['theme']> }}
             afterSignOutUrl="/sign-in"
           >
