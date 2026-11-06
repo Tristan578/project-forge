@@ -112,5 +112,9 @@ export const ENGINE_INIT_MAX_RETRIES = 3;
 // Site URL
 // ---------------------------------------------------------------------------
 
-/** Canonical site URL, driven by NEXT_PUBLIC_SITE_URL env var (build-time). */
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://spawnforge.ai";
+/**
+ * Canonical site URL, driven by NEXT_PUBLIC_SITE_URL env var (build-time).
+ * Production serves www.spawnforge.ai and redirects the apex to it, so the
+ * fallback is the www host; canonicals, sitemap and robots must match it.
+ */
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.spawnforge.ai";
