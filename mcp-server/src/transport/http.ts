@@ -34,7 +34,6 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 export interface HttpTransportOptions {
   port: number;
@@ -286,15 +285,7 @@ export async function startHttpTransport(
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: false,
     });
-    // SDK type-variance: StreamableHTTPServerTransport types `onclose`,
-    // `onerror`, `onmessage` and `sessionId` as `... | undefined` accessors,
-    // but the Transport interface declares all four as plain optionals
-    // (`onclose?: () => void`, `sessionId?: string`, ...), which
-    // exactOptionalPropertyTypes reads as non-undefined. Both declarations are
-    // the SDK's (1.30.0), so neither is ours to widen; the objects are
-    // identical. Drop the cast when the SDK agrees with itself: #10278,
-    // pinned by src/transport/__tests__/transportGap.test.ts.
-    await sharedServer.connect(sharedTransport as Transport);
+    await sharedServer.connect(sharedTransport);
   }
 
   const server = createServer((req, res) => {
@@ -370,8 +361,7 @@ export async function startHttpTransport(
             mcpServer?.close().catch(() => {});
           };
           res.on('close', cleanup);
-          // Same SDK type-variance as the shared transport above (#10278).
-          await mcpServer.connect(transport as Transport);
+          await mcpServer.connect(transport);
         } else {
           transport = sharedTransport!;
         }
