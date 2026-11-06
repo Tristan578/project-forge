@@ -7,6 +7,7 @@ import { getStripe } from '@/lib/billing/stripe-client';
 import { buildPortalSessionParams } from '@/lib/billing/portal-config';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
@@ -21,6 +22,11 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * cancellation/retention flow. See `buildPortalSessionParams`.
  */
 async function POST_impl(req: NextRequest) {
+  // Sanctions geo-block (#9331): refuse payment from a blocked jurisdiction
+  // here too, so it holds even on a path the proxy matcher stops covering.
+  const geoBlocked = sanctionsGeoBlock(req);
+  if (geoBlocked) return geoBlocked;
+
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,

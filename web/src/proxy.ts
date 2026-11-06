@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server';
 import { loadPublishedGameMetadata } from '@/lib/play/gameMetadata';
 import { gameNotFoundResponse, gameUnavailableResponse } from '@/lib/play/notFoundDocument';
 import { stripNeverCarriedParams } from '@/lib/navigation/authRoutes';
+import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
 import {
   buildPlayContentSecurityPolicy,
   isPlayPath,
@@ -131,10 +132,11 @@ const CLIENT_SPOOFABLE_HEADERS = [
  *
  * Both of those headers are stripped from client-supplied input on every path
  * the proxy runs on, not just `/play` — otherwise a caller could hand the app a
- * nonce of their choosing. The `config.matcher` below excludes extension-suffixed
- * paths, which would have skipped a user-chosen game slug ending in `.html`/`.js`
- * (a legal `[slug]` match that renders a real HTML document); the explicit
- * `/play/:path*` entry there closes that, so every `/play` URL is stripped and
+ * nonce of their choosing. The `config.matcher` below excludes only TOP-LEVEL
+ * extension-suffixed paths (the files in public/), so a user-chosen game slug
+ * ending in `.html`/`.js` (a legal `[slug]` match that renders a real HTML
+ * document) still runs the proxy; the explicit `/play/:path*` entry there
+ * guarantees it independently, so every `/play` URL is stripped and
  * nonce-stamped. The strip is defense-in-depth regardless: a browser cannot be
  * induced to send a custom `Content-Security-Policy` request header cross-origin.
  *
@@ -434,13 +436,19 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
 const authProxy = buildProxy();
 
 /**
- * Preflight exact play documents after normal proxy auth/CORS/CSP handling.
+ * Apply the sanctions geo-block, then preflight exact play documents after
+ * normal proxy auth/CORS/CSP handling.
  * Missing published metadata returns a direct404 before root Suspense can stream.
  * Lookup failures return a retryable503; other routes/methods and redirects retain their response.
  * @param req Incoming Next.js request.
  * @returns Existing proxy response, a missing-game404, or a temporary-failure503.
  */
 export async function proxy(req: NextRequest): Promise<NextResponse> {
+  // Sanctions geo-block (#9331) runs first, before auth, so a blocked visitor
+  // never reaches Clerk or the app. Bypass paths (health, webhooks, cron) are
+  // exempt inside sanctionsGeoBlock().
+  const blocked = sanctionsGeoBlock(req);
+  if (blocked) return blocked;
   return preflightPublishedGame(req, await authProxy(req));
 }
 
@@ -481,15 +489,25 @@ export async function preflightPublishedGame(req: NextRequest, response: NextRes
 /** Next.js static proxy matchers, including every user-controlled play slug. */
 export const config = {
   matcher: [
-    // Skip Next.js internals, static files, and engine WASM
-    '/((?!_next|monitoring|engine-pkg-webgl2|engine-pkg-webgpu|[^?]*\\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Skip Next.js internals, Vercel's own `/_vercel/*` endpoints (the Web
+    // Analytics and Speed Insights scripts and their beacons, which the layout
+    // loads on every page and which must not meet the auth redirect), engine
+    // WASM, and the static files in public/, which all sit at the top level. The extension exclusion is anchored to a
+    // SINGLE top-level segment (`[^/?]*` ... `$`): it used to be `[^?]*`, which
+    // skipped ANY path containing `.html`, `.js`, ... anywhere, so a dynamic page
+    // such as `/editor/abc.html` or `/blog/x.html` rendered with no proxy at all:
+    // no sanctions geo-block (#9331), no auth, no header stripping. No dynamic
+    // route sits at the top level (proxyGeoBlock.test.ts fails if one appears),
+    // so a top-level extension-suffixed path is only ever a public file or a 404.
+    // proxyGeoBlock.test.ts evaluates this array with Next.js's own matcher
+    // compiler against every dynamic route and every file in public/.
+    '/((?!_next|_vercel|monitoring|engine-pkg-webgl2|engine-pkg-webgpu|[^/?]*\\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)$).*)',
     // Always run for API routes
     '/(api|trpc)/:path*',
-    // Always run for /play. The extension allowlist in the first entry excludes
-    // any path whose last segment ends in `.html`/`.js`/`.css`/... — but a game
-    // slug is user-controlled, so `/play/<user>/game.html` is a legal `[slug]`
-    // match that renders a real HTML document. Without this entry it would skip
-    // the proxy entirely: no header stripping and no nonce. Must stay in sync
+    // Always run for /play. The first entry now matches every nested
+    // extension-suffixed path too (`/play/<user>/game.html` included), so this
+    // entry is belt and braces: a game slug is user-controlled and must never
+    // skip the proxy, whatever the first entry becomes. Must stay in sync
     // with PLAY_ROUTE_SOURCE in lib/security/csp.ts — Next.js requires the
     // matcher to be statically analyzable, so the literal cannot be imported.
     // proxy.test.ts pins the two to the same value.
