@@ -330,6 +330,87 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
   return publicRoutes;
 }
 
+/**
+ * First path segments of the PAGE routes that require a session.
+ *
+ * The proxy used to treat every path that was not in {@link buildPublicRoutes}
+ * as protected. That included paths no route serves, so `/refunds` and
+ * `/contact` answered a 307 to sign-in instead of the site's 404 page: a
+ * crawler indexed a sign-in redirect, and a visitor following a stale link was
+ * asked to log in to read a page that does not exist.
+ *
+ * So pages are now protected by an explicit list, and anything that is neither
+ * public nor listed here falls through to Next.js, which renders `not-found.tsx`
+ * with status 404 (or the real page, if one exists). API paths stay default-deny
+ * (see {@link requiresAuthentication}).
+ *
+ * What stops a NEW authenticated page from going public by omission is
+ * `proxy.test.ts` → "classifies every top-level app route": it walks `src/app`
+ * and fails on any top-level segment that is neither matched by
+ * `buildPublicRoutes()` nor listed here. Each listed page also redirects an
+ * anonymous request itself (`safeAuth()` + `redirect('/sign-in')`), except the
+ * editor shell, whose data comes only from protected API routes.
+ *
+ * `dev` is protected only in production, mirroring `includeDev` in
+ * {@link buildPublicRoutes} (#7915).
+ * @param options Whether the development editor auth bypass is in effect.
+ * @returns Lower-case first path segments whose pages require a session.
+ */
+export function buildProtectedPageSegments({ includeDev }: { includeDev: boolean }): string[] {
+  const segments = ['dashboard', 'editor', 'settings', 'admin'];
+  if (!includeDev) segments.push('dev');
+  return segments;
+}
+
+/**
+ * Decode a pathname into its non-empty, lower-cased segments, or `null` when it
+ * carries malformed percent-encoding. Decoding and lower-casing make the check
+ * a superset of what Next.js routes: `/%65ditor/x` and `/Editor` are both
+ * treated as the editor, never as an unknown path.
+ */
+function decodedSegments(pathname: string): string[] | null {
+  try {
+    return pathname
+      .split('/')
+      .filter((s) => s !== '')
+      .map((s) => decodeURIComponent(s).toLowerCase());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a request needs a Clerk session before it may proceed.
+ *
+ * - Public routes ({@link buildPublicRoutes}) never do.
+ * - API paths (`/api` and below) always do otherwise: an unknown API path
+ *   still answers 401, so an API client can never mistake a missing session
+ *   for a missing endpoint.
+ * - Pages do only when their first segment is in `protectedPageSegments`.
+ *   Every other page path, including one no route serves, falls through to
+ *   Next.js, which answers 404 for the latter.
+ * - A pathname with malformed percent-encoding fails closed (needs a session),
+ *   which is what every non-public path did before.
+ * @param req Incoming request.
+ * @param isPublicRoute Matcher for explicitly public routes.
+ * @param protectedPageSegments From {@link buildProtectedPageSegments}.
+ * @returns True when an anonymous request must be refused or redirected.
+ */
+export function requiresAuthentication(
+  req: NextRequest,
+  isPublicRoute: (req: NextRequest) => boolean,
+  protectedPageSegments: readonly string[],
+): boolean {
+  if (isPublicRoute(req)) return false;
+  const segments = decodedSegments(req.nextUrl.pathname);
+  if (segments === null) return true;
+  const first = segments[0];
+  // `/` (no segments) is matched by isPublicRoute above; fail closed if it ever is not.
+  if (first === undefined) return true;
+  if (first === 'api') return true;
+  return protectedPageSegments.includes(first);
+}
+
 /** Minimal shape of Clerk's `auth()` result that the proxy depends on. */
 type ProxyAuth = () => Promise<{
   userId: string | null;
@@ -351,12 +432,14 @@ type ProxyAuth = () => Promise<{
  * @param auth Clerk session reader and sign-in redirect provider.
  * @param req Incoming request.
  * @param isPublicRoute Matcher for explicitly public routes.
+ * @param protectedPageSegments Page segments that require a session ({@link buildProtectedPageSegments}).
  * @returns CORS response, authentication failure/redirect, or secured passthrough.
  */
 export async function applyAuthDecision(
   auth: ProxyAuth,
   req: NextRequest,
   isPublicRoute: (req: NextRequest) => boolean,
+  protectedPageSegments: readonly string[],
 ): Promise<Response> {
   const corsResponse = handleCors(req);
   if (corsResponse) return corsResponse;
@@ -370,7 +453,7 @@ export async function applyAuthDecision(
     }
   }
 
-  if (!isPublicRoute(req)) {
+  if (requiresAuthentication(req, isPublicRoute, protectedPageSegments)) {
     const { userId, redirectToSignIn } = await auth();
     if (!userId) {
       // Browser navigations: redirect to sign-in (preserves the original URL
@@ -413,9 +496,9 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { clerkMiddleware, createRouteMatcher } = require('@clerk/nextjs/server');
 
-  const isPublicRoute = createRouteMatcher(
-    buildPublicRoutes({ includeDev: process.env.NODE_ENV !== 'production' }),
-  );
+  const includeDev = process.env.NODE_ENV !== 'production';
+  const isPublicRoute = createRouteMatcher(buildPublicRoutes({ includeDev }));
+  const protectedPageSegments = buildProtectedPageSegments({ includeDev });
 
   // The production callback delegates to applyAuthDecision so the unit tests in
   // proxy.test.ts exercise the EXACT logic that runs in production — not a parallel
@@ -423,7 +506,7 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
   // point of #8605 (route tests that never hit the real request path left CI blind).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return clerkMiddleware((auth: any, req: NextRequest) =>
-    applyAuthDecision(auth, req, isPublicRoute),
+    applyAuthDecision(auth, req, isPublicRoute, protectedPageSegments),
     // Enforce the token's `azp` claim (#9630). The list is exported and tested
     // as a pure function because clerkMiddleware itself is required at
     // runtime and cannot be intercepted from the unit tests.
