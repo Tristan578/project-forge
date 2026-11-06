@@ -92,8 +92,8 @@ export default async function AboutPage() {
           </p>
           <p>
             <strong className="text-white">AI:</strong> Multi-agent orchestration with{' '}
-            {MCP_COMMAND_COUNT} MCP commands across {MCP_CATEGORY_COUNT} categories. AI generates 3D models, textures, sound effects,
-            music, and voice — then uses MCP commands to place and configure them in the scene.
+            {MCP_COMMAND_COUNT} MCP commands across {MCP_CATEGORY_COUNT} categories. AI asset generation (3D models, textures, sound effects, music and voice, placed and
+            configured in the scene through MCP commands) is coming after launch.
           </p>
         </div>
       </section>
@@ -157,8 +157,8 @@ export default async function AboutPage() {
           </p>
           <p>
             Where other tools add AI as an afterthought, SpawnForge was built AI-first. The
-            entire engine is controllable through {MCP_COMMAND_COUNT} MCP commands, making it the
-            most AI-accessible game engine available. AI is not a feature — it is the primary
+            engine exposes {MCP_COMMAND_COUNT} MCP commands for AI control; external MCP clients can drive a
+            local build today, and hosted access is coming after launch. AI is not a feature — it is the primary
             creation interface.
           </p>
         </div>

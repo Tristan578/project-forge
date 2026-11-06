@@ -83,6 +83,15 @@ describe('WhatsNewModal', () => {
     setupStore({ showWhatsNew: true });
     render(<WhatsNewModal />);
     const icons = screen.getAllByTestId('check-circle');
-    expect(icons.length).toBeGreaterThanOrEqual(6);
+    expect(icons).toHaveLength(screen.getAllByRole('heading', { level: 3 }).length);
+    expect(icons.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('does not list AI asset generation as shipped (it is coming after launch)', () => {
+    setupStore({ showWhatsNew: true });
+    render(<WhatsNewModal />);
+    expect(screen.getByText('Visual Scripting')).toBeDefined(); // the list rendered
+    expect(screen.queryByText(/asset generation/i)).toBeNull();
+    expect(screen.queryByText(/generate 3D models/i)).toBeNull();
   });
 });

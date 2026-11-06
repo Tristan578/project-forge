@@ -25,10 +25,10 @@ const recentFeatures = [
     title: '2D Game Engine',
     description: 'Build 2D games with sprites, tilemaps, and skeletal animation',
   },
-  {
-    title: 'AI Asset Generation',
-    description: 'Generate 3D models, textures, audio, and music with AI',
-  },
+  // AI asset generation is deliberately absent: it is coming after launch
+  // (`BYOK_GENERATION_VERIFIED` / `PLATFORM_GENERATION_KEYS_PROVISIONED` in
+  // `lib/config/publicCapabilities.ts`), and every row here renders with a
+  // green check under "features we have added recently".
 ];
 
 export function WhatsNewModal() {

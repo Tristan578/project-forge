@@ -4,7 +4,7 @@ export default function DocsHome() {
       <h1>SpawnForge Documentation</h1>
       <ul>
         <li>
-          <a href="/mcp"><strong>MCP Commands</strong></a> — Control SpawnForge from AI tools. Browse every public command available to Claude and other MCP clients; the reference counts them from the shipped manifest.
+          <a href="/mcp"><strong>MCP Commands</strong></a> — Browse every public command available to Claude and other MCP clients; the reference counts them from the shipped manifest. External clients attach to a local build today; attaching to the hosted editor is coming after launch.
         </li>
         <li>
           <a href="/capability-matrix"><strong>Capability Matrix</strong></a> — Which capabilities are proven, implemented but unverified, partial or unavailable today through the editor, the in-app AI, game scripts and external MCP, with the issue tracking every gap.

@@ -14,6 +14,7 @@ import {
   type RetiredByokProvider,
 } from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
+import { PLATFORM_GENERATION_KEYS_PROVISIONED } from '../config/publicCapabilities';
 import { effectiveTier, spendableTokensOf } from '../ai/tierAccess';
 import type { Tier } from '@/lib/db/schema';
 import { STATUS_CHECK_OPERATION } from './statusCheckOperation';
@@ -208,7 +209,8 @@ export async function resolveApiKey(
   if (effectiveTier(user.tier as Tier, spendableTokensOf(user)) === 'starter') {
     throw new ApiKeyError(
       'TIER_NOT_ALLOWED',
-      `The ${TIER_DISPLAY_NAMES.starter} tier cannot use AI generation. Upgrade to ${TIER_DISPLAY_NAMES.hobbyist} and add your own ${provider} API key, or upgrade to ${TIER_DISPLAY_NAMES.pro} for platform keys.`
+      `The ${TIER_DISPLAY_NAMES.starter} tier cannot use AI generation. Upgrade to ${TIER_DISPLAY_NAMES.hobbyist} and add your own ${provider} API key` +
+        (PLATFORM_GENERATION_KEYS_PROVISIONED ? `, or upgrade to ${TIER_DISPLAY_NAMES.pro} for platform keys.` : '.')
     );
   }
 
@@ -218,8 +220,10 @@ export async function resolveApiKey(
   if (user.tier !== 'pro' && totalAvailable <= 0) {
     throw new ApiKeyError(
       'NO_KEY_CONFIGURED',
-      `No ${provider} API key configured. Add your own key in Settings, ` +
-        `upgrade to the ${TIER_DISPLAY_NAMES.pro} tier, or purchase add-on tokens.`
+      PLATFORM_GENERATION_KEYS_PROVISIONED
+        ? `No ${provider} API key configured. Add your own key in Settings, ` +
+          `upgrade to the ${TIER_DISPLAY_NAMES.pro} tier, or purchase add-on tokens.`
+        : `No ${provider} API key configured. Add your own key in Settings.`
     );
   }
 
