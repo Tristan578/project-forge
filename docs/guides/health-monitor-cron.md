@@ -35,8 +35,10 @@ authenticated; the Sentry issues it raises speak to health. On `main` today
 `checkPayments` makes an authenticated `GET https://api.stripe.com/v1/balance`
 and grades the result, so the "Payments (Stripe)" bullet below describes the
 2026-09-05 behaviour and is out of date. `checkAiProviders` is still a
-configuration check (it grades chat backend resolution and reports generation
-key presence as detail), not a request to a provider. `vercel crons ls` and a
+configuration check, not a request to a provider: it is `down` with no chat
+backend and `degraded` when any platform capability has no key or gateway
+route, so the "AI Providers" bullet below is out of date too. #9719, the
+precondition named in "Why it has never run", closed on 2026-09-10. `vercel crons ls` and a
 quoted 200 log line were not available to the session that wrote this; if you
 want that line on #9118, the dashboard filter in "Evidence: one successful run"
 step 2 produces it.
