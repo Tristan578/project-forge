@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { TRIAL_GRANT_TOKENS } from '../../src/lib/tokens/pricing';
+import { PRIVACY_LAST_UPDATED, TERMS_LAST_UPDATED } from '../../src/components/legal/lastUpdated';
 
 /**
  * Public pages E2E tests — verifies all unauthenticated routes render correctly
@@ -88,7 +89,7 @@ test.describe('Public Pages @ui', () => {
       await page.waitForLoadState('domcontentloaded');
 
       await expect(page.getByText('Terms of Service').first()).toBeVisible();
-      await expect(page.getByText(/February 27, 2026/)).toBeVisible();
+      await expect(page.getByText(TERMS_LAST_UPDATED)).toBeVisible();
     });
 
     test('has all 16 sections with correct headings', async ({ page }) => {
@@ -151,7 +152,7 @@ test.describe('Public Pages @ui', () => {
       await page.waitForLoadState('domcontentloaded');
 
       await expect(page.getByText('Privacy Policy').first()).toBeVisible();
-      await expect(page.getByText(/February 27, 2026/)).toBeVisible();
+      await expect(page.getByText(PRIVACY_LAST_UPDATED)).toBeVisible();
     });
 
     test('has all 12 sections with correct headings', async ({ page }) => {

@@ -2,6 +2,7 @@ import { cacheLife, cacheTag } from 'next/cache';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalLayout } from '@/components/legal/LegalLayout';
+import { TERMS_LAST_UPDATED } from '@/components/legal/lastUpdated';
 
 export const metadata: Metadata = {
   title: 'Terms of Service - SpawnForge',
@@ -35,14 +36,14 @@ export default async function TermsOfServicePage() {
   return (
     <LegalLayout
       title="Terms of Service"
-      lastUpdated="February 27, 2026"
+      lastUpdated={TERMS_LAST_UPDATED}
       tableOfContents={tableOfContents}
     >
       {/* 1. Acceptance of Terms */}
       <section id="acceptance">
         <h2>1. Acceptance of Terms</h2>
         <p>
-          By accessing or using SpawnForge (&quot;the Service&quot;), operated by SpawnForge
+          By accessing or using SpawnForge (&quot;the Service&quot;), operated by Nolan Consulting LLC, an Iowa limited liability company
           (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;), you agree to be bound by these Terms of
           Service (&quot;Terms&quot;). If you do not agree to all of these Terms, you may not
           access or use the Service.
@@ -496,7 +497,7 @@ export default async function TermsOfServicePage() {
         <h2>14. Governing Law</h2>
         <p>
           These Terms shall be governed by and construed in accordance with the laws of
-          the State of Delaware, United States, without regard to its conflict of law
+          the State of Iowa, United States, without regard to its conflict of law
           provisions.
         </p>
         <p>
