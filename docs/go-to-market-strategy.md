@@ -75,7 +75,7 @@ Earlier drafts of this table listed $29/$79/$199, a watermark on free exports, "
 | Churn rate | N/A | 8% | 5% |
 | NPS | N/A | 40+ | 50+ |
 
-> The MRR row above implies about $50 average revenue per paying customer (10 customers = $500). Real prices are $9, $29 and $79. Reaching $50 needs nobody on Starter and a 58% Creator / 42% Studio mix. These targets are superseded by the re-derivation below.
+> The MRR row above implies about $50 average revenue per paying customer (10 customers = $500). Real prices are $9, $29 and $79. Reaching $50 takes a mix weighted heavily to Studio: for example 58% Creator / 42% Studio with nobody on Starter, or 10% Starter / 44% Creator / 46% Studio. Starter can be at most about 41% of payers, and only if every other payer is on Studio. These targets are superseded by the re-derivation below.
 
 #### Re-derived at the real prices (2026-11-05)
 
