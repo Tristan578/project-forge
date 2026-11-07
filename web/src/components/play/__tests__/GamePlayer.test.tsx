@@ -554,6 +554,76 @@ describe('GamePlayer', () => {
         expect(runtime.handle_command).toHaveBeenCalledWith('play', {});
       });
 
+      // #10368: a 2D game published before the key existed states no type.
+      // When its content is unmistakably 2D it is played as 2D, through the
+      // same explicit send, and the guess is reported.
+      it('a key-less legacy publication of 2D content is played as 2D, and the guess is reported', async () => {
+        const legacy2d = {
+          ...mockGame,
+          sceneData: {
+            formatVersion: 3,
+            metadata: { name: 'Old Side Scroller' },
+            entities: [
+              { entityId: 'player', entityType: 'sprite', spriteData: {} },
+              { entityId: 'ledge', entityType: 'cube', physics2dEnabled: true, physics2dData: {} },
+            ],
+          },
+        };
+        global.fetch = okFetch(legacy2d);
+        const runtime = stubRuntime();
+        runtime.handle_command.mockReturnValue({ success: true });
+        vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        try {
+          render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+          await advance();
+          fireEvent.click(screen.getByText('Click to play'));
+          await advance(PLAY_ENGINE_SETTLE_MS);
+
+          const order = runtime.handle_command.mock.calls.map((call) => call[0] as string);
+          expect(order.filter((command) => command === 'set_project_type')).toHaveLength(1);
+          expect(runtime.handle_command).toHaveBeenCalledWith('set_project_type', { projectType: '2d' });
+          expect(order.indexOf('load_scene')).toBeLessThan(order.indexOf('set_project_type'));
+          expect(order.indexOf('set_project_type')).toBeLessThan(order.indexOf('play'));
+          expect(vi.mocked(addBreadcrumb)).toHaveBeenCalledWith({
+            category: 'play',
+            level: 'info',
+            message: 'legacy publication with no projectType played as 2d (#10368)',
+            data: { userId: 'user-1', slug: 'my-awesome-game' },
+          });
+          expect(info).toHaveBeenCalledTimes(1);
+        } finally {
+          info.mockRestore();
+        }
+      });
+
+      it('a key-less legacy publication with any 3D content stays 3D and reports nothing', async () => {
+        const mixed = {
+          ...mockGame,
+          sceneData: {
+            formatVersion: 3,
+            metadata: { name: 'Old Mixed' },
+            entities: [
+              { entityId: 'player', entityType: 'sprite', spriteData: {} },
+              { entityId: 'box', entityType: 'cube', physicsEnabled: true, physicsData: {} },
+            ],
+          },
+        };
+        global.fetch = okFetch(mixed);
+        const runtime = stubRuntime();
+        runtime.handle_command.mockReturnValue({ success: true });
+        vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+
+        render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+        await advance();
+        fireEvent.click(screen.getByText('Click to play'));
+        await advance(PLAY_ENGINE_SETTLE_MS);
+
+        expect(runtime.handle_command).not.toHaveBeenCalledWith('set_project_type', expect.anything());
+        expect(runtime.handle_command).toHaveBeenCalledWith('play', {});
+        expect(vi.mocked(addBreadcrumb)).not.toHaveBeenCalledWith(expect.objectContaining({ category: 'play' }));
+      });
+
       it('a refused set_project_type is a failed start, the same path as a refused play', async () => {
         global.fetch = okFetch(twoDGame);
         const runtime = stubRuntime();
