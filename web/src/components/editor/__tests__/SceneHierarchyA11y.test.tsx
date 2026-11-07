@@ -104,7 +104,7 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     expect(results.violations, summarize(results.violations)).toHaveLength(0);
   });
 
-  it('nests child rows in a group owned by their parent treeitem (#9677)', async () => {
+  it('owns child rows in a group linked to their parent treeitem (#9677, #10465)', async () => {
     // aria-required-children (critical) was one of the three violations the
     // old .dv-dockview exclusion hid. The fixture nests Sword under Player, so
     // this audit covers the treeitem > group > treeitem shape, not only a flat
@@ -112,12 +112,34 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     const { container } = render(<SceneHierarchy />);
     const tree = screen.getByRole('tree');
     const player = within(tree).getByRole('treeitem', { name: 'Player' });
-    const group = within(player).getByRole('group');
-    expect(within(group).getByRole('treeitem', { name: 'Sword' })).toHaveAttribute('aria-level', '2');
+    // The group is a DOM sibling owned through aria-owns (#10465), so the
+    // parent row's own text stays its name; ownership is what ARIA reads.
+    const ownedId = player.getAttribute('aria-owns');
+    expect(ownedId).toBeTruthy();
+    const group = document.getElementById(ownedId!);
+    expect(group).toHaveAttribute('role', 'group');
+    expect(player.contains(group)).toBe(false);
+    expect(within(group!).getByRole('treeitem', { name: 'Sword' })).toHaveAttribute('aria-level', '2');
+    // A leaf row owns nothing.
+    expect(within(tree).getByRole('treeitem', { name: 'Sword' })).not.toHaveAttribute('aria-owns');
 
     const results = await axe(container);
     expect(results.passes?.map((p) => (p as { id: string }).id)).toContain('aria-required-children');
     expect(results.violations.map((v) => v.id)).not.toContain('aria-required-children');
+  });
+
+  it('keeps each row\'s own text to its accessible name (label-content-name-mismatch, #10465)', () => {
+    // axe-core 4.14 runs label-content-name-mismatch (WCAG 2.5.3) by default.
+    // It reads a treeitem's visible text from its whole DOM subtree, so a
+    // parent row that contained its children's rows read as "Player Sword"
+    // against the aria-label "Player". jsdom has no layout, so axe reports the
+    // rule as incomplete here; assert the property it checks directly instead.
+    render(<SceneHierarchy />);
+    const rows = screen.getAllByRole('treeitem');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.textContent?.trim()).toBe(row.getAttribute('aria-label'));
+    }
   });
 
   it('exposes exactly one row in the tab order (roving tabindex)', () => {

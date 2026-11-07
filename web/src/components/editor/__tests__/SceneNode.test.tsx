@@ -103,6 +103,62 @@ describe('SceneNode', () => {
     expect(mockOnToggleExpand).toHaveBeenCalledWith('e1');
   });
 
+  it('owns its child group through aria-owns only while expanded (#10465)', () => {
+    const nodeWithChildren = { ...node, children: ['e2'] };
+    const { rerender } = render(
+      <SceneNode
+        node={nodeWithChildren}
+        depth={0}
+        onContextMenu={mockOnContextMenu}
+        expandedIds={new Set(['e1'])}
+      />
+    );
+    const row = screen.getByRole('treeitem', { name: 'Test Cube' });
+    const group = document.getElementById(row.getAttribute('aria-owns') ?? '');
+    expect(group).toHaveAttribute('role', 'group');
+    expect(row.contains(group)).toBe(false);
+
+    rerender(
+      <SceneNode
+        node={nodeWithChildren}
+        depth={0}
+        onContextMenu={mockOnContextMenu}
+        expandedIds={new Set()}
+      />
+    );
+    expect(screen.getByRole('treeitem', { name: 'Test Cube' })).not.toHaveAttribute('aria-owns');
+    expect(screen.queryByRole('group')).toBeNull();
+  });
+
+  it('dims a hidden parent\'s child group along with its row', () => {
+    const hiddenParent = { ...node, visible: false, children: ['e2'] };
+    render(
+      <SceneNode
+        node={hiddenParent}
+        depth={0}
+        onContextMenu={mockOnContextMenu}
+        expandedIds={new Set(['e1'])}
+      />
+    );
+    expect(screen.getByRole('treeitem', { name: 'Test Cube' })).toHaveClass('opacity-50');
+    expect(screen.getByRole('group')).toHaveClass('opacity-50');
+  });
+
+  it('owns no group when a filter hides every child', () => {
+    const nodeWithChildren = { ...node, children: ['e2'] };
+    render(
+      <SceneNode
+        node={nodeWithChildren}
+        depth={0}
+        onContextMenu={mockOnContextMenu}
+        expandedIds={new Set(['e1'])}
+        visibleIds={new Set(['e1'])}
+      />
+    );
+    expect(screen.getByRole('treeitem', { name: 'Test Cube' })).not.toHaveAttribute('aria-owns');
+    expect(screen.queryByRole('group')).toBeNull();
+  });
+
   it('calls onDragStart with entityId and name when drag begins', () => {
     const mockOnDragStart = vi.fn();
     const { container } = render(
