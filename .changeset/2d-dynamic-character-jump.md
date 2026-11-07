@@ -1,0 +1,7 @@
+---
+"web": patch
+---
+
+2D characters on a dynamic 2D physics body can now jump. Before, the character controller moved every 2D character by writing its position directly, and a jump press lifted it by about 0.03 units for one frame, so no 2D platformer with a gap or a raised platform could be finished (#10378). A 2D character whose 2D physics is enabled with body type Dynamic is now moved through its body's velocity, so the 2D simulation's gravity, collisions and continuous detection apply to it. A jump press launches it only while it stands on something (a contact whose surface faces up, at most 45 degrees from flat), and `jumpHeight` is the height of the jump in world units, worked out against the gravity the 2D simulation applies to that body (world 2D gravity times the body's own gravity scale). The controller's own `gravityScale` is not used on this path. Double jump, a 0.1 s grace period after walking off a ledge and a 0.1 s jump buffer behave as they do for 3D characters. A 2D body with no gravity (a top-down game) is steered on both axes and does not jump. A script's `setVelocity` on the character still takes effect for the frame it is sent.
+
+Not changed: a 2D character with a kinematic or static 2D body, or with no 2D physics, keeps the old movement and the one-frame hop. Players built with 3D physics in a 2D project (what the game-creation pipeline and the 2D templates build today) also keep the old movement. The Jump Height tooltip now says this.
