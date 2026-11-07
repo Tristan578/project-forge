@@ -4,9 +4,9 @@
 
 ## What is SpawnForge?
 
-SpawnForge is a web-based, AI-native 2D and 3D game engine. Users create games by describing what they want in natural language or by using a visual editor. The platform handles everything from scene composition and physics to scripting, asset generation, and one-click publishing — all in the browser with no downloads or installs required.
+SpawnForge is a web-based, AI-native 2D and 3D game engine. Users create games by describing what they want in natural language or by using a visual editor. The platform handles everything from scene composition and physics to scripting and one-click publishing — all in the browser with no downloads or installs required. AI asset generation is coming after launch.
 
-The engine is built in Rust, compiled to WebAssembly, and renders via WebGPU (with WebGL2 fallback). AI features are powered by multi-agent orchestration with 350 MCP (Model Context Protocol) commands spanning 41 categories.
+The engine is built in Rust, compiled to WebAssembly, and renders via WebGPU (with WebGL2 fallback). AI features are powered by multi-agent orchestration with 383 MCP (Model Context Protocol) commands spanning 41 categories.
 
 ## Architecture
 
@@ -51,14 +51,14 @@ The engine is built in Rust, compiled to WebAssembly, and renders via WebGPU (wi
 ### AI Capabilities
 - Natural language game creation and editing
 - Multi-agent AI orchestration
-- AI asset generation:
+- AI asset generation (coming after launch):
   - 3D model generation
   - Texture generation
   - Sound effect generation
   - Music generation
   - Voice line generation
 - 25+ specialized AI modules
-- BYOK (Bring Your Own Keys) support for AI providers
+- Bring Your Own Keys (BYOK) support for AI providers (coming after launch)
 
 ### Editor
 - Dockview-based workspace with customizable panels
@@ -75,7 +75,9 @@ The engine is built in Rust, compiled to WebAssembly, and renders via WebGPU (wi
 - Community gallery for discovering and playing games
 - Cloud project storage
 
-## MCP Commands (350 commands, 41 categories)
+## MCP Commands (383 commands, 41 categories)
+
+External MCP clients can drive a local build today. Attaching to the hosted editor at spawnforge.ai is coming after launch.
 
 Categories: animation, asset, audio, camera, compound, cutscene, dialogue, docs, economy, editor, environment, export, game_cameras, game_components, generation, history, lighting, localization, materials, mesh, modeling, particles, performance, physics2d, prefab, publishing, query, rendering, runtime, scene, scripting, security, shaders, skeleton2d, sprite, sprite_animation, templates, terrain, tilemap, ui, world_building.
 
@@ -83,10 +85,10 @@ Categories: animation, asset, audio, camera, compound, cutscene, dialogue, docs,
 
 | Plan | Price | Key Features |
 |------|-------|-------------|
-| Free (Starter) | $0/month | AI chat (limited), 1 published game, community templates, basic export |
-| Hobbyist | $9/month | Unlimited AI chat, 5 published games, asset generation, priority support |
-| Creator | $29/month | Unlimited publishing, custom domain, advanced AI tools, remove branding |
-| Pro | $99/month | Team collaboration, API access, dedicated support, custom integrations |
+| Free | $0/month | Full editor and local export, 3 cloud projects, 1 published game, 50 trial AI tokens at signup |
+| Starter | $9/month | 10 cloud projects, 3 published games, 300 AI tokens/month, AI chat; AI asset generation coming after launch |
+| Creator | $29/month | 50 cloud projects, 10 published games, 1,000 AI tokens/month, advanced AI panels; external MCP access coming after launch |
+| Studio | $79/month | Unlimited cloud projects, 100 published games, 3,000 AI tokens/month, Pro AI panels; platform AI keys coming after launch |
 
 ## Comparison with Other Game Engines
 

@@ -41,15 +41,15 @@ export default function SpawnForgeBrowserAiGameEngine() {
         The built-in chat panel lets you describe what you want in plain language. The AI executes
         compound actions — spawning entities, configuring materials, writing scripts — iterating
         across multiple turns until the scene matches your description. 25+ AI modules handle
-        everything from scene generation to asset creation.
+        everything from scene generation to asset creation (AI generation of 3D models, textures and audio is coming after launch).
       </p>
 
       <h2>{MCP_COMMAND_COUNT} MCP Commands</h2>
       <p>
         The Model Context Protocol (MCP) server exposes {MCP_COMMAND_COUNT} commands across{' '}
-        {MCP_CATEGORY_COUNT} categories. Any
-        MCP-compatible agent or LLM can create scenes, configure physics, write game scripts, and
-        export finished games — all without touching the UI.
+        {MCP_CATEGORY_COUNT} categories. An
+        MCP-compatible agent attached to a local build can create scenes, configure physics, and
+        write game scripts without touching the UI; attaching to the hosted editor is coming after launch.
       </p>
       <p>
         Categories span the full engine: transforms, materials, physics, audio, animation,
