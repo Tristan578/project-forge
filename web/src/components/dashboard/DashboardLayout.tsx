@@ -7,6 +7,8 @@ import { BarChart3, Settings, Plus } from 'lucide-react';
 import { Button } from '@spawnforge/ui';
 import { ProjectCard } from './ProjectCard';
 import { NewProjectDialog } from './NewProjectDialog';
+import { emptySceneFile } from '@/lib/scenes/sceneValidation';
+import { FRESH_ENGINE_PROJECT_TYPE } from '@/lib/scenes/sceneProjectType';
 
 export interface Project {
   id: string;
@@ -65,25 +67,10 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          sceneData: {
-            formatVersion: 1,
-            sceneName: name,
-            entities: [],
-            ambientLight: { color: [1, 1, 1], brightness: 0.3 },
-            environment: {
-              skyboxBrightness: 1.0,
-              iblIntensity: 0.5,
-              iblRotationDegrees: 0,
-              clearColor: [0.1, 0.1, 0.15],
-              fogEnabled: false,
-              fogColor: [0.5, 0.5, 0.5],
-              fogStart: 10.0,
-              fogEnd: 100.0,
-            },
-          },
-        }),
+        // The engine's own empty scene, stating its dimension (#10374): a
+        // dashboard project starts in 3D, the type a fresh engine starts in,
+        // so it says so and opens the same way whatever the tab did before.
+        body: JSON.stringify({ name, sceneData: emptySceneFile(name, FRESH_ENGINE_PROJECT_TYPE) }),
       });
       if (res.ok) {
         const { id } = await res.json();

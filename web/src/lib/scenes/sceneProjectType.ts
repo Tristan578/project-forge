@@ -66,3 +66,44 @@ export function readProjectTypeFromSceneData(sceneData: unknown): SceneProjectTy
   const raw = sceneData.metadata[SCENE_PROJECT_TYPE_KEY];
   return isSceneProjectType(raw) ? raw : null;
 }
+
+/**
+ * The dimension a fresh engine starts in, and so the one a scene that states
+ * none comes up in when it is opened cold. Mirrors `ProjectType::default()`
+ * in `engine/src/core/project_type.rs`.
+ */
+export const FRESH_ENGINE_PROJECT_TYPE: SceneProjectType = '3d';
+
+/**
+ * The scene a PROJECT-LEVEL open hands the engine (#10374).
+ *
+ * The engine is a page singleton (`init_engine` skips a second start, and
+ * `useEngine` caches the module), so a client-side hop from `/editor/A` to
+ * `/editor/B` keeps the SAME Bevy app and its `ProjectType`. A scene with no
+ * key leaves that type alone on load, which is right when switching scenes
+ * inside one project and wrong when opening a different project: a key-less
+ * project opened after a 2D one inherited 2D, and its next autosave wrote
+ * `projectType: "2d"` into it.
+ *
+ * Opening a project must mean what a cold open means, whatever the engine did
+ * before, so a scene that states no type is opened as the fresh-engine type —
+ * the dimension it already came up in on every cold open. A stated type, or a
+ * value outside the vocabulary (the engine refuses that scene as before), is
+ * left exactly as it is. Only the project open applies this: switching
+ * scenes, restoring an auto-save or a checkpoint, and importing a file keep
+ * the "inherit the session's type" rule (`docs/features/save-load.md`).
+ *
+ * @param sceneData The project's stored scene, parsed and untrusted.
+ * @returns `sceneData` itself when it states a type or is not a scene object
+ *   with a `metadata` record; otherwise a shallow copy whose
+ *   `metadata.projectType` is {@link FRESH_ENGINE_PROJECT_TYPE}.
+ */
+export function sceneForProjectOpen(sceneData: unknown): unknown {
+  if (!isRecord(sceneData) || !isRecord(sceneData.metadata)) return sceneData;
+  const raw = sceneData.metadata[SCENE_PROJECT_TYPE_KEY];
+  if (raw !== undefined && raw !== null) return sceneData;
+  return {
+    ...sceneData,
+    metadata: { ...sceneData.metadata, [SCENE_PROJECT_TYPE_KEY]: FRESH_ENGINE_PROJECT_TYPE },
+  };
+}
