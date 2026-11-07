@@ -151,7 +151,8 @@ export function SceneNode({
   const isSelected = selectedIds.has(node.entityId);
   const isPrimary = primaryId === node.entityId;
   const hasChildren = node.children.length > 0;
-  const showChildGroup = hasChildren && isExpanded;
+  const visibleChildIds = node.children.filter((childId) => !visibleIds || visibleIds.has(childId));
+  const showChildGroup = isExpanded && visibleChildIds.length > 0;
   // The child group is a DOM SIBLING of this treeitem, owned through
   // aria-owns, not a DOM child. axe-core 4.14's label-content-name-mismatch
   // (WCAG 2.5.3) reads a treeitem's visible text from its DOM subtree, so a
@@ -177,7 +178,9 @@ export function SceneNode({
     rovingActiveId != null ? rovingActiveId === node.entityId : isFocused;
 
   // Sync the roving index when focus lands on THIS row (including its own
-  // icon-only controls), but ignore focus bubbling up from a descendant row.
+  // icon-only controls). Child rows render in a sibling group (aria-owns), so
+  // their focus never bubbles here; the owner check guards the row's own
+  // controls and keeps this correct if the markup changes again.
   const handleRowFocus = useCallback(
     (e: React.FocusEvent<HTMLDivElement>) => {
       const owner = (e.target as HTMLElement).closest('[data-tree-entity-id]');
@@ -491,9 +494,10 @@ export function SceneNode({
 
       {/* Children: a sibling group owned by the treeitem above (aria-owns). */}
       {showChildGroup && (
-        <div role="group" id={childGroupId}>
-          {node.children
-            .filter((childId) => !visibleIds || visibleIds.has(childId))
+        // A hidden parent dims its whole subtree, as it did when the group was
+        // nested inside the (dimmed) treeitem.
+        <div role="group" id={childGroupId} className={getVisibilityClasses() || undefined}>
+          {visibleChildIds
             .map((childId) => {
               const childNode = sceneGraph.nodes[childId];
               if (!childNode) return null;
