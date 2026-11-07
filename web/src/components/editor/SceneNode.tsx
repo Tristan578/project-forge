@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect, useRef, type MouseEvent } from 'react';
+import { Fragment, useState, useCallback, useEffect, useRef, useId, type MouseEvent } from 'react';
 import { ChevronRight, ChevronDown, Eye, EyeOff, Box, Sun, Camera, Layers } from 'lucide-react';
 import { useEditorStore, type SceneNode as SceneNodeData } from '@/stores/editorStore';
 import type { DropTarget, DropZone } from '@/lib/dndUtils';
@@ -151,6 +151,14 @@ export function SceneNode({
   const isSelected = selectedIds.has(node.entityId);
   const isPrimary = primaryId === node.entityId;
   const hasChildren = node.children.length > 0;
+  const showChildGroup = hasChildren && isExpanded;
+  // The child group is a DOM SIBLING of this treeitem, owned through
+  // aria-owns, not a DOM child. axe-core 4.14's label-content-name-mismatch
+  // (WCAG 2.5.3) reads a treeitem's visible text from its DOM subtree, so a
+  // nested group made an expanded parent's text "Player Sword" against its
+  // aria-label "Player" (#10465). aria-owns keeps the accessibility tree
+  // tree > treeitem > group > treeitem that aria-required-children needs (#9677).
+  const childGroupId = useId();
 
   const iconType = getEntityIconName(node);
 
@@ -367,120 +375,123 @@ export function SceneNode({
   };
 
   return (
-    <div
-      role="treeitem"
-      aria-selected={isSelected}
-      aria-expanded={hasChildren ? isExpanded : undefined}
-      aria-level={depth + 1}
-      aria-label={node.name}
-      data-tree-entity-id={node.entityId}
-      tabIndex={isRovingActive ? 0 : -1}
-      onFocus={handleRowFocus}
-      className={`outline-none ${getVisibilityClasses()}`}
-    >
-      {/* Drop indicator BEFORE */}
-      {isDropTarget && dropTarget?.zone === 'before' && (
-        <div
-          className="h-0.5 bg-blue-500 rounded-full"
-          style={{ marginLeft: `${depth * 16 + 8}px` }}
-        />
-      )}
-
+    <Fragment>
       <div
-        ref={rowRef}
-        draggable={!isEditing}
-        className={`flex items-center gap-1 px-2 py-1 cursor-grab select-none ${getSelectionClasses()} ${getDragClasses()}`}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        onClick={handleClick}
-        onContextMenu={handleContextMenuClick}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
+        role="treeitem"
+        aria-selected={isSelected}
+        aria-expanded={hasChildren ? isExpanded : undefined}
+        aria-level={depth + 1}
+        aria-label={node.name}
+        aria-owns={showChildGroup ? childGroupId : undefined}
+        data-tree-entity-id={node.entityId}
+        tabIndex={isRovingActive ? 0 : -1}
+        onFocus={handleRowFocus}
+        className={`outline-none ${getVisibilityClasses()}`}
       >
-        {/* Expand/collapse chevron */}
-        <button
-          className={`w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] ${
-            !hasChildren ? 'invisible' : ''
-          }`}
-          onClick={handleExpandClick}
-          aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
-          // ARIA tree is a composite widget with a single tab stop (the roving
-          // treeitem). Descendant controls must NOT be independent page Tab
-          // stops on every row, which would defeat the roving tabindex — so the
-          // chevron is unconditionally -1 and driven by the row's Arrow keys
-          // (Right expands, Left collapses) plus pointer clicks.
-          tabIndex={-1}
-        >
-          {isExpanded ? (
-            <ChevronDown className="w-3 h-3" />
-          ) : (
-            <ChevronRight className="w-3 h-3" />
-          )}
-        </button>
-
-        {/* Visibility toggle */}
-        <button
-          className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
-          onClick={handleVisibilityClick}
-          title={node.visible ? 'Hide entity' : 'Show entity'}
-          aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
-          aria-pressed={!node.visible}
-          // Single-tab-stop tree: the eye toggle is not an independent Tab stop
-          // on every row. Keyboard users toggle visibility with the "V" key on
-          // the focused row (see SceneHierarchy handleKeyDown); pointer users
-          // click it directly.
-          tabIndex={-1}
-        >
-          {node.visible ? (
-            <Eye className="w-3 h-3" />
-          ) : (
-            <EyeOff className="w-3 h-3" />
-          )}
-        </button>
-
-        {/* Entity icon */}
-        <EntityIcon type={iconType} className="w-4 h-4 text-neutral-400" />
-
-        {/* Entity name (with inline editing support) */}
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            aria-label={`Rename ${node.name}`}
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={handleEditKeyDown}
-            onBlur={handleEditBlur}
-            onClick={(e) => e.stopPropagation()}
-            className="
-              flex-1 min-w-0 text-sm bg-neutral-700 text-white
-              border border-blue-500 rounded px-1 py-0.5
-              outline-none focus:ring-1 focus:ring-blue-400
-            "
+        {/* Drop indicator BEFORE */}
+        {isDropTarget && dropTarget?.zone === 'before' && (
+          <div
+            className="h-0.5 bg-blue-500 rounded-full"
+            style={{ marginLeft: `${depth * 16 + 8}px` }}
           />
-        ) : (
-          <HighlightedText
-            text={node.name}
-            highlight={filterTerm}
-            className={`text-sm truncate ${
-              isPrimary ? 'text-white font-medium' : matchingIds?.has(node.entityId) ? 'text-neutral-200' : 'text-neutral-300'
-            } ${filterTerm && !matchingIds?.has(node.entityId) ? 'opacity-60' : ''}`}
+        )}
+
+        <div
+          ref={rowRef}
+          draggable={!isEditing}
+          className={`flex items-center gap-1 px-2 py-1 cursor-grab select-none ${getSelectionClasses()} ${getDragClasses()}`}
+          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+          onClick={handleClick}
+          onContextMenu={handleContextMenuClick}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {/* Expand/collapse chevron */}
+          <button
+            className={`w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] ${
+              !hasChildren ? 'invisible' : ''
+            }`}
+            onClick={handleExpandClick}
+            aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            // ARIA tree is a composite widget with a single tab stop (the roving
+            // treeitem). Descendant controls must NOT be independent page Tab
+            // stops on every row, which would defeat the roving tabindex — so the
+            // chevron is unconditionally -1 and driven by the row's Arrow keys
+            // (Right expands, Left collapses) plus pointer clicks.
+            tabIndex={-1}
+          >
+            {isExpanded ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <ChevronRight className="w-3 h-3" />
+            )}
+          </button>
+
+          {/* Visibility toggle */}
+          <button
+            className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
+            onClick={handleVisibilityClick}
+            title={node.visible ? 'Hide entity' : 'Show entity'}
+            aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
+            aria-pressed={!node.visible}
+            // Single-tab-stop tree: the eye toggle is not an independent Tab stop
+            // on every row. Keyboard users toggle visibility with the "V" key on
+            // the focused row (see SceneHierarchy handleKeyDown); pointer users
+            // click it directly.
+            tabIndex={-1}
+          >
+            {node.visible ? (
+              <Eye className="w-3 h-3" />
+            ) : (
+              <EyeOff className="w-3 h-3" />
+            )}
+          </button>
+
+          {/* Entity icon */}
+          <EntityIcon type={iconType} className="w-4 h-4 text-neutral-400" />
+
+          {/* Entity name (with inline editing support) */}
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              aria-label={`Rename ${node.name}`}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleEditKeyDown}
+              onBlur={handleEditBlur}
+              onClick={(e) => e.stopPropagation()}
+              className="
+                flex-1 min-w-0 text-sm bg-neutral-700 text-white
+                border border-blue-500 rounded px-1 py-0.5
+                outline-none focus:ring-1 focus:ring-blue-400
+              "
+            />
+          ) : (
+            <HighlightedText
+              text={node.name}
+              highlight={filterTerm}
+              className={`text-sm truncate ${
+                isPrimary ? 'text-white font-medium' : matchingIds?.has(node.entityId) ? 'text-neutral-200' : 'text-neutral-300'
+              } ${filterTerm && !matchingIds?.has(node.entityId) ? 'opacity-60' : ''}`}
+            />
+          )}
+        </div>
+
+        {/* Drop indicator AFTER (only if not expanded or no children) */}
+        {isDropTarget && dropTarget?.zone === 'after' && !isExpanded && (
+          <div
+            className="h-0.5 bg-blue-500 rounded-full"
+            style={{ marginLeft: `${depth * 16 + 8}px` }}
           />
         )}
       </div>
 
-      {/* Drop indicator AFTER (only if not expanded or no children) */}
-      {isDropTarget && dropTarget?.zone === 'after' && !isExpanded && (
-        <div
-          className="h-0.5 bg-blue-500 rounded-full"
-          style={{ marginLeft: `${depth * 16 + 8}px` }}
-        />
-      )}
-
-      {/* Children */}
-      {hasChildren && isExpanded && (
-        <div role="group">
+      {/* Children: a sibling group owned by the treeitem above (aria-owns). */}
+      {showChildGroup && (
+        <div role="group" id={childGroupId}>
           {node.children
             .filter((childId) => !visibleIds || visibleIds.has(childId))
             .map((childId) => {
@@ -515,6 +526,6 @@ export function SceneNode({
             })}
         </div>
       )}
-    </div>
+    </Fragment>
   );
 }
