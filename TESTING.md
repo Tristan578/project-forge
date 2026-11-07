@@ -239,6 +239,32 @@ Leave these unchecked until exercised in a running editor.
 
 ---
 
+## Sanctions Geo-Block (#9331)
+
+Run against a local production build (`cd web && npm run build && npx next start`), where nothing overwrites the Vercel geolocation headers, so they can be set by hand. The list and the rules are in `specs/2026-11-04-sanctions-geo-block.md`.
+
+### Blocked country: site
+- [ ] `curl -si -H 'x-vercel-ip-country: IR' http://localhost:3000/pricing` → `451`, `Cache-Control: private, no-store`, `Link: <https://www.spawnforge.ai>; rel="blocked-by"`, and a plain page reading "SpawnForge is not available in your region"
+- [ ] Open the same URL in a browser with the header set (a header-modifying extension) → the plain 451 page shows, with no scripts, styles or images loaded
+- [ ] `curl -si -H 'x-vercel-ip-country: IR' http://localhost:3000/editor/abc.html` → `451` (an extension-shaped dynamic page still reaches the proxy)
+- [ ] `curl -si -H 'x-vercel-ip-country: IR' http://localhost:3000/api/projects` → `451` with JSON `{"code":"SANCTIONS_GEO_BLOCK", ...}`
+
+### Blocked country: payment
+- [ ] `curl -si -X POST -H 'x-vercel-ip-country: RU' -H 'content-type: application/json' -d '{"tier":"creator"}' http://localhost:3000/api/billing/checkout` → `451`, and no Stripe Checkout session is created
+- [ ] Repeat for `/api/tokens/purchase` (`{"package":"spark"}`), `/api/billing/portal` and `/api/marketplace/assets/<id>/purchase` → `451` each
+
+### Allowed country and allowed region
+- [ ] `curl -si -H 'x-vercel-ip-country: US' http://localhost:3000/pricing` → `200`, the normal page
+- [ ] `curl -si -H 'x-vercel-ip-country: UA' -H 'x-vercel-ip-country-region: 30' http://localhost:3000/` → `200` (Kyiv is not blocked)
+- [ ] `curl -si -H 'x-vercel-ip-country: UA' -H 'x-vercel-ip-country-region: 43' http://localhost:3000/` → `451` (Crimea is)
+- [ ] `curl -si http://localhost:3000/` with no header → `200` (missing header fails open)
+
+### Bypass paths
+- [ ] `curl -si -H 'x-vercel-ip-country: IR' http://localhost:3000/api/health` → not `451`
+- [ ] `curl -si -X POST -H 'x-vercel-ip-country: IR' http://localhost:3000/api/stripe/webhook` → not `451` (signature check answers instead)
+
+---
+
 ## Production Smoke
 
 ### Sign-in Page Rendering

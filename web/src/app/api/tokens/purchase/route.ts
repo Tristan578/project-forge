@@ -8,6 +8,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
 import { getStripe } from '@/lib/billing/stripe-client';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
 
 const purchaseSchema = z.object({
   package: z.enum(['spark', 'blaze', 'inferno']),
@@ -20,6 +21,11 @@ const PACKAGE_PRICE_IDS: Record<string, string | undefined> = {
 };
 
 async function POST_impl(req: NextRequest) {
+  // Sanctions geo-block (#9331): refuse payment from a blocked jurisdiction
+  // here too, so it holds even on a path the proxy matcher stops covering.
+  const geoBlocked = sanctionsGeoBlock(req);
+  if (geoBlocked) return geoBlocked;
+
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
