@@ -13,11 +13,11 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.9.23",
-    "@tailwindcss/postcss": "^4.3.3",
-    "fumadocs-core": "^16.17.9",
-    "fumadocs-mdx": "^15.4.10",
-    "fumadocs-ui": "^16.17.9",
+    "@clerk/nextjs": "^7.9.25",
+    "@tailwindcss/postcss": "^4.3.5",
+    "fumadocs-core": "^16.18.1",
+    "fumadocs-mdx": "^15.5.0",
+    "fumadocs-ui": "^16.18.1",
     "gray-matter": "^4",
     "next": "^16.4.5",
     "react": "^19.3.1",
@@ -25,7 +25,7 @@
     "tailwindcss": "^4"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
