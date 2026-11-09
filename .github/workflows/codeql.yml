@@ -133,6 +133,6 @@ jobs:
           build-mode: none
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@256d634097be96e792d6764f9edaefc4320557b1 # v4
+        uses: github/codeql-action/analyze@fbfa9f37476c0024508d051f3c34fcca3366b0e2 # v4
         with:
           category: "/language:${{ matrix.language }}"
