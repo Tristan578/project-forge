@@ -57,7 +57,10 @@ export function useGenerationPolling() {
     });
   }, []);
 
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
   // Separate effect for unmount-only cleanup so that timer teardown does not
   // run on every jobs state change (which would desync the polling loop).
   useEffect(() => {
@@ -549,6 +552,7 @@ export function useGenerationPolling() {
       img.src = url;
     });
   }
+<<<<<<< Updated upstream
 
   // Declared AFTER `startPolling` and its helpers, not before them.
   //
@@ -560,6 +564,10 @@ export function useGenerationPolling() {
   // Moving the effect below the declarations is behaviour-identical: both of the
   // other effects have `[]` deps and register cleanup only, so the mount order
   // this changes is not observable.
+=======
+  // Declared last, after startPolling: react-hooks/immutability rejects an effect
+  // that reaches a function declared later in the component body.
+>>>>>>> Stashed changes
   useEffect(() => {
     const activeJobs = Object.values(jobs).filter(
       (j) => j.status === 'pending' || j.status === 'processing'
@@ -570,19 +578,36 @@ export function useGenerationPolling() {
       if (timersRef.current[job.id]) continue;
 
       // Start polling for this job
+<<<<<<< Updated upstream
       startPolling(job.id, job.jobId, job.type, job.durable === true);
+=======
+      startPolling(job.id, job.jobId, job.type);
+>>>>>>> Stashed changes
     }
 
     // Cleanup timers for jobs that are no longer active
     const activeJobIds = new Set(activeJobs.map((j) => j.id));
     for (const id of Object.keys(timersRef.current)) {
       if (!activeJobIds.has(id)) {
+<<<<<<< Updated upstream
         stopPolling(id);
+=======
+        clearInterval(timersRef.current[id]);
+        delete timersRef.current[id];
+        delete pollCountsRef.current[id];
+>>>>>>> Stashed changes
       }
     }
     // NOTE: No cleanup return here — clearing all timers on deps change would stop
     // in-flight polls every time updateJob() causes a re-render (PF-699 desync bug).
+<<<<<<< Updated upstream
     // Unmount cleanup is handled by the separate [] -deps effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs]);
+=======
+    // Unmount cleanup is handled by the separate effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
+
+>>>>>>> Stashed changes
 }

@@ -22,8 +22,13 @@ export function TerrainInspector() {
   const [localData, setLocalData] = useState<TerrainDataState | null>(terrainData);
   const [updateTimer, setUpdateTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
+<<<<<<< Updated upstream
   // Sync local state with the store. Derived state, so it is applied during
   // render rather than in an effect.
+=======
+  // Sync local state with the store during render via the prev-value pattern
+  // rather than in an effect (react-hooks/set-state-in-effect).
+>>>>>>> Stashed changes
   const [prevTerrainData, setPrevTerrainData] = useState(terrainData);
   if (prevTerrainData !== terrainData) {
     setPrevTerrainData(terrainData);

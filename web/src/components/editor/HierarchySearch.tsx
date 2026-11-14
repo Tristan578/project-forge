@@ -26,8 +26,14 @@ export function HierarchySearch({ matchCount }: HierarchySearchProps) {
   // Local input value for responsive typing (debounced to store)
   const [localValue, setLocalValue] = useState(hierarchyFilter);
 
+<<<<<<< Updated upstream
   // Sync local value when the store changes (e.g. from the clear action).
   // Derived state, so it is applied during render rather than in an effect.
+=======
+  // Sync local value when the store changes (e.g., from clear action). Done
+  // during render via the prev-value pattern rather than in an effect, which
+  // react-hooks/set-state-in-effect rejects.
+>>>>>>> Stashed changes
   const [prevFilter, setPrevFilter] = useState(hierarchyFilter);
   if (prevFilter !== hierarchyFilter) {
     setPrevFilter(hierarchyFilter);

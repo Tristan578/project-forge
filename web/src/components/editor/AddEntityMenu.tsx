@@ -67,16 +67,26 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
     }
   }, [open]);
 
+<<<<<<< Updated upstream
   // The highlighted index is derived from `open`: first item when the menu
   // opens, nothing when it closes. Applied during render rather than in an
   // effect so the first paint already carries the right highlight.
+=======
+  // Reset the roving-tabindex cursor during render rather than in an effect
+  // (react-hooks/set-state-in-effect): the index is derived from `open`, so the
+  // prev-value pattern keeps it in sync without a second render pass.
+>>>>>>> Stashed changes
   const [prevOpen, setPrevOpen] = useState(open);
   if (prevOpen !== open) {
     setPrevOpen(open);
     setFocusedIndex(open ? 0 : -1);
   }
 
+<<<<<<< Updated upstream
   // Move real DOM focus once the menu has been painted.
+=======
+  // Moving DOM focus is a real side effect and stays in an effect.
+>>>>>>> Stashed changes
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {

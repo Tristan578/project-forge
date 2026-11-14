@@ -44,6 +44,9 @@ interface GamePlayerProps {
   isAuthenticated?: boolean;
 }
 
+// The share URL never changes while this page is mounted.
+const subscribeToNothing = () => () => {};
+
 export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayerProps) {
   const [gameData, setGameData] = useState<GameData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +61,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // during SSR, so reading it at render time causes a hydration mismatch
   // (server: '', client: actual URL). An empty string also throws in addUtm's
   // new URL() call, so ShareButtons is only rendered once the URL is known.
+<<<<<<< Updated upstream
   // useSyncExternalStore gives React both snapshots explicitly: the server one
   // is used for SSR and hydration, the client one for every render after, with
   // no state write and so no extra render pass.
@@ -65,6 +69,15 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
     subscribeToNothing,
     getShareUrlSnapshot,
     getServerShareUrlSnapshot
+=======
+  // useSyncExternalStore gives the server the empty snapshot and the client the
+  // real URL without a setState in an effect (react-hooks/set-state-in-effect).
+  // The URL is fixed for the lifetime of this page, so nothing to subscribe to.
+  const shareUrl = useSyncExternalStore(
+    subscribeToNothing,
+    () => window.location.href,
+    () => ''
+>>>>>>> Stashed changes
   );
 
   const containerRef = useRef<HTMLDivElement>(null);

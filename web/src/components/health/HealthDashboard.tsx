@@ -120,12 +120,21 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
   // anything. Mount-only: the interval below covers every subsequent attempt,
   // including a retry after this one fails.
   const hasInitialReport = initialReport !== null;
+  // Driven from an async IIFE because react-hooks/set-state-in-effect flags any
+  // named callee that contains a setState, regardless of await ordering.
   useEffect(() => {
+<<<<<<< Updated upstream
     if (!hasInitialReport) {
       void (async () => {
         await fetchReport();
       })();
     }
+=======
+    if (hasInitialReport) return;
+    void (async () => {
+      await fetchReport();
+    })();
+>>>>>>> Stashed changes
   }, [hasInitialReport, fetchReport]);
 
   // Auto-refresh every 30 seconds

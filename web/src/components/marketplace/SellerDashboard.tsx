@@ -64,6 +64,7 @@ export function SellerDashboard() {
     }
   }, []);
 
+<<<<<<< Updated upstream
   // Both fetchers are declared above so the mount effect is not reaching
   // forward to them. fetchAssets opens with a synchronous setLoading(true), so
   // the effect calls it from inside an async IIFE rather than directly — the
@@ -71,6 +72,15 @@ export function SellerDashboard() {
   useEffect(() => {
     void (async () => {
       await Promise.all([fetchProfile(), fetchAssets()]);
+=======
+  // The loaders are awaited inside an async IIFE rather than called directly:
+  // react-hooks/set-state-in-effect flags any named callee that contains a
+  // setState, so the fetch has to be driven from inside the effect body.
+  useEffect(() => {
+    void (async () => {
+      await fetchProfile();
+      await fetchAssets();
+>>>>>>> Stashed changes
     })();
   }, [fetchProfile, fetchAssets]);
 

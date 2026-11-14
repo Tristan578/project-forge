@@ -49,9 +49,15 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
     }
   }, [router]);
 
+<<<<<<< Updated upstream
   // Only fetch on mount if the server did not pre-populate the list. Nothing
   // here writes state synchronously — every setState in fetchProjects happens
   // after an await — so the effect cannot cascade a second render.
+=======
+  // Only fetch on mount if the server did not pre-populate the list. Driven from
+  // an async IIFE because react-hooks/set-state-in-effect flags any named callee
+  // that contains a setState, regardless of await ordering.
+>>>>>>> Stashed changes
   useEffect(() => {
     if (initialProjects !== undefined) return;
     void (async () => {

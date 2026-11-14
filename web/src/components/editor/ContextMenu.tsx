@@ -55,8 +55,13 @@ export function ContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [clampedPosition, setClampedPosition] = useState(position);
 
+<<<<<<< Updated upstream
   // Reset to the requested position whenever it changes. Derived from a prop,
   // so it is computed during render — the layout effect below then clamps it to
+=======
+  // Reset position during render when it changes, rather than in an effect
+  // (react-hooks/set-state-in-effect). The layout effect below re-clamps it to
+>>>>>>> Stashed changes
   // the viewport once the menu has been measured.
   const [prevPosition, setPrevPosition] = useState(position);
   if (prevPosition !== position) {
@@ -170,13 +175,19 @@ export function ContextMenu({
     };
   }, [isOpen, onClose, focusedIndex, actionableIndices, focusItem]);
 
+<<<<<<< Updated upstream
   // Drop the focus highlight as the menu closes. Derived from `isOpen`, so it
   // is applied during render rather than in an effect.
+=======
+  // Reset the roving-tabindex cursor during render rather than in an effect
+  // (react-hooks/set-state-in-effect) — it is derived purely from `isOpen`.
+>>>>>>> Stashed changes
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
   if (prevIsOpen !== isOpen) {
     setPrevIsOpen(isOpen);
     if (!isOpen) {
       setFocusedIndex(-1);
+<<<<<<< Updated upstream
     }
   }
 
@@ -188,7 +199,20 @@ export function ContextMenu({
         focusItem(actionableIndices[0]);
       });
       return () => cancelAnimationFrame(frame);
+=======
+>>>>>>> Stashed changes
     }
+  }
+
+  // Auto-focus first item when menu opens. Moving DOM focus is a real side
+  // effect and stays in an effect.
+  useEffect(() => {
+    if (!isOpen || actionableIndices.length === 0) return;
+    // Delay to allow layout effect to run first
+    const frame = requestAnimationFrame(() => {
+      focusItem(actionableIndices[0]);
+    });
+    return () => cancelAnimationFrame(frame);
   // Only trigger on open state changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);

@@ -52,6 +52,7 @@ export function AdminDashboard() {
     }
   }, []);
 
+<<<<<<< Updated upstream
   // Explicit refresh (Refresh button, post-save reload): shows the spinner and
   // clears any stale error before reloading.
   const fetchData = useCallback(async () => {
@@ -65,6 +66,15 @@ export function AdminDashboard() {
       await loadData();
     })();
   }, [loadData]);
+=======
+  // Driven from an async IIFE inside the effect: react-hooks/set-state-in-effect
+  // flags any named callee that contains a setState, regardless of await ordering.
+  useEffect(() => {
+    void (async () => {
+      await fetchData();
+    })();
+  }, [fetchData]);
+>>>>>>> Stashed changes
 
   const saveTokenConfig = useCallback(async (config: TokenConfig) => {
     setSaving(config.id);

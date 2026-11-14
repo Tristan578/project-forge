@@ -46,6 +46,18 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
     buttonRef.current?.focus();
   }, []);
 
+  // Menu items are read from the DOM in render order rather than tracked in a
+  // ref array: a render-time ref-callback factory writes to `ref.current` while
+  // rendering (react-hooks/refs), and the array it built was never cleared, so
+  // a closed-then-reopened menu could keep focusing a detached node.
+  const getMenuItems = useCallback(
+    () =>
+      Array.from(
+        menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []
+      ),
+    []
+  );
+
   // Close on outside click
   useEffect(() => {
     if (!open) return;
@@ -63,14 +75,22 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
     if (open) {
       // Defer to next frame so items are rendered
       requestAnimationFrame(() => {
+<<<<<<< Updated upstream
         menuItems(menuRef.current)[0]?.focus();
+=======
+        getMenuItems()[0]?.focus();
+>>>>>>> Stashed changes
       });
     }
-  }, [open]);
+  }, [open, getMenuItems]);
 
   const handleMenuKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+<<<<<<< Updated upstream
       const items = menuItems(menuRef.current);
+=======
+      const items = getMenuItems();
+>>>>>>> Stashed changes
       const idx = items.indexOf(document.activeElement as HTMLButtonElement);
 
       switch (e.key) {
@@ -95,7 +115,7 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
           break;
       }
     },
-    [close]
+    [close, getMenuItems]
   );
 
   const handleRestartTutorial = () => {
@@ -189,21 +209,21 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
   );
 }
 
-import { forwardRef } from 'react';
-
-const MenuItem = forwardRef<
-  HTMLButtonElement,
-  {
-    icon: React.ReactNode;
-    label: string;
-    shortcut?: string;
-    onClick: () => void;
-    disabled?: boolean;
-  }
->(function MenuItem({ icon, label, shortcut, onClick, disabled }, ref) {
+function MenuItem({
+  icon,
+  label,
+  shortcut,
+  onClick,
+  disabled,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  shortcut?: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
-      ref={ref}
       role="menuitem"
       tabIndex={-1}
       onClick={onClick}
@@ -215,4 +235,4 @@ const MenuItem = forwardRef<
       {shortcut && <span className="text-[10px] text-zinc-400">{shortcut}</span>}
     </button>
   );
-});
+}

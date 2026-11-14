@@ -21,6 +21,7 @@ export function BillingTab() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [portalError, setPortalError] = useState<string | null>(null);
 
+<<<<<<< Updated upstream
   const fetchBillingStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/billing/status');
@@ -45,6 +46,29 @@ export function BillingTab() {
       await fetchBillingStatus();
     })();
   }, [fetchBillingStatus]);
+=======
+  // Inlined into the effect (rather than a named loader called from it) because
+  // react-hooks/set-state-in-effect flags any named callee containing setState.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/billing/status');
+        if (res.ok) {
+          const data = await res.json();
+          setBillingStatus(data);
+        } else {
+          setFetchError('Unable to load billing information. Please refresh the page.');
+        }
+      } catch {
+        setFetchError(
+          'Unable to load billing information. Please check your connection and refresh.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+>>>>>>> Stashed changes
 
   const handleManageSubscription = async () => {
     setPortalError(null);

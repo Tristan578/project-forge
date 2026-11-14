@@ -23,13 +23,12 @@ export function DialogueOverlay() {
   const engineMode = useEditorStore((s) => s.engineMode);
 
   const [showHistory, setShowHistory] = useState(false);
-  const [typewriterText, setTypewriterText] = useState('');
-  const [typewriterDone, setTypewriterDone] = useState(false);
 
   // Get current node
   const tree = (activeTreeId ? getTree(dialogueTrees, activeTreeId) : undefined) ?? null;
   const currentNode = tree?.nodes.find((n) => n.id === currentNodeId) ?? null;
 
+<<<<<<< Updated upstream
   // The starting text is derived from the current node and the store's
   // typewriterComplete flag, so it is computed during render — the very first
   // paint of a new line already shows the right thing instead of flashing the
@@ -62,22 +61,52 @@ export function DialogueOverlay() {
 
     const fullText = currentNode.text;
     let charIndex = 0;
+=======
+  const isTextNode = currentNode?.type === 'text';
+  const fullText = isTextNode ? currentNode.text : '';
+
+  // The typewriter tracks only how many characters have been revealed; the text
+  // and the done flag are derived during render. Previously all three lived in
+  // state and were written synchronously from the effect body, which
+  // react-hooks/set-state-in-effect rejects.
+  const [charIndex, setCharIndex] = useState(0);
+  const [prevNodeKey, setPrevNodeKey] = useState<string | null>(null);
+  const nodeKey = isTextNode ? currentNodeId : null;
+  if (prevNodeKey !== nodeKey) {
+    setPrevNodeKey(nodeKey);
+    setCharIndex(0);
+  }
+
+  const typewriterText = !isTextNode
+    ? ''
+    : typewriterComplete
+      ? fullText
+      : fullText.slice(0, charIndex);
+  const typewriterDone = !isTextNode || typewriterComplete || charIndex >= fullText.length;
+
+  // Typewriter effect: advance the reveal index on a timer. setState from a
+  // timer callback is not an effect-body write, so the rule is satisfied.
+  useEffect(() => {
+    if (!isTextNode || typewriterComplete) return;
+
+    const total = fullText.length;
+    let revealed = 0;
+>>>>>>> Stashed changes
 
     const interval = setInterval(() => {
-      charIndex++;
-      if (charIndex >= fullText.length) {
-        setTypewriterText(fullText);
-        setTypewriterDone(true);
+      revealed++;
+      if (revealed >= total) {
+        setCharIndex(total);
         clearInterval(interval);
         // Mark typewriter as complete in store
         skipTypewriter();
       } else {
-        setTypewriterText(fullText.slice(0, charIndex));
+        setCharIndex(revealed);
       }
     }, TYPEWRITER_MS);
 
     return () => clearInterval(interval);
-  }, [currentNodeId, currentNode, typewriterComplete, skipTypewriter]);
+  }, [isTextNode, fullText, typewriterComplete, skipTypewriter]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback(
