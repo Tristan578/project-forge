@@ -16,10 +16,10 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 
 | Segment | Size | Entry Hook | Conversion Path | LTV |
 |---------|------|-----------|----------------|-----|
-| **Game jam participants** | 500K+ annually | "Prototype in minutes, not hours" | Free → Starter ($29/mo) for export | Medium |
+| **Game jam participants** | 500K+ annually | "Prototype in minutes, not hours" | Free → Starter ($9/mo) for AI tokens and more cloud projects | Medium |
 | **CS/game design students** | 2M+ globally | "Learn game dev without Unity overhead" | Free → Educational tier (discounted) | Low (but viral) |
-| **Indie developers** | 300K+ active | "Professional tools, zero install" | Starter → Creator ($79/mo) for AI gen | High |
-| **Content creators/streamers** | 100K+ | "Build games live on stream" | Creator → Pro ($199/mo) for collab | Very High |
+| **Indie developers** | 300K+ active | "Professional tools, zero install" | Starter → Creator ($29/mo) for advanced AI panels and a larger project limit | High |
+| **Content creators/streamers** | 100K+ | "Build games live on stream" | Creator → Studio ($79/mo) for unlimited cloud projects and higher limits | Very High |
 | **Educators** | 50K+ | "Teach game design in any browser" | Institutional licensing | Very High |
 
 ### Distribution Channels
@@ -40,15 +40,20 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 
 ### Current Tiers (Validated)
 
-<!-- NOTE: The code tier names (starter/hobbyist/creator/pro with 50/300/1000/3000 tokens)
-     differ from the marketing names below. Reconcile before launch. -->
+<!-- Reconciled to the code on 2026-11-04. Source of truth: web/src/lib/billing/tierPlans.ts
+     (names, prices, limits) and web/src/lib/tokens/pricing.ts (token packs). If this table
+     and those files disagree, the code is right. -->
 
-| Tier | Price | Token Budget | Key Features | Target Persona |
-|------|-------|-------------|--------------|----------------|
-| **Free (starter)** | $0 | 50 AI tokens/mo | Editor, templates, export (watermark) | Trial users, students |
-| **Hobbyist** | $29/mo | 300 tokens/mo | No watermark, BYOK AI keys, cloud save | Hobbyists, jam participants |
-| **Creator** | $79/mo | 1,000 tokens/mo | Platform AI (Claude, Meshy, etc.), publish | Indie developers |
-| **Pro** | $199/mo | 3,000 tokens/mo | Priority generation, collaboration (future) | Teams, content creators |
+| Tier | Price | AI tokens | Limits and key features | Target Persona |
+|------|-------|-----------|-------------------------|----------------|
+| **Free** (billing key `starter`) | $0 | 50 trial tokens, granted once at signup; no monthly tokens | Full editor and local export; 3 cloud projects; 1 published game | Trial users, students |
+| **Starter** (billing key `hobbyist`) | $9/mo | 300/mo | 10 cloud projects; 3 published games; AI chat; 3D model, texture, sound, voice and music generation only with your own Meshy or ElevenLabs key (BYOK) | Hobbyists, jam participants |
+| **Creator** | $29/mo | 1,000/mo | 50 cloud projects; 10 published games; advanced AI panels; external MCP access is not delivered yet | Indie developers |
+| **Studio** (billing key `pro`) | $79/mo | 3,000/mo | Unlimited cloud projects; 100 published games; Pro AI panels; platform-managed AI keys are not delivered yet | Teams, content creators |
+
+Add-on token packs (one-off, `TOKEN_PACKAGES` in `pricing.ts`): Spark $12 for 1,000 tokens, Blaze $49 for 5,000, Inferno $149 for 20,000.
+
+Earlier drafts of this table listed $29/$79/$199, a watermark on free exports, "Platform AI (Claude, Meshy, etc.)" on Creator, and priority generation and collaboration on Pro. None of those matches the code: there are four paid-or-free plans, not three paid tiers above Free; no watermark gate exists; production has no platform generation keys (#9117). Per `docs/capability-matrix.md`: chat runs on platform credentials (AI Gateway or platform Anthropic key) and needs no user key; 3D model, texture, sound, voice and music generation work only with a user's own Meshy or ElevenLabs key (BYOK, implemented but unverified); sprite, pixel-art, image and background-removal generation have no BYOK route at all (`BYOK_PROVIDERS` takes only Anthropic, Meshy, Hyper3D and ElevenLabs keys) and stay unavailable until the platform OpenAI, Replicate or remove.bg keys are provisioned; and there is no collaboration or priority-generation feature. Do not market them until they ship.
 
 ### Revenue Model Analysis
 
@@ -69,6 +74,22 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 | MRR | $500 | $12,500 | $80,000 |
 | Churn rate | N/A | 8% | 5% |
 | NPS | N/A | 40+ | 50+ |
+
+> The MRR row above implies about $50 average revenue per paying customer (10 customers = $500). Real prices are $9, $29 and $79. Reaching $50 takes a mix weighted heavily to Studio: for example 58% Creator / 42% Studio with nobody on Starter, or 10% Starter / 44% Creator / 46% Studio. Starter can be at most about 41% of payers, and only if every other payer is on Studio. These targets are superseded by the re-derivation below.
+
+#### Re-derived at the real prices (2026-11-05)
+
+Gross MRR from a 12-month margin model (attached to PR #10459). Each scenario holds conversion and plan mix constant; churn is not modeled.
+
+| Scenario | Levers | Month 1 | Month 6 | Month 12 |
+|----------|--------|---------|---------|----------|
+| Conservative | 100 MAU, +15%/month, 2% paid, 70/20/10 Starter/Creator/Studio | $40 | $80 | $186 |
+| Base | 300 MAU, +25%/month, 3% paid, 50/30/20 | $261 | $797 | $3,038 |
+| This doc's levers | 500 MAU, +40%/month, 5% paid, 0/58/42 | $1,250 | $6,723 | $50,620 |
+
+The month-12 figure in the doc's own levers is below the $80,000 target because the model holds conversion at 5%; the target assumes 8%. The Year 1 subscription target above ($50K ARR, about $4,200 MRR) and the month-12 MRR target ($80,000, a $960K run rate) contradict each other; the Base scenario is closer to the first.
+
+**Profit depends on chat metering, not on growth.** In today's code, chat on the Vercel AI Gateway path deducts no tokens (#10462), so every free and paid user chats at the platform's expense. Over 12 months the model then loses money in every scenario: Base loses about $164,000 at high provider cost and about $4,700 at low cost. With chat charged in tokens at the current flat price, Base turns positive (about +$1,500 at high cost, +$11,900 at low), and Conservative stays near break-even because fixed infrastructure ($20–250 a month) exceeds its revenue. Even metered, one heavy Studio account can cost more than it pays, because chat's 5/15-token price does not scale with what a request costs (#10462). **Sign-up should stay closed until #10462 is fixed.**
 
 ---
 
@@ -102,7 +123,7 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 - **Day 0:** AI builds first game from a description in <60s
 - **Day 1:** Email: "Your game is live at spawnforge.ai/play/..." (publish nudge)
 - **Day 3:** Email: "Try these 3 modifications to your game" (engagement)
-- **Day 7:** Email: "Upgrade to Starter — export without watermark" (conversion)
+- **Day 7:** Email: "Upgrade to Starter — more AI tokens and cloud projects" (conversion)
 
 ### Month 1: Habit Formation
 - **Weekly challenges:** "Build a game with these systems this week" (community + starter bundles)
