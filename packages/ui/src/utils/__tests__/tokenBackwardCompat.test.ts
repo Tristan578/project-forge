@@ -29,6 +29,37 @@ describe('Token backward compatibility', () => {
     }
   });
 
+  it('validateCustomTheme accepts every catalog token — no token is silently dropped', () => {
+    // Drift guard: validateCustomTheme()'s ALL_VALID_KEYS must stay in 1:1 sync with
+    // THEME_DEFINITIONS. Feeding each catalog token its own built-in Dark value must
+    // round-trip it into the validated theme; a key missing from the validator's
+    // allowlist is dropped at themeValidator.ts and would fail here. This caught the
+    // --sf-status-* tokens (PF-1068 / #9108) being added to ThemeTokens and V1_TOKEN_KEYS
+    // but not to COLOR_TOKEN_KEYS, so validateCustomTheme silently stripped them from
+    // every custom theme (the #8742 "old validator strips new tokens" class).
+    const dark = THEME_DEFINITIONS.dark as Record<string, string>;
+    const catalogKeys = Object.keys(dark);
+    // Sanity: the walk is non-empty, so a vacuous pass cannot masquerade as coverage.
+    expect(catalogKeys.length).toBeGreaterThan(0);
+
+    for (const key of catalogKeys) {
+      const result = validateCustomTheme({
+        schemaVersion: 1,
+        name: 'Drift',
+        author: 'test',
+        description: '',
+        tokens: { [key]: dark[key] },
+      });
+      expect(result.ok, `validateCustomTheme rejected catalog token ${key}`).toBe(true);
+      if (result.ok) {
+        expect(
+          Object.keys(result.theme.tokens),
+          `Token ${key} was silently dropped by validateCustomTheme — add it to COLOR_TOKEN_KEYS/LENGTH_TOKEN_KEYS/FONT_TOKEN_KEYS/DURATION_TOKEN_KEYS in themeValidator.ts`,
+        ).toContain(key);
+      }
+    }
+  });
+
   it('partial theme (only --sf-accent set) passes validation', () => {
     const result = validateCustomTheme({
       schemaVersion: 1,
