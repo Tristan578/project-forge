@@ -623,7 +623,7 @@ jobs:
       # below must not leave a single byte where the build writes.
       - name: Download the PR's pre-optimisation WASM
         if: steps.engine-cache-all4.outputs.cache-hit != 'true' && steps.ci-artifact.outputs.run-id != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: wasm-binaries-cd-reuse
           path: ${{ runner.temp }}/ci-wasm
@@ -884,7 +884,7 @@ jobs:
       # serve its output so the app under test matches what deploys.
       - name: Download WASM artifacts
         if: needs.build-wasm.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: wasm-binaries
           path: engine/
@@ -1050,7 +1050,7 @@ jobs:
       # --- Path A: build-wasm prepared a verified artifact for this deploy -----
       - name: Download WASM artifacts
         if: needs.build-wasm.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: wasm-binaries
           path: engine/
@@ -1188,7 +1188,7 @@ jobs:
 
       - name: Download WASM artifacts for same-origin fallback
         id: download-wasm-staging
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: wasm-binaries
           path: engine/
@@ -1564,7 +1564,7 @@ jobs:
 
       - name: Download WASM artifacts for same-origin fallback
         id: download-wasm-production
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: wasm-binaries
           path: engine/

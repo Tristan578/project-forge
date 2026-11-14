@@ -85,7 +85,7 @@ for (const lineEnding of ['LF', 'CRLF']) {
       }
       assert.match(job, /^          node scripts\/populate-engine-fallback[.]mjs engine web\/public$/m);
       const download = job.split('      - name: Download WASM artifacts for same-origin fallback\n')[1].split(/\n      - /)[0];
-      assert.match(download, /^        uses: actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8$/m);
+      assert.match(download, /^        uses: actions\/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8$/m);
       assert.match(download, /^          name: wasm-binaries$/m);
       assert.match(download, /^          path: engine\/$/m);
       const verify = job.split('      - name: Verify ' + target + ' upload contains the engine\n')[1].split(/\n      - /)[0];
