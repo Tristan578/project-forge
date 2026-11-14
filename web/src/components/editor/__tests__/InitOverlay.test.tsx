@@ -247,6 +247,30 @@ describe('InitOverlay', () => {
     expect(mockRetry).toHaveBeenCalled();
   });
 
+  // #9726 accessibility regression: the inline Retry button must NOT be solid
+  // `bg-[var(--sf-destructive)]` with hardcoded white — white on
+  // `--sf-destructive` fails WCAG AA 1.4.3 in 5 of 7 themes (3.76:1 in the
+  // default dark theme). It renders a destructive tint over `--sf-bg-surface`
+  // with `--sf-text` instead (contrast pinned per theme in
+  // packages/ui/src/tokens/__tests__/themes.test.ts).
+  it('renders the inline Retry button with readable --sf-text, not white on solid destructive (#9726)', () => {
+    vi.mocked(useEngineStatus).mockReturnValue({
+      ...baseStatus,
+      error: 'WebGPU context lost',
+      canRetry: true,
+      isTimedOut: false,
+      retryCount: 0,
+    });
+    render(<InitOverlay />);
+    const retryButton = screen.getByText('Retry').closest('button');
+    expect(retryButton).not.toBeNull();
+    const className = retryButton!.className;
+    expect(className).toContain('text-[var(--sf-text)]');
+    expect(className).not.toContain('text-white');
+    // Solid destructive fill (no tint composite) is the failing pattern.
+    expect(className).not.toContain('bg-[var(--sf-destructive)]');
+  });
+
   // Sentry finding on #9726: the error InlineAlert and the bottom bar each had
   // their own condition for a Retry button, and both were true simultaneously
   // for a non-timeout error with canRetry — two Retry buttons on screen for

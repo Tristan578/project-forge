@@ -337,4 +337,76 @@ describe('Theme Definitions', () => {
       ).toBeGreaterThanOrEqual(3.0);
     }
   );
+
+  // #9726: `InlineAlert` (packages/ui/src/primitives/InlineAlert.tsx) is used at
+  // 5 editor call sites and paints, per variant, a 12% tint of a semantic token
+  // over `--sf-bg-surface` and carries the BODY TEXT in `--sf-text`. The
+  // primitive originally painted the semantic token itself as text on top of
+  // its own tint — the exact pairing banned by SEMANTIC_TINT_TOKENS above,
+  // which failed AA in 10 of 21 theme×variant combos (destructive/rust 2.91:1,
+  // the same ~2.9 this file cites as the reason for the ban). This grades the
+  // painted result at the primitive's real 12% (SEMANTIC_TINT_TOKENS uses the
+  // OrchestratorPanel's 10%, so it could not catch InlineAlert). Keep in
+  // lockstep with the variant tints in InlineAlert.tsx.
+  const INLINE_ALERT_TINT = 0.12;
+
+  const INLINE_ALERT_TINT_TOKENS = [
+    ['--sf-warning', 'InlineAlert variant="warning" body text'],
+    ['--sf-destructive', 'InlineAlert variant="error" body text'],
+    ['--sf-accent', 'InlineAlert variant="info" body text'],
+  ] as const;
+
+  const INLINE_ALERT_TINT_CASES = THEMES.flatMap((theme) =>
+    INLINE_ALERT_TINT_TOKENS.map(([tokenKey, usedBy]) => [theme, tokenKey, usedBy] as const)
+  );
+
+  it.each(INLINE_ALERT_TINT_CASES)(
+    '%s theme: %s/12 InlineAlert tint keeps --sf-text body copy at WCAG AA',
+    (theme, tokenKey, usedBy) => {
+      const tokens = THEME_DEFINITIONS[theme];
+      const tintHex = tokens[tokenKey] as string;
+      const surfaceHex = tokens['--sf-bg-surface'] as string;
+      const textHex = tokens['--sf-text'] as string;
+      const blendedBg = blendHex(tintHex, surfaceHex, INLINE_ALERT_TINT);
+      const ratio = contrastRatio(textHex, blendedBg);
+      expect(
+        ratio,
+        `${theme}: --sf-text ${textHex} on blended ${tokenKey}/12 ${blendedBg} (over --sf-bg-surface ${surfaceHex}, used by ${usedBy}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  );
+
+  // #9726: the inline Retry button inside InitOverlay's error alert
+  // (web/src/components/editor/InitOverlay.tsx). It was retokenised to solid
+  // `bg-[var(--sf-destructive)] text-white`, which fails AA 1.4.3 in 5 of 7
+  // themes (white on `--sf-destructive` is 3.76:1 in dark; the shared Button
+  // primitive's destructive variant carries the same latent failure via
+  // `--sf-on-accent`). It now paints a destructive tint over `--sf-bg-surface`
+  // at 25% (rest) / 35% (hover) with `--sf-text`. Both painted surfaces must
+  // clear the 4.5 text floor in every theme. Keep the alphas in lockstep with
+  // the button's className.
+  const INIT_OVERLAY_RETRY_ALPHAS: Array<[number, string]> = [
+    [0.25, 'InitOverlay retry button rest'],
+    [0.35, 'InitOverlay retry button hover'],
+  ];
+
+  const INIT_OVERLAY_RETRY_CASES = THEMES.flatMap((theme) =>
+    INIT_OVERLAY_RETRY_ALPHAS.map(([alpha, usedBy]) => [theme, alpha, usedBy] as const)
+  );
+
+  it.each(INIT_OVERLAY_RETRY_CASES)(
+    '%s theme: InitOverlay retry button (--sf-destructive tint at %s) keeps its label at WCAG AA',
+    (theme, alpha, usedBy) => {
+      const tokens = THEME_DEFINITIONS[theme];
+      const destHex = tokens['--sf-destructive'] as string;
+      const surfaceHex = tokens['--sf-bg-surface'] as string;
+      const textHex = tokens['--sf-text'] as string;
+      const blendedBg = blendHex(destHex, surfaceHex, alpha);
+      const ratio = contrastRatio(textHex, blendedBg);
+      expect(
+        ratio,
+        `${theme}: --sf-text ${textHex} on blended --sf-destructive/${alpha} ${blendedBg} (over --sf-bg-surface ${surfaceHex}, ${usedBy}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  );
 });

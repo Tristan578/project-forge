@@ -16,23 +16,30 @@ export interface InlineAlertProps
 }
 
 // Token-driven only — no raw amber/yellow/red literals. Mirrors the
-// border/bg/text pattern already used by Toast and Badge so light/dark theming
-// is handled once by the theme variables.
+// border/bg pattern already used by Toast and Badge so light/dark theming is
+// handled once by the theme variables.
+//
+// The BODY TEXT is `--sf-text`, added to the base `cn(...)` below — NOT the
+// semantic token. A variant must never paint its own semantic token as text on
+// top of a 12% tint of that same token: `--sf-warning`/`--sf-destructive`/
+// `--sf-accent` are pinned only at the WCAG 1.4.11 non-text floor (3:1) and
+// have no paired `-foreground` token, so token-on-own-tint fails AA 4.5:1 in
+// most themes (as low as ~2.9:1 for destructive in rust). This is the exact
+// pairing PF-1229 removed from OrchestratorPanel, and Toast.tsx pairs the same
+// border-40%/tint-over-surface recipe with `--sf-text` for the same reason.
+// Graded in tokens/__tests__/themes.test.ts (InlineAlert 12% tint cases).
 const variantStyles: Record<InlineAlertVariant, string> = {
   warning: [
     "border-[color-mix(in_srgb,var(--sf-warning)_40%,transparent)]",
     "bg-[color-mix(in_srgb,var(--sf-warning)_12%,var(--sf-bg-surface))]",
-    "text-[var(--sf-warning)]",
   ].join(" "),
   error: [
     "border-[color-mix(in_srgb,var(--sf-destructive)_40%,transparent)]",
     "bg-[color-mix(in_srgb,var(--sf-destructive)_12%,var(--sf-bg-surface))]",
-    "text-[var(--sf-destructive)]",
   ].join(" "),
   info: [
     "border-[color-mix(in_srgb,var(--sf-accent)_40%,transparent)]",
     "bg-[color-mix(in_srgb,var(--sf-accent)_12%,var(--sf-bg-surface))]",
-    "text-[var(--sf-accent)]",
   ].join(" "),
 };
 
@@ -57,6 +64,7 @@ export function InlineAlert({
         "rounded-[var(--sf-radius-md)]",
         "border",
         "px-3 py-2 text-xs",
+        "text-[var(--sf-text)]",
         variantStyles[variant],
         className,
       )}

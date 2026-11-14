@@ -197,9 +197,16 @@ export function InitOverlay() {
               <InlineAlert variant="error" className="mt-4 text-sm">
                 <p>Error: {error}</p>
                 {canRetry && (
+                  // Destructive-tinted button, NOT solid `--sf-destructive`
+                  // with hardcoded white: `--sf-on-accent`/white on solid
+                  // `--sf-destructive` fails WCAG AA 1.4.3 in 5 of 7 themes
+                  // (dark 3.76:1). A 25%/35% tint over `--sf-bg-surface` with
+                  // `--sf-text` clears 4.5:1 in every theme (worst 7.56:1) —
+                  // the same resolution PF-1229 applied. Pinned in
+                  // packages/ui/src/tokens/__tests__/themes.test.ts.
                   <button
                     onClick={retry}
-                    className="mt-2 rounded bg-[var(--sf-destructive)] px-3 py-1.5 text-sm text-white hover:opacity-90"
+                    className="mt-2 rounded-[var(--sf-radius-sm)] border border-[color-mix(in_srgb,var(--sf-destructive)_50%,transparent)] bg-[color-mix(in_srgb,var(--sf-destructive)_25%,var(--sf-bg-surface))] px-3 py-1.5 text-sm text-[var(--sf-text)] hover:bg-[color-mix(in_srgb,var(--sf-destructive)_35%,var(--sf-bg-surface))]"
                   >
                     Retry
                   </button>

@@ -81,6 +81,30 @@ describe('InlineAlert', () => {
     },
   );
 
+  // #9726 regression: the body text MUST be `--sf-text`, never the variant's
+  // own semantic token. Painting `text-[var(--sf-warning|destructive|accent)]`
+  // over a 12% tint of that same token fails WCAG AA 4.5:1 in most themes (as
+  // low as ~2.9:1 for destructive in rust) — the exact pairing PF-1229 removed
+  // from OrchestratorPanel. Contrast per theme is graded in
+  // tokens/__tests__/themes.test.ts; this pins the class the primitive emits so
+  // the semantic-token-as-text pattern can never come back.
+  it.each([
+    ['warning', '--sf-warning'],
+    ['error', '--sf-destructive'],
+    ['info', '--sf-accent'],
+  ] as const)(
+    'paints body text with --sf-text, never the semantic token, for the %s variant',
+    (variant, semanticToken) => {
+      const { container } = render(
+        <InlineAlert variant={variant}>Readable</InlineAlert>,
+      );
+      const box = container.firstChild as HTMLElement;
+      expect(box.className).toContain('text-[var(--sf-text)]');
+      // The semantic token may still drive border/bg, but never the text color.
+      expect(box.className).not.toContain(`text-[var(${semanticToken})]`);
+    },
+  );
+
   it.each(THEME_NAMES)('renders without hardcoded primitives in %s theme', (theme) => {
     document.documentElement.setAttribute('data-sf-theme', theme);
     const { container } = render(<InlineAlert variant="warning">Test</InlineAlert>);
