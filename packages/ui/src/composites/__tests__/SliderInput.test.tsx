@@ -6,7 +6,9 @@ describe('SliderInput', () => {
   it('renders label and value display', () => {
     render(<SliderInput label="Volume" value={50} onChange={() => {}} />);
     expect(screen.getByText('Volume')).not.toBeNull();
-    expect(screen.getByText('50')).toHaveStyle({ color: 'var(--sf-text-secondary)' });
+    // Read the inline style: jsdom 31 resolves an undefined custom property in
+    // getComputedStyle to the inherited color, so toHaveStyle can't see the token.
+    expect(screen.getByText('50').style.color).toBe('var(--sf-text-secondary)');
   });
 
   it('calls onChange with numeric value', () => {
