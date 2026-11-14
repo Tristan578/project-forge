@@ -87,17 +87,6 @@ const ENGINE_LOAD_REJECTION =
 /** The dispatch threw. The message is appended so the cause is not swallowed. */
 const ENGINE_LOAD_THREW = 'This scene could not be opened: the engine failed while loading it.';
 
-/**
- * Was this lockout raised by a THROWN dispatch (as opposed to a clean
- * `{success:false}` rejection)? A throw can have despawned the outgoing scene
- * mid-apply, so a capture taken while such a lockout stands is a capture of a
- * possibly-wrecked viewport — `restoreCheckpoint`'s recovery branch uses this
- * to refuse to re-enable saving over that capture (#10079).
- */
-function isEngineLoadThrewLockout(error: SceneLoadError | null): boolean {
-  return error !== null && error.reason.startsWith(ENGINE_LOAD_THREW);
-}
-
 export interface SceneSlice {
   sceneName: string;
   sceneModified: boolean;
@@ -1158,12 +1147,18 @@ export const createSceneSlice: StateCreator<
     const before = get();
     const { projectId, projectRevision, activeSceneId } = before;
     // A lockout standing when this restore begins is the lockout the `prior`
-    // capture (taken below, before any dispatch) is made under. If it was
-    // raised by a THROWN dispatch, that capture is of a possibly-wrecked
-    // viewport, so the recovery branch must NOT clear the lockout when it
-    // re-applies `prior` — confirming SCENE_LOADED for the wreckage does not
-    // make it trustworthy (#10079, finding 4).
-    const priorCapturedUnderThrowLockout = isEngineLoadThrewLockout(before.sceneLoadError);
+    // capture (taken below, before any dispatch) is made under. ANY standing
+    // lockout — a THROWN dispatch that may have despawned the outgoing scene
+    // mid-apply, OR a clean `{success:false}` rejection whose contract
+    // (sceneSlice.ts saveScene / SceneLoadErrorNotice) is that the engine is
+    // holding something that is NOT this project's scene — means `prior` is an
+    // export of an untrusted viewport. So the recovery branch must NOT clear
+    // the lockout when it re-applies `prior`: confirming SCENE_LOADED for that
+    // capture proves only that the wrong/wrecked scene loaded, not that it is
+    // the project's scene, and re-enabling saving over it lets the next
+    // autosave/Ctrl+S/cloud PUT write it onto the stored `sceneData` — the
+    // identical overwrite #10056 prevents (#10079, finding 4).
+    const priorCapturedUnderLockout = before.sceneLoadError !== null;
     let sceneOperationRevision = before.sceneOperationRevision;
     const isCurrent = () => get().projectId === projectId && get().projectRevision === projectRevision && get().sceneOperationRevision === sceneOperationRevision && get().activeSceneId === activeSceneId;
     set({ checkpointBusy: true, checkpointError: null, autoSaveEnabled: false });
@@ -1263,13 +1258,14 @@ export const createSceneSlice: StateCreator<
           // Confirmed by the same SCENE_LOADED wait as the success path above —
           // the prior scene is back, so its name/dirty flag come back with it.
           // The save lockout comes off too UNLESS `prior` was captured under a
-          // THREW lockout: re-applying a capture of a viewport a throw may have
-          // wrecked, and confirming SCENE_LOADED for it, does not make it
-          // trustworthy, so saving stays locked until the user reloads (#10079).
+          // standing lockout (thrown OR clean rejection): re-applying a capture
+          // of an untrusted viewport, and confirming SCENE_LOADED for it, does
+          // not make it trustworthy, so saving stays locked until the user
+          // reloads (#10079).
           set({
             sceneName: before.sceneName,
             sceneModified: before.sceneModified,
-            ...(priorCapturedUnderThrowLockout ? {} : { sceneLoadError: null }),
+            ...(priorCapturedUnderLockout ? {} : { sceneLoadError: null }),
           });
         } catch {
           message += ' The previous save is intact, but the viewport could not be recovered. Reload the project before editing.';
