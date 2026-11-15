@@ -15,7 +15,9 @@ interface Quality {
   sharpeningEnabled: boolean;
   particleDensityScale: number;
 }
-type ObservedWindow = Window & { qualityEvents: Quality[] };
+declare global {
+  interface Window { __QUALITY_EVENTS_FOR_TEST?: Quality[] }
+}
 interface Scene { quality: Quality; [key: string]: unknown }
 
 const HIGH: Quality = {
@@ -60,11 +62,11 @@ async function exportScene(page: Page): Promise<Scene> {
 }
 
 async function changeAndObserve(page: Page, command: string, payload: Record<string, unknown>, quality: Quality) {
-  await page.evaluate(() => { (window as ObservedWindow).qualityEvents = []; });
+  await page.evaluate(() => { window.__QUALITY_EVENTS_FOR_TEST = []; });
   await dispatch(page, command, payload);
   // This callback is reached only through QUALITY_CHANGED. No optimistic store
   // action or get_quality_settings query can manufacture the expected result.
-  await expect.poll(() => page.evaluate(() => (window as ObservedWindow).qualityEvents.at(-1))).toEqual(quality);
+  await expect.poll(() => page.evaluate(() => window.__QUALITY_EVENTS_FOR_TEST?.at(-1))).toEqual(quality);
   await expect.poll(() => page.evaluate(() => (window.__EDITOR_STORE as Store).getState().qualityPreset)).toBe(quality.preset);
   expect((await exportScene(page)).quality).toEqual(quality);
 }
@@ -74,9 +76,9 @@ test('quality commands, undo, save/load and reset reach the engine and editor mi
   await page.evaluate(() => {
     const store = window.__EDITOR_STORE as Store;
     const original = store.getState().setQualityFromEngine;
-    (window as ObservedWindow).qualityEvents = [];
+    window.__QUALITY_EVENTS_FOR_TEST = [];
     store.setState({ setQualityFromEngine: (data) => {
-      (window as ObservedWindow).qualityEvents.push(structuredClone(data) as Quality);
+      window.__QUALITY_EVENTS_FOR_TEST?.push(structuredClone(data) as Quality);
       original(data);
     } });
   });
