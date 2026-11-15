@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildTemplateSceneFile, toEngineEntityType } from '../templateSceneFile';
 import { TEMPLATE_REGISTRY } from '@/data/templates';
-import type { GameTemplate, EntitySnapshotData } from '@/data/templates';
+import type { GameTemplate, EntitySnapshotData, EngineActionDef } from '@/data/templates';
 
 /** Fields `EntitySnapshot` declares WITHOUT `#[serde(default)]` — all mandatory. */
 const REQUIRED_SNAPSHOT_FIELDS = [
@@ -60,12 +60,15 @@ function makeEntity(overrides: Partial<EntitySnapshotData> = {}): EntitySnapshot
   };
 }
 
-function makeTemplate(entities: EntitySnapshotData[]): GameTemplate {
+function makeTemplate(
+  entities: EntitySnapshotData[],
+  category: GameTemplate['category'] = 'platformer',
+): GameTemplate {
   return {
     id: 'test',
     name: 'Test Template',
     description: 'd',
-    category: 'platformer',
+    category,
     difficulty: 'beginner',
     thumbnail: { gradient: 'g', icon: 'i', accentColor: '#fff' },
     tags: [],
@@ -120,11 +123,102 @@ describe('buildTemplateSceneFile', () => {
     expect(JSON.parse(sceneJson).entities[0].name).toBe('Entity One');
   });
 
-  it('emits inputBindings as an InputMap, not the template empty object', () => {
-    // `InputMap` declares `actions` and `preset` with no serde default, so the
-    // template's `inputBindings: {}` fails the ENTIRE file, not just this key.
+  /**
+   * A 2D TEMPLATE MUST LOAD IN 2D MODE.
+   *
+   * Nothing in the template path ever set the engine's `ProjectType`: the
+   * translated file carried no dimension and no caller sent
+   * `set_project_type`, so every 2D template — ten sprites in the platformer
+   * alone — loaded in the default 3D mode with no 2D camera and nothing
+   * visible. The scene file now carries `metadata.projectType` and the
+   * engine restores it on `load_scene` (#10227); the template's category is
+   * the only statement of its dimension, so it is written from there.
+   */
+  describe('metadata.projectType', () => {
+    const TWO_D = ['2d_platformer', '2d_topdown', '2d_shmup', '2d_puzzle', '2d_fighter', '2d_metroidvania'] as const;
+    const THREE_D = ['platformer', 'runner', 'shooter', 'puzzle', 'explorer'] as const;
+
+    it.each(TWO_D)('%s writes 2d', (category) => {
+      const parsed = JSON.parse(buildTemplateSceneFile(makeTemplate([makeEntity()], category)).sceneJson);
+      expect(parsed.metadata.projectType).toBe('2d');
+    });
+
+    it.each(THREE_D)('%s writes 3d', (category) => {
+      const parsed = JSON.parse(buildTemplateSceneFile(makeTemplate([makeEntity()], category)).sceneJson);
+      expect(parsed.metadata.projectType).toBe('3d');
+    });
+
+    it('covers every category the type allows', () => {
+      // Non-vacuous: a new category added to `GameTemplate` must be sorted
+      // into one of the two lists above, or this fails at the type level AND here.
+      const all: ReadonlyArray<GameTemplate['category']> = [...TWO_D, ...THREE_D];
+      const _exhaustive: Record<GameTemplate['category'], true> = Object.fromEntries(
+        all.map((c) => [c, true]),
+      ) as Record<GameTemplate['category'], true>;
+      expect(Object.keys(_exhaustive)).toHaveLength(TWO_D.length + THREE_D.length);
+    });
+  });
+
+  /**
+   * A TEMPLATE THAT SAYS NOTHING ABOUT INPUT MUST NOT SILENCE THE KEYBOARD.
+   *
+   * This used to assert `{ actions: {}, preset: null }`, because `InputMap` had
+   * no serde default and a template's `inputBindings: {}` failed the whole
+   * file. That workaround had a cost nobody priced: `load_scene` assigns the
+   * file's map straight onto the `InputMap` resource, so every template was
+   * loaded into a scene where NO KEY DID ANYTHING — and a genre preset was then
+   * applied on top, which is how "pick a genre" became the only route to having
+   * input at all.
+   *
+   * `SceneFile.input_bindings` takes `#[serde(default)]` now and
+   * `InputMap::default()` is a working keyboard, so the right emission for a
+   * template with no opinion is to OMIT the key. An empty map is not neutral —
+   * it is a deliberate statement that nothing is bound (#9764).
+   */
+  it('omits inputBindings when the template declares none, so the defaults apply', () => {
     const { sceneJson } = buildTemplateSceneFile(makeTemplate([makeEntity()]));
-    expect(JSON.parse(sceneJson).inputBindings).toEqual({ actions: {}, preset: null });
+    expect('inputBindings' in JSON.parse(sceneJson)).toBe(false);
+  });
+
+  // These two fixtures used the EDITOR STORE's spelling (`actionName`,
+  // `actionType: 'digital'`, `sources: ['KeyG']`). `buildInputBindings` takes
+  // `unknown` and passes anything through, so they passed — while pinning a
+  // shape `load_scene` cannot deserialise, which is the wrong contract stated
+  // with the same confidence as the right one. Rewritten in the engine's
+  // `ActionDef` shape, which is what a template actually has to emit.
+  it('passes through the actions a template declares', () => {
+    const template = makeTemplate([makeEntity()]);
+    template.sceneData.inputBindings = {
+      grapple: {
+        name: 'grapple',
+        actionType: { type: 'Digital' },
+        sources: [{ type: 'Key', value: 'KeyG' }],
+      },
+    };
+
+    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
+    expect(parsed.inputBindings.actions.grapple).toEqual({
+      name: 'grapple',
+      actionType: { type: 'Digital' },
+      sources: [{ type: 'Key', value: 'KeyG' }],
+    });
+  });
+
+  it('accepts a template that already writes the full InputMap shape', () => {
+    const template = makeTemplate([makeEntity()]);
+    template.sceneData.inputBindings = {
+      actions: {
+        p2_attack: {
+          name: 'p2_attack',
+          actionType: { type: 'Digital' },
+          sources: [{ type: 'Key', value: 'Enter' }],
+        },
+      },
+      preset: null,
+    } as unknown as Record<string, EngineActionDef>;
+
+    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
+    expect(Object.keys(parsed.inputBindings.actions)).toEqual(['p2_attack']);
   });
 
   it('splits physics into physicsData and physicsEnabled and fills every field', () => {
@@ -282,6 +376,8 @@ describe('every shipped template translates into a loadable SceneFile', () => {
 
       expect(parsed.entities.length).toBe(entityCount);
       expect(entityCount).toBeGreaterThan(0);
+      // Every shipped 2D template is one the engine will open in 2D (#10227).
+      expect(parsed.metadata.projectType).toBe(entry.category.startsWith('2d_') ? '2d' : '3d');
 
       const keptIds = new Set<string>(parsed.entities.map((e: { entityId: string }) => e.entityId));
       for (const entity of parsed.entities) {

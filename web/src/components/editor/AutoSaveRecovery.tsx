@@ -5,6 +5,8 @@ import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
+import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
+import { showError } from '@/lib/toast';
 import {
   loadAutoSaveEntry,
   deleteAutoSaveEntry,
@@ -86,7 +88,34 @@ export function AutoSaveRecovery() {
     // permanently lost even though the scene was never loaded (PF-587).
     if (!engineReady) return;
 
-    loadScene(entry.sceneJson);
+    // `loadScene` returns false when the engine rejects the scene or its
+    // embedded prefab metadata is invalid — WITHOUT ever dispatching the load.
+    // Deleting the backup on that path would permanently lose the very work
+    // this banner exists to protect (PF-587), so surface the failure and keep
+    // both the auto-save entry and the banner so the user can try again.
+    //
+    // `rejectionStrandsEditor: false`: the scene the engine already holds is
+    // untouched when the restore is rejected, so this must not raise the
+    // save-locking `sceneLoadError` banner over a working editor — the toast
+    // below is the whole report and the current scene stays savable (#10056).
+    let accepted: boolean;
+    try {
+      accepted = loadScene(entry.sceneJson, { rejectionStrandsEditor: false });
+    } catch (error) {
+      // A THROWN dispatch is re-raised after `loadScene` has locked saving
+      // (#10079, #10202): the restore may have half-applied over the current
+      // scene, so "try again" would be the wrong advice and the backup is now
+      // the only trustworthy copy — keep the entry AND the banner. The helper
+      // narrows the reload-and-locked sentence to the engine throw; a plain
+      // error is reported as what it is. Without this catch the throw escaped
+      // the click handler as an uncaught error.
+      showError(sceneDispatchFailureMessage('The saved scene could not be restored', error));
+      return;
+    }
+    if (accepted === false) {
+      showError('The saved scene could not be restored. Its data may be invalid or the engine is not ready — try again.');
+      return;
+    }
     setSceneName(entry.sceneName);
 
     // Only delete the auto-save entry after successfully dispatching the load.

@@ -638,11 +638,83 @@ pub(super) fn apply_impulse_applications2d(
     }
 }
 
+/// System that writes 2D linear velocity (only during Play mode).
+///
+/// `Velocity` IS QUERIED MUTABLY, NOT INSERTED. `manage_physics2d_lifecycle`
+/// attaches one to every 2D body on entering Play, so it is already there and
+/// already carrying whatever the simulation last wrote. Inserting a fresh one
+/// here would replace the whole component - including `angular`, which this
+/// command has no business touching - and would discard the current `linear`
+/// on the axis the caller deliberately left out.
+///
+/// An entity with no `Velocity` is one with no 2D rigid body, so there is no
+/// velocity to set; it is skipped rather than given a body it never had.
+pub(super) fn apply_linear_velocity2d_sets(
+    mut pending: ResMut<PendingCommands>,
+    engine_mode: Res<EngineMode>,
+    mut query: Query<(&EntityId, &mut bevy_rapier2d::prelude::Velocity)>,
+) {
+    if !engine_mode.is_playing() {
+        pending.linear_velocity2d_sets.clear();
+        return;
+    }
+
+    for request in pending.linear_velocity2d_sets.drain(..) {
+        for (entity_id, mut velocity) in query.iter_mut() {
+            if entity_id.0 == request.entity_id {
+                // Per axis, so an omitted one keeps the value the simulation
+                // computed. This is the whole reason the payload is optional.
+                if let Some(x) = request.x {
+                    velocity.linear.x = x;
+                }
+                if let Some(y) = request.y {
+                    velocity.linear.y = y;
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// System that writes 2D angular velocity (only during Play mode).
+pub(super) fn apply_angular_velocity2d_sets(
+    mut pending: ResMut<PendingCommands>,
+    engine_mode: Res<EngineMode>,
+    mut query: Query<(&EntityId, &mut bevy_rapier2d::prelude::Velocity)>,
+) {
+    if !engine_mode.is_playing() {
+        pending.angular_velocity2d_sets.clear();
+        return;
+    }
+
+    for request in pending.angular_velocity2d_sets.drain(..) {
+        for (entity_id, mut velocity) in query.iter_mut() {
+            if entity_id.0 == request.entity_id {
+                velocity.angular = request.omega;
+                break;
+            }
+        }
+    }
+}
+
 /// System that processes 2D raycast requests using Rapier 2D context.
+///
+/// EVERY BRANCH OF THIS LOOP MUST EMIT EXACTLY ONE EVENT PER DRAINED REQUEST.
+/// The payloads carry no correlation id, so the browser matches answers to
+/// requests by QUEUE POSITION (`web/src/lib/scripting/raycast2dRegistry.ts`):
+/// the Nth answer settles the Nth outstanding request. A branch that returns
+/// without emitting therefore does not merely lose one answer — it shifts every
+/// later answer by one, so each subsequent script raycast resolves with a
+/// different caster's hit, indefinitely, with nothing logged anywhere.
+///
+/// That is why the "no Rapier context" and "hit an entity with no EntityId"
+/// paths emit a MISS rather than `continue`. If a new early exit is added here,
+/// it emits too. Adding a `request_id` to the payloads is the only thing that
+/// would make this loop's shape stop mattering.
 pub(super) fn apply_raycast2d_requests(
     mut pending: ResMut<PendingCommands>,
     rapier_context: bevy_rapier2d::prelude::ReadRapierContext,
-    entity_id_query: Query<&EntityId>,
+    entity_id_query: Query<(Entity, &EntityId)>,
 ) {
     for request in pending.raycast2d_requests.drain(..) {
         let Ok(rapier_context) = rapier_context.single() else {
@@ -653,15 +725,39 @@ pub(super) fn apply_raycast2d_requests(
         let origin = bevy_rapier2d::prelude::Vect::new(request.origin_x, request.origin_y);
         let direction = bevy_rapier2d::prelude::Vect::new(request.dir_x, request.dir_y);
 
+        // EXCLUDE THE CASTER WHEN ASKED. `cast_ray` runs with `solid: true` and
+        // returns the CLOSEST hit, so a ray starting inside a collider reports
+        // that collider at `toi = 0` and nothing beyond it. A ground check
+        // starts at the caster's own centre, so without this filter it can only
+        // ever answer "you are standing on yourself" — the caller then sees a
+        // self-hit and reports not-grounded, every time, for every entity.
+        let excluded = request.exclude_entity_id.as_ref().and_then(|wanted| {
+            entity_id_query
+                .iter()
+                .find(|(_, eid)| &eid.0 == wanted)
+                .map(|(entity, _)| entity)
+        });
+        // SENSORS ARE NOT GROUND. `QueryFilter::default()` leaves the flags
+        // empty, so `EXCLUDE_SENSORS` is unset and a `Sensor` collider — a
+        // pickup zone, a hazard trigger, a one-way-platform volume — answers
+        // the cast like a solid floor. A character standing inside one would
+        // read as grounded and its jump gate would open in mid-air. Nothing
+        // could observe this before, because these events reached no consumer.
+        let base = bevy_rapier2d::prelude::QueryFilter::default().exclude_sensors();
+        let filter = match excluded {
+            Some(entity) => base.exclude_collider(entity),
+            None => base,
+        };
+
         if let Some((entity, toi)) = rapier_context.cast_ray(
             origin,
             direction,
             request.max_distance,
             true,
-            bevy_rapier2d::prelude::QueryFilter::default(),
+            filter,
         ) {
             let hit_point = origin + direction * toi;
-            if let Ok(eid) = entity_id_query.get(entity) {
+            if let Ok((_, eid)) = entity_id_query.get(entity) {
                 // Compute a simple 2D normal (perpendicular to ray direction)
                 let dir_len = (direction.x * direction.x + direction.y * direction.y).sqrt();
                 let normal_x = if dir_len > 0.0 { -direction.y / dir_len } else { 0.0 };

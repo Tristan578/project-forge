@@ -1,7 +1,19 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { Play, PlayCircle, AlertTriangle, CheckCircle, XCircle, Info, Loader2 } from 'lucide-react';
+import { useState, useCallback, useRef, useMemo, useEffect, useSyncExternalStore } from 'react';
+import {
+  Play,
+  PlayCircle,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Info,
+  Loader2,
+  Circle,
+  Repeat,
+  Pause,
+  Square,
+} from 'lucide-react';
 import {
   BOT_STRATEGIES,
   simulatePlaytest,
@@ -13,6 +25,75 @@ import {
   type SceneContext,
 } from '@/lib/ai/gameplayBot';
 import { useEditorStore } from '@/stores/editorStore';
+import { InputTraceRecorder, InputTraceValidationError, type InputTrace } from '@/lib/playtest/inputTrace';
+import {
+  collectibleEntityIdsFrom,
+  getActiveReplaySession,
+  startReplaySession,
+  subscribeActiveReplaySession,
+} from '@/lib/playtest/replayEntryPoints';
+import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
+import type { ReplayCancelReason, ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
+import { replayCancelReasonClause } from '@/lib/playtest/replayCancelReason';
+import { ReplayLiveRegion, isTerminalReplayState, replayStatusText } from './ReplayLiveRegion';
+import { replayActionNames, replayAxisActionNames, type ReplaySession } from '@/lib/playtest/replayInvocation';
+
+/**
+ * The replay in flight — manual, the bot's engine run, or the chat tool's —
+ * or null. The pin is engine-global and `replayEntryPoints` admits one run at
+ * a time, so every control that would start one is disabled while this is
+ * non-null, and a hint says whose run it is waiting for.
+ */
+function useActiveReplay(): ReplaySession | null {
+  return useSyncExternalStore(subscribeActiveReplaySession, getActiveReplaySession, () => null);
+}
+
+/**
+ * A cancelled run, as the panel reports it: how far it got and — when the
+ * runner cancelled on the editor's behalf (Stop, a toolbar Pause or Resume)
+ * — why. The creator's own Cancel carries no reason.
+ */
+interface CancelledRun {
+  ticksReplayed: number;
+  reason?: ReplayCancelReason;
+}
+
+/**
+ * Who owns the replay in flight, in the creator's words, and what they can
+ * do about it. The source label alone cannot tell the panel's own bot run
+ * from a replay the chat assistant started (both are `'ai'`), so the panel
+ * passes whether ITS bot run is the active one. The bot run and a manual run
+ * both have a Cancel in this panel; an assistant-started run does not.
+ * @param session The replay in flight.
+ * @param botRunning Whether the panel's own bot run is that replay.
+ * @returns The subject and the advice for the hint.
+ */
+function describeReplayOrigin(
+  session: ReplaySession,
+  botRunning: boolean,
+): { who: string; advice: string } {
+  if (session.source === 'manual') return { who: 'your recording', advice: 'Cancel it or press Stop.' };
+  if (botRunning) return { who: 'the AI bot', advice: 'Cancel it or press Stop.' };
+  return { who: 'the assistant', advice: 'Wait for it to finish or press Stop.' };
+}
+
+/** Why Record / Replay / Run Playtest are disabled while someone else's replay runs. */
+function ReplayBusyHint({
+  session,
+  botRunning,
+  testId,
+}: {
+  session: ReplaySession;
+  botRunning: boolean;
+  testId: string;
+}) {
+  const { who, advice } = describeReplayOrigin(session, botRunning);
+  return (
+    <p data-testid={testId} className="text-xs text-zinc-400 mb-2">
+      A replay is running ({who}). {advice}
+    </p>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -156,18 +237,433 @@ function MetricsTable({ report }: { report: PlaytestReport }) {
 }
 
 // ---------------------------------------------------------------------------
+// Runtime replay (real engine) — distinct from the heuristic AI Playtest above
+// ---------------------------------------------------------------------------
+
+/**
+ * Manual Record + Replay controls for the REAL runtime (#9902).
+ *
+ * Record captures the engine's per-tick named-action input into a bounded
+ * `InputTrace`; Replay drives that same trace back through the real input path
+ * via `invokeReplay('manual', ...)` and reports an observed-state verdict
+ * (entity moved, one collectible
+ * collected). This is deliberately kept separate from, and never conflated
+ * with, the heuristic "AI Playtest" rating above.
+ */
+function RuntimeReplaySection({ botRunning }: { botRunning: boolean }) {
+  const engineMode = useEditorStore((s) => s.engineMode);
+  const primaryId = useEditorStore((s) => s.primaryId);
+  const inputBindings = useEditorStore((s) => s.inputBindings);
+  const allGameComponents = useEditorStore((s) => s.allGameComponents);
+  const sceneName = useEditorStore((s) => s.sceneName);
+  const selectedEntityName = useEditorStore((s) => primaryId ? s.sceneGraph.nodes[primaryId]?.name : undefined);
+
+  const recorderRef = useRef<InputTraceRecorder | null>(null);
+  const traceRef = useRef<InputTrace | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [hasTrace, setHasTrace] = useState(false);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [outcome, setOutcome] = useState<ReplayOutcome | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const isPlaying = engineMode === 'play';
+  // A replay started anywhere (the bot's Run Playtest, the chat tool) occupies
+  // the engine clock; Record and Replay wait for it, not only for their own.
+  const activeReplay = useActiveReplay();
+  const replayActive = activeReplay !== null;
+  const bindings = useMemo(() => inputBindings ?? [], [inputBindings]);
+  const actionNames = useMemo(() => bindings.map((b) => b.actionName), [bindings]);
+
+  // The same default observation set the AI tool derives (`replayEntryPoints`).
+  const collectibleEntityIds = useMemo(
+    () => collectibleEntityIdsFrom(allGameComponents),
+    [allGameComponents],
+  );
+
+  const failRecording = useCallback((cause: unknown) => {
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    traceRef.current = null;
+    setHasTrace(false);
+    setIsRecording(false);
+    console.error('Input recording failed:', cause);
+    setError('Recording could not be saved. Check your input bindings, then select Record to try again.');
+  }, []);
+
+  const toggleRecord = useCallback(() => {
+    setError(null);
+    try {
+      if (recorderRef.current?.isRecording()) {
+        try {
+          recorderRef.current.stop();
+        } catch (cause) {
+          // Validation failures already reach failRecording through onError.
+          if (!(cause instanceof InputTraceValidationError)) throw cause;
+        }
+        return;
+      }
+      const recorder = new InputTraceRecorder(
+        sceneName || 'current-scene',
+        actionNames,
+        (trace) => {
+          traceRef.current = trace;
+          recorderRef.current = null;
+          setHasTrace(true);
+          setIsRecording(false);
+        },
+        failRecording,
+      );
+      recorder.start();
+      recorderRef.current = recorder;
+      traceRef.current = null;
+      setHasTrace(false);
+      setIsRecording(true);
+      setOutcome(null);
+    } catch (e) {
+      failRecording(e);
+    }
+  }, [actionNames, sceneName, failRecording]);
+
+  // A controlled replay session (#10007): the handle is what Pause / Resume /
+  // Cancel act on, and `progress` is what the pending/progress line renders.
+  const handleRef = useRef<ReplayHandle | null>(null);
+  const [progress, setProgress] = useState<ReplayProgress | null>(null);
+  const [cancelled, setCancelled] = useState<CancelledRun | null>(null);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    return () => {
+      recorderRef.current?.cancel();
+      recorderRef.current = null;
+    };
+  }, [isPlaying]);
+
+  // Stop — and a Pause or Resume from the editor toolbar — ends a replay in
+  // flight: the runner watches the store's engineMode through the boundary
+  // `replayEntryPoints` builds and cancels itself on a mode change it did not
+  // make (its own Pause and Resume move the mode too, and it knows them as
+  // its own). That one watch covers this section, the bot's run below and
+  // the chat tool alike, so the panel keeps no Stop effect of its own; the
+  // cancelled line below says which control it was. Unmounting the panel
+  // mid-replay must not leave a synthetic key held either, and that IS the
+  // panel's job.
+  useEffect(
+    () => () => {
+      handleRef.current?.cancel();
+    },
+    [],
+  );
+
+  const [previousMode, setPreviousMode] = useState(engineMode);
+  if (previousMode !== engineMode) {
+    setPreviousMode(engineMode);
+    setIsRecording(false);
+  }
+
+  const startReplay = useCallback(async () => {
+    const trace = traceRef.current;
+    if (!trace || !primaryId) return;
+    setError(null);
+    setOutcome(null);
+    setCancelled(null);
+    setIsReplaying(true);
+    let unsubscribe: (() => void) | null = null;
+    try {
+      const session = startReplaySession('manual', {
+        trace,
+        playerEntityId: primaryId,
+        collectibleEntityIds,
+      });
+      handleRef.current = session.handle;
+      setProgress(session.handle.getProgress());
+      unsubscribe = session.handle.subscribe(setProgress);
+      const result = await session.handle.result;
+      if (result.status === 'completed') {
+        setOutcome(result.outcome);
+        // The run was pinned, so the verdict stands; the release failing is
+        // reported beside it (Stop releases a pin in force during Play anyway).
+        if (result.unpinError) setError(`Replay finished, but the engine clock could not be released: ${result.unpinError}`);
+      } else if (result.status === 'cancelled') {
+        setCancelled(result);
+      } else {
+        setError(result.error.message);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      unsubscribe?.();
+      handleRef.current = null;
+      // The terminal progress is kept: clearing it here lands in the same
+      // render as the terminal state and the announcer would say nothing.
+      // The next Replay click replaces it.
+      setIsReplaying(false);
+    }
+  }, [primaryId, collectibleEntityIds]);
+
+  const pauseReplay = useCallback(() => {
+    handleRef.current?.pause();
+  }, []);
+  const resumeReplay = useCallback(() => {
+    handleRef.current?.resume();
+  }, []);
+  const cancelReplay = useCallback(() => {
+    handleRef.current?.cancel();
+  }, []);
+
+  const canPause = progress?.state === 'running' || progress?.state === 'pinning';
+  const showResume = progress?.state === 'paused' || progress?.state === 'pausing';
+
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase text-zinc-400 mb-2">
+        Runtime Replay
+      </h3>
+      <p className="text-xs text-zinc-400 mb-2">
+        Record your inputs while playing, then replay them through the real engine
+        to verify the game responds. This is a runtime check, not the heuristic
+        rating above.
+      </p>
+      {!isPlaying && (
+        <div className="text-xs text-zinc-400 italic mb-2">
+          Enter Play mode to record and replay input.
+        </div>
+      )}
+      <p className="text-xs text-zinc-400 mb-2">
+        {primaryId
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank selected-entity name is unset; falls back to showing the raw id
+          ? `Replay will observe ${selectedEntityName || primaryId}.`
+          : 'Select the player entity before replaying recorded input.'}
+      </p>
+      {activeReplay && !isReplaying && (
+        <ReplayBusyHint session={activeReplay} botRunning={botRunning} testId="replay-busy-hint" />
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={toggleRecord}
+          disabled={!isPlaying || isReplaying || replayActive}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
+          aria-label={isRecording ? 'Stop recording input' : 'Record input'}
+          aria-pressed={isRecording}
+        >
+          <Circle size={14} className={isRecording ? 'text-red-400 animate-pulse' : ''} />
+          {isRecording ? 'Stop Recording' : 'Record'}
+        </button>
+        <button
+          onClick={startReplay}
+          disabled={!isPlaying || !primaryId || !hasTrace || isRecording || isReplaying || replayActive}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
+          aria-label="Replay recorded input"
+        >
+          {isReplaying ? <Loader2 size={14} className="animate-spin" /> : <Repeat size={14} />}
+          Replay
+        </button>
+      </div>
+
+      {isReplaying && progress && (
+        // The visible line changes on every tick and is deliberately NOT a
+        // live region; `ReplayLiveRegion` announces it at a readable rate.
+        <div
+          data-testid="replay-progress"
+          className="mt-2 flex items-center gap-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
+        >
+          <Loader2 size={14} className="animate-spin text-blue-400 shrink-0" />
+          <span className="flex-1 text-zinc-300">{replayStatusText(progress)}</span>
+          {showResume ? (
+            <button
+              onClick={resumeReplay}
+              disabled={progress.state === 'pausing'}
+              className={REPLAY_CONTROL_BUTTON}
+              aria-label="Resume replay"
+            >
+              <Play size={14} />
+            </button>
+          ) : (
+            <button
+              onClick={pauseReplay}
+              disabled={!canPause}
+              className={REPLAY_CONTROL_BUTTON}
+              aria-label="Pause replay"
+            >
+              <Pause size={14} />
+            </button>
+          )}
+          <button
+            onClick={cancelReplay}
+            disabled={progress.state === 'cancelling'}
+            className={REPLAY_CONTROL_BUTTON}
+            aria-label="Cancel replay"
+          >
+            <Square size={14} />
+          </button>
+        </div>
+      )}
+      {/* Persistent (empty while idle): a live region inserted mid-run would
+          not have its first content announced by several screen readers. It
+          receives the terminal progress too, says it once, then empties. */}
+      <ReplayLiveRegion progress={progress} />
+
+      {cancelled !== null && (
+        <div role="status" className="mt-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs text-zinc-400">
+          Replay cancelled after {cancelled.ticksReplayed} ticks{replayCancelReasonClause(cancelled.reason)}. Input was
+          released; no verdict was recorded.
+        </div>
+      )}
+
+      {error && (
+        <div role="alert" className="mt-2 px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
+          {error}
+        </div>
+      )}
+
+      <ReplayOutcomeView outcome={outcome} label="Replay" />
+    </div>
+  );
+}
+
+/**
+ * Pause / Resume / Cancel are icon buttons: a 14 px icon with `p-1` is a
+ * 22 px target, under the WCAG 2.5.8 minimum of 24 × 24. `min-h-6 min-w-6`
+ * (24 px) is the floor; the icon stays centred inside it.
+ */
+const REPLAY_CONTROL_BUTTON =
+  'inline-flex min-h-6 min-w-6 items-center justify-center p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed';
+
+/**
+ * Observed-state verdict of a runtime replay, used for both the manual Replay
+ * button and the AI bot's runtime run so the two read identically.
+ */
+function ReplayOutcomeView({ outcome, label }: { outcome: ReplayOutcome | null; label: string }) {
+  if (!outcome) return null;
+  const passed = outcome.verdict === 'passed';
+  return (
+    <div role="status" aria-live="polite" className="mt-2 space-y-1.5">
+      <div
+        className={`flex items-center gap-2 px-3 py-2 rounded border ${
+          passed ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'
+        }`}
+      >
+        {passed ? (
+          <CheckCircle size={16} className="text-green-400" />
+        ) : (
+          <XCircle size={16} className="text-red-400" />
+        )}
+        <span className={`text-sm font-semibold ${passed ? 'text-green-400' : 'text-red-400'}`}>
+          {label} {outcome.verdict}
+        </span>
+        <span className="text-xs text-zinc-400 ml-auto">
+          {outcome.ticksReplayed} ticks
+          {outcome.pinned ? ` · pinned ${outcome.pinHz} Hz` : ' · unpinned clock'}
+        </span>
+      </div>
+      {outcome.assertions.map((a) => (
+        <div
+          key={a.operationId}
+          className="flex items-start gap-1.5 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
+        >
+          {a.passed ? (
+            <CheckCircle size={14} className="text-green-400 mt-0.5 shrink-0" />
+          ) : (
+            <XCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
+          )}
+          <div>
+            <div className="text-zinc-300">{a.description}</div>
+            <div className="text-zinc-500 mt-0.5">{a.operationId}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
 
 export function PlaytestPanel() {
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const allGameComponents = useEditorStore((s) => s.allGameComponents);
+  const engineMode = useEditorStore((s) => s.engineMode);
+  const primaryId = useEditorStore((s) => s.primaryId);
+  const inputBindings = useEditorStore((s) => s.inputBindings);
+  const sceneName = useEditorStore((s) => s.sceneName);
 
   const [selectedStrategy, setSelectedStrategy] = useState<BotStrategy>('explorer');
   const [isRunning, setIsRunning] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [sessions, setSessions] = useState<PlaytestSession[]>([]);
   const [report, setReport] = useState<PlaytestReport | null>(null);
+  // The bot's plan driven through the REAL engine (#10007): the same
+  // `replay_input_trace` command the manual Replay button runs, labelled 'ai',
+  // through the same controlled session — so it occupies the one replay
+  // guard, is cancelled by Stop like the manual run, and can be cancelled by
+  // this panel unmounting (the handle below).
+  const [botOutcome, setBotOutcome] = useState<ReplayOutcome | null>(null);
+  const [botRuntimeError, setBotRuntimeError] = useState<string | null>(null);
+  const [botCancelled, setBotCancelled] = useState<CancelledRun | null>(null);
+  /**
+   * The bot run's progress: what its progress line and announcer render. The
+   * terminal progress is kept after the run (the announcer says it once), so
+   * "running" is the non-terminal case, not "non-null".
+   */
+  const [botProgress, setBotProgress] = useState<ReplayProgress | null>(null);
+  const botRunning = botProgress !== null && !isTerminalReplayState(botProgress.state);
+  const botHandleRef = useRef<ReplayHandle | null>(null);
+  const activeReplay = useActiveReplay();
+  const replayActive = activeReplay !== null;
+  const canRunInEngine = engineMode === 'play' && !!primaryId;
+
+  // Unmounting mid-run must not leave the bot's synthetic keys held.
+  useEffect(
+    () => () => {
+      botHandleRef.current?.cancel();
+    },
+    [],
+  );
+
+  const runBotInEngine = useCallback(
+    async (session: PlaytestSession) => {
+      if (!primaryId) return;
+      const bindings = inputBindings ?? [];
+      // The bot's vocabulary and its axis names both come from the primary
+      // player's bindings, the map the key resolver reads: a name is in the
+      // vocabulary exactly when the resolver can answer it, and is an axis
+      // exactly when the resolver reads its sign (a digital binding would
+      // press its positive key for a negative direction — the wrong way).
+      const trace = botSessionToInputTrace(session, {
+        fixtureId: sceneName || 'current-scene',
+        actionNames: replayActionNames(bindings),
+        axisActionNames: replayAxisActionNames(bindings),
+      });
+      // The bot's plan never aims for a collectible, so its verdict is the
+      // movement assertion alone; `collectiblesCollected` is still reported.
+      const replay = startReplaySession('ai', { trace, playerEntityId: primaryId }, { assertCollectible: false });
+      botHandleRef.current = replay.handle;
+      setBotProgress(replay.handle.getProgress());
+      const unsubscribe = replay.handle.subscribe(setBotProgress);
+      try {
+        const result = await replay.handle.result;
+        if (result.status === 'completed') {
+          setBotOutcome(result.outcome);
+          if (result.unpinError) {
+            setBotRuntimeError(`finished, but the engine clock could not be released: ${result.unpinError}`);
+          }
+        } else if (result.status === 'cancelled') {
+          setBotCancelled(result);
+        } else {
+          setBotRuntimeError(result.error.message);
+        }
+      } finally {
+        unsubscribe();
+        botHandleRef.current = null;
+        // The terminal progress stays (see `botRunning`); the next run replaces it.
+      }
+    },
+    [primaryId, inputBindings, sceneName],
+  );
+
+  const cancelBotReplay = useCallback(() => {
+    botHandleRef.current?.cancel();
+  }, []);
 
   const buildContext = useCallback((): SceneContext => {
     // Build a lightweight game-component map from store data
@@ -189,16 +685,26 @@ export function PlaytestPanel() {
 
   const runSingle = useCallback(async () => {
     setIsRunning(true);
+    setBotOutcome(null);
+    setBotRuntimeError(null);
+    setBotCancelled(null);
     try {
       const ctx = buildContext();
       const session = await simulatePlaytest(ctx, selectedStrategy);
       const newSessions = [session];
       setSessions(newSessions);
       setReport(generatePlaytestReport(newSessions));
+      if (canRunInEngine) {
+        try {
+          await runBotInEngine(session);
+        } catch (e) {
+          setBotRuntimeError(e instanceof Error ? e.message : String(e));
+        }
+      }
     } finally {
       setIsRunning(false);
     }
-  }, [buildContext, selectedStrategy]);
+  }, [buildContext, selectedStrategy, canRunInEngine, runBotInEngine]);
 
   const runAll = useCallback(async () => {
     setIsRunningAll(true);
@@ -229,6 +735,9 @@ export function PlaytestPanel() {
           </h2>
           <p className="text-xs text-zinc-400 mt-1">
             Run AI bots to test your game for balance issues, soft-locks, and unreachable areas.
+            {canRunInEngine
+              ? ' Run Playtest also drives the bot’s plan through the running engine and reports what it observed.'
+              : ' Enter Play mode and select the player to also run the bot through the engine.'}
           </p>
         </div>
 
@@ -239,10 +748,15 @@ export function PlaytestPanel() {
         </div>
 
         {/* Action buttons */}
+        {activeReplay && !botRunning && (
+          <ReplayBusyHint session={activeReplay} botRunning={false} testId="bot-busy-hint" />
+        )}
         <div className="flex gap-2">
           <button
             onClick={runSingle}
-            disabled={isLoading}
+            // Also waits for a replay started elsewhere: Run Playtest drives
+            // the engine, and only one pinned run exists at a time.
+            disabled={isLoading || replayActive}
             className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
             aria-label={`Run playtest with ${selectedStrategy} strategy`}
           >
@@ -259,6 +773,41 @@ export function PlaytestPanel() {
             Run All
           </button>
         </div>
+
+        {/* Runtime replay (real engine) — separate from the heuristic bot above */}
+        <RuntimeReplaySection botRunning={botRunning} />
+
+        {/* The bot's plan run through the real engine — a runtime verdict, never a rating */}
+        {botProgress && botRunning && (
+          <div
+            data-testid="bot-replay-progress"
+            className="flex items-center gap-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
+          >
+            <Loader2 size={14} className="animate-spin text-blue-400 shrink-0" />
+            <span className="flex-1 text-zinc-300">AI bot: {replayStatusText(botProgress)}</span>
+            <button
+              onClick={cancelBotReplay}
+              disabled={botProgress.state === 'cancelling'}
+              className={REPLAY_CONTROL_BUTTON}
+              aria-label="Cancel AI bot replay"
+            >
+              <Square size={14} />
+            </button>
+          </div>
+        )}
+        <ReplayLiveRegion progress={botProgress} testId="bot-replay-announcer" />
+        {botCancelled !== null && (
+          <div role="status" className="px-2.5 py-1.5 bg-zinc-800 rounded text-xs text-zinc-400">
+            AI bot runtime replay cancelled after {botCancelled.ticksReplayed} ticks{replayCancelReasonClause(botCancelled.reason)}.
+            Input was released; no verdict was recorded.
+          </div>
+        )}
+        {botRuntimeError && (
+          <div role="alert" className="px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
+            AI bot runtime replay: {botRuntimeError}
+          </div>
+        )}
+        <ReplayOutcomeView outcome={botOutcome} label="AI bot runtime replay" />
 
         {/* Results */}
         {report && (

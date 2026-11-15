@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { FALLBACK_SCHEMA } from '../types';
-import { makeStepError, successResult, failResult } from './shared';
+import { makeStepError, failResult } from './shared';
+
+// Keep planned SFX durations compatible with the existing standalone route.
+const SFX_MIN_SECONDS = 0.5;
+const SFX_MAX_SECONDS = 22;
 
 const inputSchema = z.object({
   type: z.enum(['3d-model', 'texture', 'sound', 'music', 'voice', 'sprite']),
@@ -12,33 +16,21 @@ const inputSchema = z.object({
   fallback: z.string(),
   maxRetries: z.number().int().min(0).max(5).optional(),
   optional: z.boolean().optional(),
+  // This validates the plan; generation remains unavailable below.
+  durationSeconds: z.number().min(SFX_MIN_SECONDS).max(SFX_MAX_SECONDS).optional(),
 });
 
 /**
- * Mock generation call. In production this would call /api/generate with
- * the appropriate endpoint for the asset type. Returns a stable placeholder
- * asset ID for unit testing.
+ * Asset generation remains unavailable until the pipeline can deliver a
+ * persisted artifact and settle generation within its existing reservation.
+ * Calling a standalone paid route here would deduct separately while the
+ * pipeline has no consumer for the returned audio (#10035, #9922, #9808).
  */
-async function generateAsset(
-  _type: string,
-  _description: string,
-  _styleDirective: string,
-  signal: AbortSignal,
-): Promise<string> {
-  if (signal.aborted) {
-    throw new Error('Aborted');
-  }
-  // Production: would call fetch('/api/generate/...', { signal })
-  // Placeholder — returns a unique-ish ID for each call. Tests should assert
-  // on success/failure, not the specific ID value.
-  return `asset_${crypto.randomUUID().slice(0, 8)}`;
-}
-
 export const assetGenerateExecutor: ExecutorDefinition = {
   name: 'asset_generate',
   inputSchema,
   userFacingErrorMessage:
-    'Asset generation failed. Using a placeholder instead.',
+    'Asset generation is not available in game creation yet. Select Start Over to change your request. You can add assets manually in the editor.',
 
   async execute(
     input: Record<string, unknown>,
@@ -47,17 +39,11 @@ export const assetGenerateExecutor: ExecutorDefinition = {
     const parsed = inputSchema.safeParse(input);
     if (!parsed.success) {
       return failResult(
-        makeStepError(
-          'INVALID_INPUT',
-          parsed.error.message,
-          this.userFacingErrorMessage,
-        ),
+        makeStepError('INVALID_INPUT', parsed.error.message, this.userFacingErrorMessage),
       );
     }
 
-    const { type, description, styleDirective, fallback } = parsed.data;
-
-    // Validate fallback before attempting generation, so we can use it on failure
+    const { type, fallback } = parsed.data;
     const fallbackParsed = FALLBACK_SCHEMA.safeParse(fallback);
     if (!fallbackParsed.success) {
       return failResult(
@@ -70,24 +56,28 @@ export const assetGenerateExecutor: ExecutorDefinition = {
     }
 
     if (ctx.signal.aborted) {
-      return successResult({
-        assetId: fallbackParsed.data,
-        usedFallback: true,
-      });
+      return failResult(
+        makeStepError('CANCELLED', 'Asset generation was cancelled.', 'Asset generation was cancelled.'),
+      );
     }
 
-    let assetId: string;
-    let usedFallback = false;
-
-    try {
-      assetId = await generateAsset(type, description, styleDirective, ctx.signal);
-    } catch {
-      // Generation failed — use validated fallback
-      assetId = fallbackParsed.data;
-      usedFallback = true;
-    }
-
-    return successResult({ assetId, usedFallback });
+    // A fallback identifier is only a suggestion: nothing was generated or
+    // attached. Failure stops required steps and skips optional ones without
+    // counting this step as completed in reservation settlement.
+    return {
+      ...failResult(
+        makeStepError(
+          'ASSET_GENERATION_UNAVAILABLE',
+          `The ${type} adapter requires artifact delivery and reservation-aware billing.`,
+          this.userFacingErrorMessage,
+        ),
+      ),
+      output: {
+        unsupported: true,
+        pending: true,
+        assetType: type,
+        fallbackAssetId: fallbackParsed.data,
+      },
+    };
   },
 };
-

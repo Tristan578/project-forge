@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
+import { SliderInput, NumberField } from '@spawnforge/ui';
 import { useEditorStore, type AudioData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { Play, StopCircle, Sparkles, HelpCircle, Lock } from 'lucide-react';
@@ -8,10 +9,23 @@ import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
-interface SliderRowProps {
+// The shared SliderInput composite has no `term` tooltip slot, so where a row
+// carried one we compose the InfoTooltip alongside the composite rather than
+// dropping the help affordance users rely on.
+function SliderRowWithTerm({
+  label,
+  value,
+  min = 0,
+  max = 1,
+  step = 0.01,
+  precision = 2,
+  onChange,
+  term,
+}: {
   label: string;
   value: number;
   min?: number;
@@ -19,30 +33,25 @@ interface SliderRowProps {
   step?: number;
   precision?: number;
   onChange: (v: number) => void;
-}
-
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, term }: SliderRowProps & { term?: string }) {
+  term?: string;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
-        {label}
-        {term && <InfoTooltip term={term} />}
-      </label>
-      <input
-        type="range"
+    <div className="flex items-start gap-1">
+      <SliderInput
+        label={label}
+        value={value}
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
-          [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
-          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-          [&::-webkit-slider-thumb]:bg-zinc-300"
+        formatValue={(v) => v.toFixed(precision)}
+        onChange={onChange}
+        className="flex-1"
       />
-      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
-        {value.toFixed(precision)}
-      </span>
+      {term && (
+        <span className="pt-0.5 shrink-0">
+          <InfoTooltip term={term} />
+        </span>
+      )}
     </div>
   );
 }
@@ -54,13 +63,18 @@ interface CheckboxRowProps {
 }
 
 function CheckboxRow({ label, checked, onChange, term }: CheckboxRowProps & { term?: string }) {
+  // useId + htmlFor/id gives the checkbox a programmatic accessible name, so
+  // getByLabelText(label) resolves to it rather than the visual label sitting
+  // next to an unassociated input (the drift PF-1182/PF-1183 exist to close).
+  const id = useId();
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+      <label htmlFor={id} className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
       </label>
       <input
+        id={id}
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
@@ -71,54 +85,114 @@ function CheckboxRow({ label, checked, onChange, term }: CheckboxRowProps & { te
   );
 }
 
-interface NumberInputRowProps {
+// The shared NumberField composite has no `term` tooltip slot, so — exactly as
+// SliderRowWithTerm does for sliders — we compose the InfoTooltip alongside the
+// shared control rather than reintroducing a bespoke local number-input row.
+// NumberField supplies the useId + htmlFor/id label association.
+function NumberRowWithTerm({
+  label,
+  value,
+  min,
+  max,
+  step = 0.1,
+  onChange,
+  term,
+}: {
   label: string;
   value: number;
   min?: number;
   max?: number;
   step?: number;
   onChange: (v: number) => void;
-}
-
-function NumberInputRow({ label, value, min, max, step = 0.1, onChange, term }: NumberInputRowProps & { term?: string }) {
+  term?: string;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
-        {label}
-        {term && <InfoTooltip term={term} />}
-      </label>
-      <input
-        type="number"
+    <div className="flex items-start gap-1">
+      <NumberField
+        label={label}
         value={value}
         min={min}
         max={max}
         step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-          focus:ring-1 focus:ring-blue-500"
+        onChange={onChange}
+        className="flex-1"
       />
+      {term && (
+        <span className="pt-1.5 shrink-0">
+          <InfoTooltip term={term} />
+        </span>
+      )}
     </div>
   );
 }
 
 export function AudioInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
   const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
 
-  const tier = useUserStore((s) => s.tier);
-  const canGenerateSound = canAccessPanel('generate-sound', tier);
-  const canGenerateMusic = canAccessPanel('generate-music', tier);
+  const rawTier = useUserStore((s) => s.tier);
+  const spendableTokens = useUserStore((s) => s.spendableTokens);
+  const profileLoaded = useUserStore((s) => s.profileLoaded);
+  // A starter account with trial tokens reads as hobbyist here (#7715).
+  const tier = effectiveTier(rawTier, spendableTokens);
+  // #9117: a capability NO key can enable (`unprovisionable`) is disabled here,
+  // at the entry point, not two clicks later inside an empty dialog — for BOTH
+  // buttons, so the next declared-unavailable capability is handled the same
+  // way as music. A merely unconfigured capability stays clickable: the dialog
+  // notice names the provider and links to Settings, and that is the only
+  // place a touch user can read it (#9725 p7).
+  // The Sound dialog runs sfx OR voice and keeps its own type radios enabled
+  // so the user can switch between them, so this entry point closes only when
+  // NEITHER can run — gating it on sfx alone would make voice generation
+  // unreachable from the UI the moment sfx were declared unavailable (#9725 p8).
+  const soundGate = combineGenerationGates([
+    useGenerationGate('sfx-generation'),
+    useGenerationGate('voice-generation'),
+  ]);
+  const musicGate = useGenerationGate('music-generation');
+  // Before /api/user/profile resolves, `tier`/`spendableTokens` are still
+  // defaults. The same rule every editor gate uses decides the loading
+  // window: a panel the trial can open (hobbyist tier) reads as unlocked,
+  // anything above stays locked (#7715 review round 3).
+  const soundTierOk = profileLoaded ? canAccessPanel('generate-sound', tier) : canAccessPanelBeforeProfileLoad('generate-sound');
+  const musicTierOk = profileLoaded ? canAccessPanel('generate-music', tier) : canAccessPanelBeforeProfileLoad('generate-music');
+  // While the first /api/capabilities body is in flight nothing is known yet,
+  // so the button must not paint as ready and then contradict itself when the
+  // answer lands. Held closed for that window rather than opening a dialog
+  // whose own gate is about to change under the user (#9725 p8).
+  const canGenerateSound = soundTierOk && !soundGate.unprovisionable && !soundGate.loading;
+  const canGenerateMusic = musicTierOk && !musicGate.unprovisionable && !musicGate.loading;
   // These stay focusable when locked (aria-disabled, not disabled): they are
   // upgrade prompts, and a control removed from the tab order can never tell
   // anyone what it wants. But `title` alone is not that telling — it is
   // unreachable by keyboard and inconsistently announced — so the requirement
   // goes in the accessible name too.
+  //
+  // Name and badge below read the SAME key, `unprovisionable`. They used to
+  // disagree — badge on `blocked`, name on `unprovisionable` — so a tier-locked
+  // user missing only a key (the default free-tier state in production) got an
+  // amber "Unavailable" beside a name reading "requires Starter tier": two
+  // contradictory reasons for one disabled control, no upgrade affordance, and
+  // visible text absent from the accessible name (WCAG 2.5.3). AssetPanel
+  // already derived all three from `unprovisionable`; this now matches.
   const soundButtonLabel = canGenerateSound
     ? 'Generate sound with AI'
-    : `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`;
+    : soundGate.unprovisionable
+      ? `Generate sound with AI — ${soundGate.reason ?? 'not available yet'}`
+      : !soundTierOk
+        ? `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`
+        : 'Generate sound with AI — checking availability';
   const musicButtonLabel = canGenerateMusic
     ? 'Generate music with AI'
-    : `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`;
+    : musicGate.unprovisionable
+      ? `Generate music with AI — ${musicGate.reason ?? 'not available yet'}`
+      : !musicTierOk
+        ? `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`
+        : 'Generate music with AI — checking availability';
 
   const primaryId = useEditorStore((s) => s.primaryId);
   // Read the selected entity's audio out of the per-entity map. This used to be
@@ -207,6 +281,7 @@ export function AudioInspector() {
           <button
             onClick={() => canGenerateSound && setGenerateSoundOpen(true)}
             aria-disabled={!canGenerateSound || undefined}
+            aria-busy={soundGate.loading || undefined}
             aria-label={soundButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateSound
@@ -215,12 +290,24 @@ export function AudioInspector() {
             }`}
             title={soundButtonLabel}
           >
-            {canGenerateSound ? <Sparkles size={10} /> : <Lock size={10} />}
+            {soundGate.unprovisionable ? (
+              // "Not offered", never "upgrade your plan" — keyed on the same
+              // field as the accessible name so the two cannot disagree.
+              <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">Unavailable</span>
+            ) : !soundTierOk ? (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                <Lock size={10} />
+                {TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']}
+              </span>
+            ) : (
+              <Sparkles size={10} />
+            )}
             Sound
           </button>
           <button
             onClick={() => canGenerateMusic && setGenerateMusicOpen(true)}
             aria-disabled={!canGenerateMusic || undefined}
+            aria-busy={musicGate.loading || undefined}
             aria-label={musicButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateMusic
@@ -229,7 +316,17 @@ export function AudioInspector() {
             }`}
             title={musicButtonLabel}
           >
-            {canGenerateMusic ? <Sparkles size={10} /> : <Lock size={10} />}
+            {musicGate.unprovisionable ? (
+              // Distinct from the tier lock: this is "not available yet".
+              <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">Unavailable</span>
+            ) : !musicTierOk ? (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                <Lock size={10} />
+                {TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']}
+              </span>
+            ) : (
+              <Sparkles size={10} />
+            )}
             Music
           </button>
         </div>
@@ -247,14 +344,14 @@ export function AudioInspector() {
           {/* Asset Dropdown */}
           <div className="flex items-center gap-2">
             <label
-              htmlFor="audio-asset-select"
+              htmlFor={fieldId('audio-asset-select')}
               className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
             >
               Asset
               <InfoTooltip term="audioAsset" />
             </label>
             <select
-              id="audio-asset-select"
+              id={fieldId('audio-asset-select')}
               value={selectedAssetId}
               onChange={(e) => handleUpdate({ assetId: e.target.value || null })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -275,14 +372,14 @@ export function AudioInspector() {
           {/* Bus Assignment */}
           <div className="flex items-center gap-2">
             <label
-              htmlFor="audio-bus-select"
+              htmlFor={fieldId('audio-bus-select')}
               className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
             >
               Bus
               <InfoTooltip term="audioBus" />
             </label>
             <select
-              id="audio-bus-select"
+              id={fieldId('audio-bus-select')}
               value={primaryAudio.bus ?? 'sfx'}
               onChange={(e) => handleUpdate({ bus: e.target.value })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -297,7 +394,7 @@ export function AudioInspector() {
           </div>
 
           {/* Volume */}
-          <SliderRow
+          <SliderRowWithTerm
             label="Volume"
             value={primaryAudio.volume}
             min={0}
@@ -308,7 +405,7 @@ export function AudioInspector() {
           />
 
           {/* Pitch */}
-          <SliderRow
+          <SliderRowWithTerm
             label="Pitch"
             value={primaryAudio.pitch}
             min={0.25}
@@ -337,21 +434,21 @@ export function AudioInspector() {
           {/* Spatial Settings (conditional) */}
           {primaryAudio.spatial && (
             <>
-              <NumberInputRow
+              <NumberRowWithTerm
                 label="Max Distance"
                 value={primaryAudio.maxDistance}
                 min={1}
                 onChange={(v) => handleUpdate({ maxDistance: v })}
                 term="audioMaxDistance"
               />
-              <NumberInputRow
+              <NumberRowWithTerm
                 label="Ref Distance"
                 value={primaryAudio.refDistance}
                 min={0.1}
                 onChange={(v) => handleUpdate({ refDistance: v })}
                 term="audioRefDistance"
               />
-              <NumberInputRow
+              <NumberRowWithTerm
                 label="Rolloff"
                 value={primaryAudio.rolloffFactor}
                 min={0}

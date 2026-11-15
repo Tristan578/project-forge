@@ -1,16 +1,25 @@
 //! 2D sprite and skeleton command handlers.
 
 use crate::core::pending_commands::*;
+use crate::core::project_type::ProjectType;
 
 /// Handle set_project_type command.
 /// Payload: { projectType: "2d" | "3d" }
+///
+/// Any other spelling is refused HERE. The handler used to queue whatever
+/// string arrived and `apply_project_type_changes` dropped the ones it did not
+/// recognise with a silent `continue`, so `{ projectType: "2D" }` answered
+/// `Ok` and changed nothing (#10227).
 fn handle_set_project_type(payload: serde_json::Value) -> super::CommandResult {
-    let project_type = payload.get("projectType")
+    let spelling = payload.get("projectType")
         .and_then(|v| v.as_str())
-        .ok_or("Missing projectType")?
-        .to_string();
+        .ok_or("Missing projectType")?;
+    let project_type = ProjectType::from_wire(spelling)
+        .ok_or_else(|| format!("projectType must be \"2d\" or \"3d\", got {spelling:?}"))?;
 
-    if queue_set_project_type_from_bridge(SetProjectTypeRequest { project_type }) {
+    // Always `Some`: the command states a type. `None` exists for `load_scene`
+    // alone (a scene file with no `metadata.projectType`), never for a payload.
+    if queue_set_project_type_from_bridge(SetProjectTypeRequest { project_type: Some(project_type) }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -1079,6 +1088,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "paint_tile" => Some(handle_paint_tile(payload.clone())),
         "erase_tile" => Some(handle_erase_tile(payload.clone())),
         "fill_tiles" => Some(handle_fill_tiles(payload.clone())),
+        "set_tile_collision_shape" => Some(handle_set_tile_collision_shape(payload.clone())),
         "set_grid_2d" => Some(handle_set_grid_2d(payload.clone())),
         _ => None,
     }
@@ -1269,6 +1279,57 @@ fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
+/// Parse a `set_tile_collision_shape` payload:
+/// `{ entityId, layer, x, y, shape }`.
+///
+/// `shape` is validated against `CollisionShape::from_wire`, the SAME vocabulary
+/// the chat handler and script API use, so an unknown value is rejected with an
+/// actionable error rather than silently defaulting to a passable cell. Coords
+/// use `tile_field_u32` for the same wasm32 truncation reason `parse_paint_tile`
+/// documents. Extracted from the handler so it is testable natively — the
+/// handler needs the thread-local `PendingCommands`, which no unit test has.
+fn parse_set_tile_collision_shape(
+    payload: &serde_json::Value,
+) -> Result<SetTileCollisionShapeRequest, String> {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?;
+    if entity_id.trim().is_empty() {
+        return Err("entityId must not be blank".to_string());
+    }
+    let entity_id = entity_id.to_string();
+
+    let layer = tile_field_u32(payload.get("layer"))
+        .ok_or("Missing or invalid layer")? as usize;
+
+    let x = tile_field_u32(payload.get("x"))
+        .ok_or("Missing or invalid x")? as usize;
+
+    let y = tile_field_u32(payload.get("y"))
+        .ok_or("Missing or invalid y")? as usize;
+
+    let shape_str = payload.get("shape")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing or invalid shape")?;
+    let shape = crate::core::tilemap::CollisionShape::from_wire(shape_str)
+        .ok_or_else(|| format!(
+            "Invalid collision shape '{}': expected one of none, full, halfTop, halfBottom, slopeLeft, slopeRight",
+            shape_str,
+        ))?;
+
+    Ok(SetTileCollisionShapeRequest { entity_id, layer, x, y, shape })
+}
+
+/// Handle set_tile_collision_shape command.
+/// Payload: { entityId, layer, x, y, shape }
+fn handle_set_tile_collision_shape(payload: serde_json::Value) -> super::CommandResult {
+    if queue_set_tile_collision_shape_from_bridge(parse_set_tile_collision_shape(&payload)?) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 /// Handle set_grid_2d command.
 /// Payload: { visible, cellSize, color: [r, g, b, a] }
 fn handle_set_grid_2d(payload: serde_json::Value) -> super::CommandResult {
@@ -1300,6 +1361,51 @@ fn handle_set_grid_2d(payload: serde_json::Value) -> super::CommandResult {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+#[cfg(test)]
+mod set_project_type_tests {
+    use super::dispatch;
+    use serde_json::json;
+
+    fn run(payload: serde_json::Value) -> Result<(), String> {
+        dispatch("set_project_type", &payload).expect("set_project_type must be routed")
+    }
+
+    #[test]
+    fn a_known_type_reaches_the_queue() {
+        // Under native test no `PendingCommands` is registered, so reaching
+        // the queue answers with that error — which is the proof the payload
+        // was accepted and nothing refused it earlier.
+        for spelling in ["2d", "3d"] {
+            assert_eq!(
+                run(json!({ "projectType": spelling })).expect_err("queue is absent in this test"),
+                "PendingCommands resource not initialized",
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_type_is_refused_before_queueing() {
+        assert_eq!(run(json!({})).expect_err("missing key"), "Missing projectType");
+        assert_eq!(run(json!({ "projectType": 2 })).expect_err("wrong JSON type"), "Missing projectType");
+    }
+
+    #[test]
+    fn an_unknown_spelling_is_refused_instead_of_being_silently_dropped() {
+        // #10227 (Boy Scout): the handler used to queue ANY string and the
+        // system dropped the ones it did not recognise with `continue`, so
+        // `{ projectType: "2D" }` answered `Ok` and changed nothing. The AI
+        // handler's zod schema and the MCP manifest both promise `2d | 3d`;
+        // the engine now holds the same line.
+        for bad in ["2D", "3D", "TwoD", "twod", ""] {
+            let error = run(json!({ "projectType": bad })).expect_err(bad);
+            assert!(error.contains("projectType must be \"2d\" or \"3d\""), "{bad:?}: {error}");
+            assert!(error.contains(bad), "the refusal names the value it refused: {error}");
+            assert!(!error.contains("not initialized"), "{bad:?} reached the queue: {error}");
+        }
     }
 }
 
@@ -1703,5 +1809,105 @@ mod tile_field_bounds_tests {
         assert_eq!(tiles[0].x, u32::MAX as usize);
         assert_eq!(tiles[0].y, u32::MAX as usize);
         assert_eq!(tiles[0].tile_index, Some(u32::MAX));
+    }
+}
+
+#[cfg(test)]
+mod set_tile_collision_shape_tests {
+    use super::parse_set_tile_collision_shape;
+    use crate::core::tilemap::CollisionShape;
+    use serde_json::json;
+
+    #[test]
+    fn parses_a_valid_payload() {
+        let req = parse_set_tile_collision_shape(&json!({
+            "entityId": "tm-1", "layer": 2, "x": 3, "y": 4, "shape": "halfTop",
+        }))
+        .expect("a well-formed payload parses");
+        assert_eq!(req.entity_id, "tm-1");
+        assert_eq!(req.layer, 2);
+        assert_eq!(req.x, 3);
+        assert_eq!(req.y, 4);
+        assert_eq!(req.shape, CollisionShape::HalfTop);
+    }
+
+    #[test]
+    fn accepts_every_shape_in_the_vocabulary() {
+        for (wire, expected) in [
+            ("none", CollisionShape::None),
+            ("full", CollisionShape::Full),
+            ("halfTop", CollisionShape::HalfTop),
+            ("halfBottom", CollisionShape::HalfBottom),
+            ("slopeLeft", CollisionShape::SlopeLeft),
+            ("slopeRight", CollisionShape::SlopeRight),
+        ] {
+            let req = parse_set_tile_collision_shape(&json!({
+                "entityId": "tm-1", "layer": 0, "x": 0, "y": 0, "shape": wire,
+            }))
+            .expect("every documented shape parses");
+            assert_eq!(req.shape, expected, "wire string {}", wire);
+        }
+    }
+
+    #[test]
+    fn refuses_an_unknown_shape_with_an_actionable_error() {
+        let err = parse_set_tile_collision_shape(&json!({
+            "entityId": "tm-1", "layer": 0, "x": 0, "y": 0, "shape": "wedge",
+        }))
+        .expect_err("an unknown shape must be refused, not silently defaulted");
+        assert!(err.contains("Invalid collision shape 'wedge'"), "got: {}", err);
+        assert!(err.contains("halfTop"), "error lists the vocabulary: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_missing_shape() {
+        let err = parse_set_tile_collision_shape(&json!({
+            "entityId": "tm-1", "layer": 0, "x": 0, "y": 0,
+        }))
+        .expect_err("a missing shape must be refused");
+        assert_eq!(err, "Missing or invalid shape");
+    }
+
+    #[test]
+    fn refuses_a_missing_entity_id() {
+        let err = parse_set_tile_collision_shape(&json!({
+            "layer": 0, "x": 0, "y": 0, "shape": "full",
+        }))
+        .expect_err("a missing entityId must be refused");
+        assert_eq!(err, "Missing entityId");
+    }
+
+    #[test]
+    fn refuses_blank_entity_ids_without_trimming_nonblank_ids() {
+        for entity_id in ["", " ", "\t\r\n", "\u{2003}"] {
+            let err = parse_set_tile_collision_shape(&json!({
+                "entityId": entity_id, "layer": 0, "x": 0, "y": 0, "shape": "full",
+            }))
+            .expect_err("blank entity IDs cannot identify a tilemap");
+            assert_eq!(err, "entityId must not be blank");
+        }
+        let req = parse_set_tile_collision_shape(&json!({
+            "entityId": " tm-1 ", "layer": 0, "x": 0, "y": 0, "shape": "full",
+        }))
+        .expect("nonblank IDs are preserved exactly");
+        assert_eq!(req.entity_id, " tm-1 ");
+    }
+
+    #[test]
+    fn refuses_a_coordinate_above_u32_max() {
+        let over = u32::MAX as u64 + 1;
+        for (field, expected) in [
+            ("layer", "Missing or invalid layer"),
+            ("x", "Missing or invalid x"),
+            ("y", "Missing or invalid y"),
+        ] {
+            let mut payload = json!({
+                "entityId": "tm-1", "layer": 0, "x": 0, "y": 0, "shape": "full",
+            });
+            payload[field] = json!(over);
+            let err = parse_set_tile_collision_shape(&payload)
+                .expect_err("an out-of-range field must be refused");
+            assert_eq!(err, expected, "wrong error for {}", field);
+        }
     }
 }

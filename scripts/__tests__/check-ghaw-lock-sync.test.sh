@@ -54,7 +54,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 [ -f "$HELPER" ] || { echo "compiler-version helper not found: $HELPER"; exit 1; }
@@ -80,6 +82,7 @@ make_ghaw_repo() {
   )
   echo "$repo"
 }
+readonly -f make_ghaw_repo
 
 # Run the gate inside $repo with a given compile stub; echo "<exit>|<output>".
 run_gate() {
@@ -88,6 +91,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 # True iff the working tree under .github/workflows/ is clean (no modified,
 # deleted, or untracked files). Used to prove drift detection is non-destructive.
@@ -95,6 +99,7 @@ workflows_clean() {
   local repo="$1"
   [ -z "$(cd "$repo" && git status --porcelain -- .github/workflows/)" ]
 }
+readonly -f workflows_clean
 
 echo "=== check-ghaw-lock-sync.sh tests ==="
 
@@ -315,6 +320,7 @@ run_helper() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_helper
 
 # 8a. Single committed lock recording a version → that version, verbatim.
 repo="$(make_ghaw_repo)"
@@ -438,8 +444,9 @@ if [ -f "$CI_YML" ]; then
   # file, so the mutation takes effect in the very run that should have caught
   # it. Count the key at ITS OWN indent level first (4 spaces = job level; a
   # deeper-indented step `if:` is legitimate and must not be counted) and
-  # require exactly one. actionlint flags duplicate keys, but it is not wired
-  # into this repo's CI — this pin is the backstop (#9031).
+  # require exactly one. actionlint (the `actionlint` job, #8719) flags
+  # duplicate keys, but it runs from this same PR-controlled file — this pin
+  # is the independent backstop (#9031).
   ghaw_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ghaw_block" || true)"
   if [ "$ghaw_if_count" -ne 1 ]; then
     fail "ghaw-lock-sync job has $ghaw_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"
@@ -662,7 +669,9 @@ fi
 # '$BASE_COMPILE' appears in the script source (i.e. the echo references the
 # variable rather than hardcoding the command), so it must NOT be expanded here.
 # shellcheck disable=SC2016
-if grep -A2 'Fix: from the repo root' "$SCRIPT" | grep -qF '$BASE_COMPILE'; then
+# Strip comments FIRST. Reading the raw file means a commented-out
+# `echo` still satisfies this pin, which is lesson 16 exactly.
+if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -A2 'Fix: from the repo root' | grep -qF '$BASE_COMPILE'; then
   pass "remediation hint echoes \$BASE_COMPILE (single-sourced, cannot drift)"
 else
   fail "remediation hint hardcodes the command instead of \$BASE_COMPILE"

@@ -8,21 +8,23 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const ALLOWED_MAP_KEYS = new Set(['normal', 'roughness', 'metallic', 'ao', 'emissive']);
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   {
     prompt: string;
     resolution: string;
     style: string;
     tiling: boolean;
-    entityId?: string;
-    generateMaps?: Record<string, boolean>;
+    entityId?: string | undefined;
+    generateMaps?: Record<string, boolean> | undefined;
   },
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/texture',
+  panel: 'generate-texture',
   provider: DB_PROVIDER.texture,
   operation: 'texture_generation',
   rateLimitKey: 'gen-texture',
@@ -99,3 +101,7 @@ export const POST = createGenerationHandler<
     estimatedSeconds: 60,
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

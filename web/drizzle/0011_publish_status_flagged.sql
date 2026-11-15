@@ -1,0 +1,26 @@
+-- Add the 'flagged' publish status (PF-681 / #8354).
+--
+-- 'flagged' means "hidden pending moderation review": a published game whose
+-- viewer reports reached REPORT_AUTOHIDE_THRESHOLD
+-- (web/src/lib/config/moderation.ts). It is deliberately a DISTINCT value from
+-- 'unpublished' — 'unpublished' is a creator-initiated or admin takedown that
+-- the creator can undo themselves, while 'flagged' is a moderation hold that
+-- only an admin approve (or a won appeal) may lift. Both are excluded from the
+-- play page and the community gallery by the pre-existing
+-- `status = 'published'` equality filters, so the auto-hide needs no read-path
+-- change.
+--
+-- WHY THIS IS THE ONLY STATEMENT IN THE FILE
+-- ------------------------------------------
+-- Postgres forbids USING a newly added enum value in the same transaction that
+-- added it. The PGlite test harness (web/src/lib/db/__tests__/pgliteHarness.ts
+-- buildSchema) replays each migration file with a single `pglite.exec(file)`,
+-- which wraps the whole file in one implicit transaction. Keeping the
+-- ALTER TYPE alone in its own file guarantees no later statement — here or in a
+-- future migration appended to this file — can trip that rule and break the
+-- harness build for every *.db.test.ts in the repo. The published_games columns
+-- and the game_reports table therefore live in 0012.
+--
+-- Idempotent (IF NOT EXISTS) per the 0006 convention, so re-running against a
+-- DB that already carries the value (e.g. a dev `drizzle-kit push`) is a no-op.
+ALTER TYPE "public"."publish_status" ADD VALUE IF NOT EXISTS 'flagged';

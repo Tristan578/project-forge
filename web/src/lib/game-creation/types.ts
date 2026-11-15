@@ -11,6 +11,7 @@
 import { z } from 'zod';
 import type { GddScope } from '@/lib/config/enums';
 import type { EditorState } from '@/stores/editorStore';
+import type { CompletionMode } from '@/stores/slices/types';
 import type { Behavior } from './behaviorVocabulary';
 
 // ---------------------------------------------------------------------------
@@ -131,7 +132,7 @@ export interface EntityBlueprint {
    * the decomposition prompt never contains that word, so the plural cannot come
    * back without a deliberate test change.
    */
-  behavior?: Behavior;
+  behavior?: Behavior | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +142,7 @@ export interface EntityBlueprint {
 export interface AssetNeed {
   type: '3d-model' | 'texture' | 'sound' | 'music' | 'voice' | 'sprite';
   description: string;
-  entityRef?: string;
+  entityRef?: string | undefined;
   styleDirective: string;
   priority: 'required' | 'nice-to-have';
   fallback: string;
@@ -168,6 +169,27 @@ export interface OrchestratorGDD {
   feelDirective: FeelDirective;
   constraints: string[];
   projectType: '2d' | '3d';
+  /**
+   * The game's intentional completion semantics (#9901). Optional on the brief:
+   * absent means the classic `win` default, preserving every GDD authored before
+   * the field existed.
+   *
+   * Set by the decomposer when the model states it (`zBriefContent` in
+   * `briefSchema.ts` validates it against `COMPLETION_MODES`, the same list the
+   * manual picker and the `set_completion_mode` tool use). Propagated by
+   * `scene_create`, which reads it through `ExecutorContext.gdd` and stages it
+   * on `newScene`, so it lands on `SceneGraph.completionMode` as native
+   * editable data (#9998). It also tells `planBuilder` not to invent a default
+   * win condition for an endless/sandbox/narrative brief. Chosen explicitly,
+   * never inferred from entity names.
+   *
+   * `| undefined` is deliberate (`exactOptionalPropertyTypes`): a validated
+   * `GameBrief` (#10174) infers the key as `mode | undefined`, and the brief
+   * has to be assignable here so the manual path feeds `buildPlan` the same
+   * object the AI path does. Readers already treat absence and `undefined`
+   * alike (`requiresWinCondition` reads both as `win`).
+   */
+  completionMode?: CompletionMode | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +206,7 @@ export interface PlanStep {
   fallbackStepId?: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
   output?: Record<string, unknown>;
-  error?: OrchestratorStepError;
+  error?: OrchestratorStepError | undefined;
   userFacingErrorMessage?: string;
 }
 
@@ -273,7 +295,7 @@ export interface TokenEstimate {
   totalVarianceLow: number;
   userTier: string;
   sufficientBalance: boolean;
-  warningMessage?: string;
+  warningMessage?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +328,7 @@ export interface ExecutorContext {
    * either path to a single boolean.
    */
   dispatchCommand: (command: string, payload: unknown) => import('@/hooks/useEngine').CommandResponse | void;
-  dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
+  dispatchCommandBatch?: ((commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult) | undefined;
   /**
    * Reads the editor store LIVE at call time.
    *
@@ -366,6 +388,32 @@ export interface ExecutorContext {
    * ids in as finished work would go unnoticed.
    */
   resolveStepOutputs: (executorName: string) => Record<string, unknown>[];
+  /**
+   * Reads the engine's REAL current view of one entity, correlated by id
+   * (#9899). Backed by `get_entity_details` -> `QUERY_ENTITY_DETAILS`
+   * (engine/src/bridge/query.rs), whose response the orchestrator caches. A call
+   * fires a fresh query AND returns the most recently observed snapshot, so
+   * `observeEngineEffect` polling it eventually reads the state the query
+   * produced — or `undefined` while the entity does not (yet) exist.
+   *
+   * OPTIONAL on purpose. A context without it (every existing unit test, and any
+   * WASM build wired before this field existed) keeps the legacy
+   * `waitForEngineFrame` path in the spawn/transform executors — confirmation is
+   * an upgrade, never a hard dependency that could strand a caller.
+   */
+  observeEntity?: (entityId: string) => ObservedEntity | undefined;
+  /**
+   * The brief the plan was built from (#9998). Set by `runPipeline` from
+   * `plan.gdd`, so every executor in a run reads the same one; a caller's own
+   * value is replaced, exactly as the step resolvers are.
+   *
+   * Read-only by contract: executors take facts OFF the brief (today,
+   * `scene_create` reads `completionMode`); they never edit it. OPTIONAL so a
+   * context built outside `runPipeline` (unit tests, older callers) still
+   * type-checks — an executor must treat its absence as "the brief said
+   * nothing", which for the completion mode is the legacy `win`.
+   */
+  gdd?: Readonly<OrchestratorGDD>;
 }
 
 export interface ExecutorDefinition {
@@ -378,5 +426,58 @@ export interface ExecutorDefinition {
 export interface ExecutorResult {
   success: boolean;
   output?: Record<string, unknown>;
-  error?: OrchestratorStepError;
+  error?: OrchestratorStepError | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Confirmed engine effects (#9899, operation family ai.FR-1.OP-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * A snapshot of the engine's REAL view of one entity, correlated by id.
+ *
+ * This is what `get_entity_details` -> `QUERY_ENTITY_DETAILS` carries back
+ * (engine/src/bridge/query.rs). The engine emits this event ONLY when the
+ * entity exists. A `readEntityObservation` miss means no response has been
+ * cached yet; it cannot distinguish an absent entity from a delayed response.
+ * The cache may also contain an older observation for the same entity.
+ */
+export interface ObservedEntity {
+  entityId: string;
+  transform?: {
+    /** World-space translation, engine order [x, y, z]. */
+    position: [number, number, number];
+    /** Euler degrees, matching the `QUERY_ENTITY_DETAILS` payload. */
+    rotation: [number, number, number];
+    scale: [number, number, number];
+  };
+}
+
+/**
+ * The four terminal verdicts of a confirmed spawn/transform (#9899).
+ *
+ *  - `applied`    — an engine observation for the target entity satisfies the
+ *                   intended effect. The adapter reads the latest cached
+ *                   response; it does not receive a command acknowledgement.
+ *  - `rejected`   — the dispatcher refused the command outright (`sendCommands`
+ *                   returned false). No observation is attempted.
+ *  - `timed-out`  — the command was accepted but the observation deadline
+ *                   (5 s) expired without the engine ever showing the effect.
+ *  - `cancelled`  — the caller aborted while the observation was still open.
+ */
+export type EngineEffectStatus = 'applied' | 'rejected' | 'timed-out' | 'cancelled';
+
+/**
+ * A typed, correlated result for one spawn or transform operation.
+ *
+ * `operationId` identifies the caller's observation attempt and `entityId`
+ * identifies its target. The engine query response carries only the entity id;
+ * the operation id on this result does not prove when that response was taken.
+ */
+export interface EngineEffectResult {
+  status: EngineEffectStatus;
+  operationId: string;
+  entityId: string;
+  /** Present only for `applied` — the observed engine state that satisfied it. */
+  observed?: ObservedEntity;
 }

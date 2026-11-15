@@ -11,7 +11,9 @@
     ],
     "deny": [
       "Edit(/.claude/settings.json)",
-      "Write(/.claude/settings.json)",
+      "Write(/.claude/settings.json)"
+    ],
+    "ask": [
       "Edit(/.codex/config.toml)",
       "Write(/.codex/config.toml)"
     ]
@@ -145,6 +147,26 @@
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block-deferred-fixes.sh\"",
             "timeout": 5,
             "statusMessage": "Checking for Boy Scout Rule violations"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/require-pr-ready.sh\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__[A-Za-z0-9_-]*[Gg][Ii][Tt][Hh][Uu][Bb][A-Za-z0-9_-]*__(update_pull_request|add_issue_comment|update_issue_comment)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/require-pr-ready.sh\"",
+            "timeout": 30
           }
         ]
       },

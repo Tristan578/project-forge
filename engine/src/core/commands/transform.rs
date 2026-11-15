@@ -614,6 +614,10 @@ struct SetInputBindingPayload {
     negative_keys: Vec<String>,
     #[serde(default)]
     dead_zone: Option<f32>,
+    /// Local-player slot (0 = primary). Omitted by every existing caller, which
+    /// keeps single-player scenes and scripts on player 0 exactly as before.
+    #[serde(default)]
+    player: u8,
 }
 
 /// Handle set_input_binding command.
@@ -644,7 +648,7 @@ fn handle_set_input_binding(payload: serde_json::Value) -> CommandResult {
         dead_zone: data.dead_zone.unwrap_or(0.1),
     };
 
-    let update = InputBindingUpdate { action_def };
+    let update = InputBindingUpdate { action_def, player: data.player };
 
     if queue_input_binding_update_from_bridge(update) {
         tracing::info!("Queued input binding update: {}", data.action_name);
@@ -659,6 +663,9 @@ fn handle_set_input_binding(payload: serde_json::Value) -> CommandResult {
 #[serde(rename_all = "camelCase")]
 struct RemoveInputBindingPayload {
     action_name: String,
+    /// Local-player slot (0 = primary). Omitted defaults to player 0.
+    #[serde(default)]
+    player: u8,
 }
 
 /// Handle remove_input_binding command.
@@ -668,6 +675,7 @@ fn handle_remove_input_binding(payload: serde_json::Value) -> CommandResult {
 
     let removal = InputBindingRemoval {
         action_name: data.action_name.clone(),
+        player: data.player,
     };
 
     if queue_input_binding_removal_from_bridge(removal) {
@@ -683,6 +691,9 @@ fn handle_remove_input_binding(payload: serde_json::Value) -> CommandResult {
 #[serde(rename_all = "camelCase")]
 struct SetInputPresetPayload {
     preset: String,
+    /// Local-player slot (0 = primary). Omitted defaults to player 0.
+    #[serde(default)]
+    player: u8,
 }
 
 /// Handle set_input_preset command.
@@ -693,7 +704,7 @@ fn handle_set_input_preset(payload: serde_json::Value) -> CommandResult {
     let preset = InputPreset::from_str(&data.preset)
         .ok_or_else(|| format!("Unknown input preset: {}. Valid: fps, platformer, topdown, racing", data.preset))?;
 
-    let request = InputPresetRequest { preset };
+    let request = InputPresetRequest { preset, player: data.player };
 
     if queue_input_preset_from_bridge(request) {
         tracing::info!("Queued input preset: {:?}", preset);

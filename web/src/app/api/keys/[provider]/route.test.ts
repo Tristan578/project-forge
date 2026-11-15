@@ -59,6 +59,14 @@ describe('PUT /api/keys/[provider]', () => {
     expect(res.status).toBe(429);
   });
 
+  it.each(['openai', 'replicate'])('rejects unsupported sprite key setup for %s', async (provider) => {
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost/api/keys/' + provider, { method: 'PUT', body: JSON.stringify({ key: 'test-key-1234567890' }) });
+    const response = await PUT(req, { params: Promise.resolve({ provider }) });
+    expect(response.status).toBe(400);
+    expect(storeProviderKey).not.toHaveBeenCalled();
+  });
+
   it('should return 400 for invalid provider', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/keys/invalid', {
@@ -70,6 +78,17 @@ describe('PUT /api/keys/[provider]', () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toContain('must be one of');
+  });
+
+  it('rejects a Suno key with 400 — it is no longer an addable BYOK provider (#9522)', async () => {
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/keys/suno', {
+      method: 'PUT',
+      body: JSON.stringify({ key: 'suno-test-key-1234567890' }),
+    });
+    const res = await PUT(req, { params: Promise.resolve({ provider: 'suno' }) });
+    expect(res.status).toBe(400);
+    expect(storeProviderKey).not.toHaveBeenCalled();
   });
 
   it('should return 422 for short API key', async () => {
@@ -146,6 +165,18 @@ describe('DELETE /api/keys/[provider]', () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.configured).toBe(false);
+    expect(deleteProviderKey).toHaveBeenCalled();
+  });
+
+  it('still deletes a retired Suno key so a stored credential can be cleared (#9522)', async () => {
+    const { DELETE } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/keys/suno', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ provider: 'suno' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.provider).toBe('suno');
     expect(deleteProviderKey).toHaveBeenCalled();
   });
 });

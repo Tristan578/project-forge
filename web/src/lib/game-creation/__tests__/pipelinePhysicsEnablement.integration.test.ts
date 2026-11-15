@@ -50,6 +50,7 @@ import {
 } from '../physicsProfileResolution';
 import type { ExecutorContext, OrchestratorGDD, OrchestratorPlan } from '../types';
 import { setWinnabilityStateReader } from '@/stores/slices';
+import { isSceneFileEnvelope } from '@/lib/scenes/sceneValidation';
 import { createTestHarness } from '@/__integration__/harness';
 import type { TestHarness } from '@/__integration__/harness';
 import type { SceneNode } from '@/stores/slices/types';
@@ -113,6 +114,15 @@ function attachFakeEngine(harness: TestHarness): Recorded[] {
         && Object.hasOwn(harness.getState().sceneGraph.nodes, rawTarget);
 
     recorded.push({ command, payload, targetVisible });
+    // Unlike queued scene mutations, validation responds synchronously without
+    // flushing spawns. Rust decoder tests own the component-schema checks.
+    if (command === 'validate_scene') {
+      try {
+        return { success: typeof bag.json === 'string' && isSceneFileEnvelope(JSON.parse(bag.json)) };
+      } catch {
+        return { success: false };
+      }
+    }
     if (command !== 'spawn_entity') return;
 
     const rawId = Object.hasOwn(bag, 'id') ? bag['id'] : undefined;

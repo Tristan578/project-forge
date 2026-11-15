@@ -65,7 +65,9 @@ test.describe('Leaderboard API @api', () => {
     test('invalid JSON body returns 400 "Invalid JSON body"', async ({ request }) => {
       const response = await request.post(LEADERBOARD_PATH, {
         headers: { 'content-type': 'application/json' },
-        data: 'this-is-not-json{',
+        // A string passed through `data` is JSON-encoded by Playwright. A
+        // Buffer is sent verbatim, which exercises the route's parse failure.
+        data: Buffer.from('this-is-not-json{'),
         maxRedirects: 0,
       });
       expect([400, 429]).toContain(response.status());

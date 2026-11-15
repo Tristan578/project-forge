@@ -37,7 +37,9 @@ TMPDIR_T="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$GATE" ] || { echo "notifier not found: $GATE"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required by this suite"; exit 1; }
@@ -85,6 +87,7 @@ run_notify() {
   )"
   NOTIFY_EXIT=$?
 }
+readonly -f run_notify
 
 echo "=== required inputs fail loud ==="
 for missing in NOTIFY_KEY NOTIFY_TITLE NOTIFY_BODY; do

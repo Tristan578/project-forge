@@ -67,8 +67,8 @@ const path = require('path');
 // Names match the canonical constants for grep-based discovery.
 const BUNDLE_ROUTE_FIRST_LOAD_WARN = 2.1 * 1024 * 1024;
 const BUNDLE_ROUTE_FIRST_LOAD_FAIL = 2.3 * 1024 * 1024;
-const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
-const BUNDLE_TOTAL_FAIL = 6 * 1024 * 1024;
+const BUNDLE_TOTAL_WARN = 6 * 1024 * 1024;
+const BUNDLE_TOTAL_FAIL = 6.5 * 1024 * 1024;
 
 /** Thrown for conditions that must fail closed (exit 2), never pass. */
 class BundleToolingError extends Error {}

@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 
 interface GenerateTextureDialogProps {
   isOpen: boolean;
@@ -18,6 +20,10 @@ type Resolution = '1024' | '2048';
 type TextureStyle = 'realistic' | 'stylized' | 'cartoon';
 
 export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTextureDialogProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [resolution, setResolution] = useState<Resolution>('1024');
   const [style, setStyle] = useState<TextureStyle>('realistic');
@@ -38,7 +44,14 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
   const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = 30;
+  // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  const gate = useGenerationGate('texture-generation');
   const canSubmit =
+    // `blocked` is false until the first /api/capabilities body lands, so
+    // without this a permanently-unavailable capability presented a live
+    // Generate button with no notice beside it (#9725 p8).
+    !gate.loading &&
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -90,7 +103,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="generate-texture-dialog-title"
+        aria-labelledby="generate-texture-dialog-title" aria-describedby={gate.blocked ? 'generate-texture-unavailable' : undefined}
         className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
       >
         {/* Header */}
@@ -109,6 +122,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {gate.blocked && <GenerationUnavailableNotice id="generate-texture-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -117,7 +131,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               placeholder="Weathered red brick wall with moss"
               className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             />
@@ -128,11 +142,12 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
           {/* Resolution */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">Resolution</label>
+            <label htmlFor={fieldId('resolution')} className="mb-1 block text-xs font-medium text-zinc-300">Resolution</label>
             <select
+              id={fieldId('resolution')}
               value={resolution}
               onChange={(e) => setResolution(e.target.value as Resolution)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             >
               <option value="1024">1024x1024</option>
@@ -142,11 +157,12 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
           {/* Style */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+            <label htmlFor={fieldId('style')} className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
             <select
+              id={fieldId('style')}
               value={style}
               onChange={(e) => setStyle(e.target.value as TextureStyle)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             >
               <option value="realistic">Realistic</option>
@@ -162,7 +178,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
               id="tiling"
               checked={tiling}
               onChange={(e) => setTiling(e.target.checked)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
             />
             <label htmlFor="tiling" className="text-xs text-zinc-300">
@@ -187,7 +203,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
                     id={key}
                     checked={maps[key]}
                     onChange={(e) => setMaps({ ...maps, [key]: e.target.checked })}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || gate.blocked}
                     className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
                   />
                   <label htmlFor={key} className="text-xs text-zinc-300">
@@ -200,6 +216,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
           {/* Target entity */}
           <div className="rounded border border-zinc-800 bg-zinc-850 p-2 text-xs text-zinc-400">
+            {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank primary entity name is unset; falls back to a display placeholder */}
             Apply to: <span className="font-medium text-zinc-300">{primaryName || 'Selected entity'}</span>
           </div>
 
@@ -226,7 +243,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit} aria-describedby={gate.blocked ? 'generate-texture-unavailable' : undefined}
             aria-busy={isSubmitting}
             className="flex flex-1 items-center justify-center gap-2 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >

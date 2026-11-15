@@ -10,7 +10,9 @@ import {
   useFeatureGating,
   useCapabilities,
   _resetCapabilitiesCache,
+  invalidateCapabilitiesCache,
   ERROR_TTL_MS,
+  CAPABILITIES_TTL_MS,
 } from '../useFeatureGating';
 import type { CapabilitiesResponse } from '@/app/api/capabilities/route';
 
@@ -27,12 +29,13 @@ function mockCapabilitiesResponse(
       { capability: 'texture', available: false, label: 'Texture Generation', requiredProviders: ['Meshy'], hint: 'Configure Meshy API key in Settings to enable Texture Generation.' },
       { capability: 'sfx', available: false, label: 'Sound Effect Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.' },
       { capability: 'voice', available: false, label: 'Voice Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Voice Generation.' },
-      { capability: 'music', available: false, label: 'Music Generation', requiredProviders: ['Suno'], hint: 'Configure Suno API key in Settings to enable Music Generation.' },
+      { capability: 'music', available: false, label: 'Music Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Music Generation.' },
       { capability: 'sprite', available: false, label: 'Sprite Generation', requiredProviders: ['Replicate'], hint: 'Configure Replicate API key in Settings to enable Sprite Generation.' },
       { capability: 'bg_removal', available: false, label: 'Background Removal', requiredProviders: ['remove.bg'], hint: 'Configure remove.bg API key in Settings to enable Background Removal.' },
     ],
     available: ['chat', 'embedding'],
     unavailable: ['image', 'model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal'],
+    degraded: false,
     ...overrides,
   };
 }
@@ -347,5 +350,91 @@ describe('useCapabilities', () => {
     });
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+// #9725 review (Sentry): the module-level cache never expired on success, so a
+// sign-out/sign-in within one SPA session kept serving the previous user's
+// BYOK-aware body. The cache now ages out on the same 60s the route's
+// `Cache-Control: private, max-age=60` allows, and can be invalidated
+// explicitly by whatever reacts to an auth change.
+describe('capabilities cache freshness (#9725)', () => {
+  beforeEach(() => {
+    _resetCapabilitiesCache();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    _resetCapabilitiesCache();
+  });
+
+  function okFetch() {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify(mockCapabilitiesResponse()), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  }
+
+  it('refetches once a successful response is older than CAPABILITIES_TTL_MS', async () => {
+    const fetchSpy = okFetch();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const first = renderHook(() => useCapabilities());
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    // Inside the TTL: a new mount is served from cache.
+    now.mockReturnValue(1_000_000 + CAPABILITIES_TTL_MS - 1);
+    const second = renderHook(() => useCapabilities());
+    expect(second.result.current.loading).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    second.unmount();
+
+    // Past the TTL: a new mount refetches.
+    now.mockReturnValue(1_000_000 + CAPABILITIES_TTL_MS + 1);
+    const third = renderHook(() => useCapabilities());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(third.result.current.loading).toBe(false));
+  });
+
+  it('invalidateCapabilitiesCache() forces the next mount to refetch', async () => {
+    const fetchSpy = okFetch();
+    const first = renderHook(() => useCapabilities());
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    first.unmount();
+    invalidateCapabilitiesCache();
+    const second = renderHook(() => useCapabilities());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(second.result.current.loading).toBe(false));
+  });
+
+  // The route answers `Cache-Control: private, max-age=60`, so a default-mode
+  // fetch right after invalidateCapabilitiesCache() is satisfied by the
+  // browser's HTTP cache with the PRE-save body — which then sets fetchedAt
+  // and is held for another CAPABILITIES_TTL_MS. The module already memoizes
+  // for 60s; the network request itself must bypass the HTTP cache. jsdom
+  // mocks fetch, so the only observable here is the init the hook passes.
+  it('bypasses the browser HTTP cache so an invalidation is not served the stale body', async () => {
+    const fetchSpy = okFetch();
+    const hook = renderHook(() => useCapabilities());
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith('/api/capabilities', expect.objectContaining({ cache: 'no-store' }));
+  });
+});
+
+// #9727 review: `CAPABILITY_LABELS` in lib/config/providers claims to be the one
+// vocabulary Settings, /api/capabilities and the status page share. A second
+// byte-identical table in this hook is exactly the drift that claim denies.
+describe('feature labels', () => {
+  it('derives every label from the shared CAPABILITY_LABELS table', async () => {
+    const { FEATURE_CAPABILITY_MAP, FEATURE_LABELS } = await import('@/hooks/useFeatureGating');
+    const { CAPABILITY_LABELS } = await import('@/lib/config/providers');
+    for (const [featureId, caps] of Object.entries(FEATURE_CAPABILITY_MAP)) {
+      expect(FEATURE_LABELS[featureId as keyof typeof FEATURE_LABELS], featureId).toBe(
+        caps.map((cap) => CAPABILITY_LABELS[cap]).join(' + '),
+      );
+    }
   });
 });

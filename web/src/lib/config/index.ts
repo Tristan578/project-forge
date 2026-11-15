@@ -13,3 +13,4 @@ export * from './timeouts';
 export * from './providers';
 export * from './scopes';
 export * from './enums';
+export * from './moderation';

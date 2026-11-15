@@ -143,8 +143,10 @@ describe('generateMcpDocs', () => {
   });
 
   // `fatal` is what makes the CLI exit 1 and fail the Vercel build. Without it
-  // the build goes green with zero pages and the unreadable manifest resurfaces
-  // as a runtime 500 from lib/commands.ts on the force-dynamic /mcp route.
+  // the build goes green having generated zero MDX pages, and the per-command
+  // reference silently vanishes from the live site. (The /mcp routes are
+  // covered separately: lib/commands.ts imports the manifest statically, so a
+  // missing file fails `next build` there before any request is served.)
   it('marks an unreadable manifest fatal', () => {
     const result = generateMcpDocs(path.join(tmpDir, 'does-not-exist.json'), outputDir);
 

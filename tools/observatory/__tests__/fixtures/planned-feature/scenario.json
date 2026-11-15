@@ -1,0 +1,32 @@
+{
+  "description": "A planned capability with no code must exist in the inventory with stable identity, own zero files, and be excused from the capability-without-artifact gap (unlike a removed command, which declared an owner that vanished).",
+  "coveredScopes": ["feature/"],
+  "files": ["feature/real.ts"],
+  "rules": [
+    {
+      "capabilityId": "feature.real",
+      "domain": "feature",
+      "confidence": "reviewed",
+      "primaryOwner": "feature/real.ts",
+      "own": ["feature/real.ts"]
+    }
+  ],
+  "planned": [
+    {
+      "capabilityId": "feature.future",
+      "domain": "feature",
+      "confidence": "reviewed",
+      "requirement": "FR-42 planned collaboration mode; no implementation yet."
+    }
+  ],
+  "expected": {
+    "trackedTotal": 1,
+    "ownedTotal": 1,
+    "excludedTotal": 0,
+    "unmappedTotal": 0,
+    "notYetCoveredTotal": 0,
+    "plannedCapability": "feature.future",
+    "plannedRequirement": "FR-42 planned collaboration mode; no implementation yet.",
+    "gapCount": 0
+  }
+}

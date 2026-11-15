@@ -4,7 +4,7 @@ description: Infrastructure specialist for SpawnForge. Use when working with Ver
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Agent, WebFetch
 argument-hint: "[service: vercel|r2|neon|upstash|clerk|stripe|sentry|posthog|github|ci-status]"
-paths: ".github/workflows/**, infra/**, vercel.json"
+paths: ".github/workflows/**, infra/**, vercel.json, vercel.ts"
 ---
 
 # Infrastructure & Services Guide
@@ -43,7 +43,7 @@ ever disagree, that one is right — fix this one.
 - **Sibling projects**: `spawnforge-staging`, `spawnforge-docs`, `spawnforge-design`
 - **Scope**: `--scope tnolan` on EVERY Vercel CLI command
 - **CLI commands**: `vercel ls --scope tnolan`, `vercel logs --scope tnolan`, `vercel env ls|pull --scope tnolan`
-- **Config**: `vercel.json` (crons, headers, rewrites)
+- **Config**: `web/vercel.ts` (typed `VercelConfig`: install/build commands, region, `git.deploymentEnabled: false`, the health-monitor cron; replaced `vercel.json`, PF-1060/#9097). Response headers live in `web/next.config.ts`, not here
 - **Key env vars**: `VERCEL_URL`, `NEXT_PUBLIC_SITE_URL`
 - **Gotchas**:
   - `vercel dev` runs all services locally
@@ -92,7 +92,7 @@ ever disagree, that one is right — fix this one.
 ### Clerk (Authentication)
 
 - **Key env vars**: `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- **Webhooks**: `POST /api/webhooks/clerk` — handles `user.created`, `user.updated`, `user.deleted`
+- **Webhooks**: `POST /api/auth/webhook` — handles `user.created`, `user.updated`, `user.deleted`
 - **Proxy**: `proxy.ts` calls `clerkMiddleware()` — required for `auth()` in Server Components
 - **Gotchas**:
   - `vercel integration add clerk` needs terminal interaction (blocked for AI agents)
@@ -103,8 +103,8 @@ ever disagree, that one is right — fix this one.
 ### Stripe (Payments)
 
 - **Key env vars**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (no publishable key — checkout is a server-side redirect to a Stripe-hosted page, so `web/` never loads Stripe.js)
-- **Webhooks**: `POST /api/webhooks/stripe` — handles checkout, subscription, invoice, charge events
-- **Local testing**: `stripe listen --forward-to http://spawnforge.localhost:1355/api/webhooks/stripe`
+- **Webhooks**: `POST /api/stripe/webhook` — handles checkout, subscription, invoice, charge events
+- **Local testing**: `stripe listen --forward-to http://spawnforge.localhost:1355/api/stripe/webhook`
 - **Tiers**: starter (free), hobbyist, creator, pro
 - **Gotchas**:
   - Webhook signatures MUST be verified with `constructEvent()`
@@ -172,10 +172,27 @@ Only **Database and Clerk** failures return HTTP 503; everything else degrades t
 a per-service `degraded`/`down` entry. So a green status code is not a green stack — read
 `services[]`.
 
-The `AI Providers` check is the one that reports "outage" when a `PLATFORM_*` key is unset
-rather than wrong (PF-1054). Those names are read through an indirection table
-(`PLATFORM_KEY_ENV` in `web/src/lib/config/providers.ts`), so grepping for them finds nothing —
-see `web/.env.example` before concluding a provider is actually down.
+The `AI Providers` check grades per capability (#9719), not per key:
+
+| Verdict | When |
+|---------|------|
+| `down` | no chat backend resolves at all — nothing AI-shaped can be served |
+| `degraded` | a chat backend resolves but some generation capability has neither a platform key nor a gateway route. The unconfigured capabilities are named in `error`, in `details.unconfiguredCapabilities`, and in the public-safe `summary` |
+| `healthy` | chat resolves and every offered capability is configured |
+
+An unset `PLATFORM_*` key therefore yields **`degraded`, never "outage"** — and that is
+production's expected steady state today (`docs/guides/platform-keys.md`: no `PLATFORM_*` key
+is set, deliberately). Remove a capability from the declaration when provisioning it;
+missing or invalid declarations do not suppress faults. Only when every missing capability is explicitly listed in the deployment setting
+`HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES` does the entry carry `configurationOnly: true`,
+which keeps it out of the top-level `overall` and out of the 15-minute synthetic monitor's
+Sentry pages (#9727) — the entry itself still reads `degraded` on the status page. So: an
+amber AI Providers card with no `/health` banner and no Sentry page is the documented
+baseline; the same card WITH a page is a real regression.
+
+Those key names are read through an indirection table (`PLATFORM_KEY_ENV` in
+`web/src/lib/config/providers.ts`), so grepping for them finds nothing — see
+`web/.env.example` before concluding a provider is actually down.
 
 ## Scripts
 

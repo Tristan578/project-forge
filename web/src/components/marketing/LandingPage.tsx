@@ -22,6 +22,7 @@ import {
   Gamepad2,
 } from 'lucide-react';
 import { AiShowcaseSection } from '@/components/marketing/AiShowcaseSection';
+import { PreLaunchBanner } from '@/components/marketing/PreLaunchBanner';
 import { TIER_PLANS, isExclusionFeature, type TierKey } from '@/lib/billing/tierPlans';
 
 /* ------------------------------------------------------------------ */
@@ -223,6 +224,7 @@ export default async function LandingPage() {
   cacheTag('landing');
   return (
     <>
+      <PreLaunchBanner />
       {/* ---- Navigation ---- */}
       <nav
         className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md"

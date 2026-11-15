@@ -1,14 +1,45 @@
 'use client';
 
-import { type ReactElement, useState } from 'react';
+import { type ReactElement, useId, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { boneNameList } from '@/lib/skeleton2d/skeletonPayload';
-import type { Bone2dDef } from '@/stores/slices/types';
+import type { Bone2dDef, AttachmentData2d, VertexWeights2d } from '@/stores/slices/types';
+
+/** One bone influence on a vertex, held as strings while the row is edited. */
+interface MeshInfluenceDraft {
+  bone: string;
+  weight: string;
+}
+
+/** A vertex being edited: position plus its bone influences. */
+interface MeshVertexDraft {
+  x: string;
+  y: string;
+  /** Index in the existing attachment, retained when other vertices are removed. */
+  originalIndex?: number;
+  influences: MeshInfluenceDraft[];
+}
+
+/**
+ * The in-progress mesh attachment. `original` is the key it edits (or `null` for
+ * a brand-new attachment), so Apply replaces the right slot.
+ */
+interface MeshDraft {
+  name: string;
+  original: string | null;
+  vertices: MeshVertexDraft[];
+}
 
 export function SkeletonInspector({ entityId }: { entityId: string }) {
+  // Drafts belong to one entity; changing selection must discard them before Apply.
+  return <EntitySkeletonInspector key={entityId} entityId={entityId} />;
+}
+
+function EntitySkeletonInspector({ entityId }: { entityId: string }) {
+  const attachmentNameId = useId();
   const skeleton = useEditorStore((s) => s.skeletons2d[entityId]);
   const animations = useEditorStore((s) => s.skeletalAnimations2d[entityId] ?? []);
   const selectedBone = useEditorStore((s) => s.selectedBone);
@@ -20,6 +51,10 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
 
   const [newBoneName, setNewBoneName] = useState('');
   const [selectedSkin, setSelectedSkin] = useState(skeleton?.activeSkin ?? 'default');
+  const [newAttachmentName, setNewAttachmentName] = useState('');
+  const [newAttachmentError, setNewAttachmentError] = useState<string | null>(null);
+  const [meshDraft, setMeshDraft] = useState<MeshDraft | null>(null);
+  const [meshError, setMeshError] = useState<string | null>(null);
 
   if (!skeleton) {
     return (
@@ -84,9 +119,223 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
     setSkeleton2d(entityId, { ...skeleton, bones });
   };
 
+  // --- Mesh attachments (#9732) ---------------------------------------------
+  // The manual, no-chat authoring path for the same vertex/weight data
+  // `add_skeleton2d_mesh_attachment` writes. Edits round-trip through
+  // `setSkeleton2d` like every other change in this panel. Apply adds
+  // client-side validation the command / chat path does NOT enforce (that path
+  // only checks vertices.length === weights.length): an influence must name a
+  // real bone, and a vertex must carry a positive total weight — otherwise the
+  // engine's skinning drops it to its bind position. Weights are rejected here,
+  // not silently normalized, so an author sees and fixes the row rather than
+  // having their numbers quietly rewritten.
+  const activeSkinData = skeleton.skins[selectedSkin];
+  const meshAttachments = Object.entries(activeSkinData?.attachments ?? {}).filter(
+    ([, a]) => a.type === 'mesh',
+  );
+  const boneNames = new Set(skeleton.bones.map(b => b.name));
+
+  const updateDraft = (updater: (draft: MeshDraft) => MeshDraft) => {
+    setMeshDraft(prev => (prev ? updater(prev) : prev));
+  };
+
+  // Vertex/weight edits live only in local `meshDraft` state and reach the store
+  // solely on Apply (unlike the bone fields, which write through `setSkeleton2d`
+  // on every keystroke). So opening a new draft — or switching the edit target —
+  // silently discards every unapplied edit on the current one. When a draft is
+  // already open, gate that loss behind the same confirm dialog the Remove
+  // Skeleton button uses. When none is open there is nothing to lose, so `open`
+  // runs synchronously — that keeps the common first-open path free of the extra
+  // microtask an `await` would insert.
+  const guardDiscardThen = (open: () => void) => {
+    if (!meshDraft) {
+      open();
+      return;
+    }
+    void confirm('Discard unsaved mesh edits?').then((ok) => {
+      if (ok) open();
+    });
+  };
+
+  // Switching the active skin also throws away an open, unapplied mesh draft
+  // (its vertices/weights live only in local state until Apply), so route the
+  // discard through the same guard as Add/Edit rather than clearing it silently
+  // — a mis-clicked or exploratory skin change is exactly the loss the confirm
+  // dialog exists to prevent.
   const handleSkinChange = (skinName: string) => {
-    setSelectedSkin(skinName);
-    setSkeleton2d(entityId, { ...skeleton, activeSkin: skinName });
+    guardDiscardThen(() => {
+      setSelectedSkin(skinName);
+      setNewAttachmentError(null);
+      setMeshDraft(null);
+      setMeshError(null);
+      setSkeleton2d(entityId, { ...skeleton, activeSkin: skinName });
+    });
+  };
+
+  const handleAddMeshAttachment = () => {
+    const name = newAttachmentName.trim();
+    if (!name) return;
+    if (Object.hasOwn(activeSkinData?.attachments ?? {}, name)) {
+      setNewAttachmentError(`An attachment named "${name}" already exists in skin "${selectedSkin}".`);
+      return;
+    }
+    setNewAttachmentError(null);
+    guardDiscardThen(() => {
+      const firstBone = skeleton.bones[0]?.name ?? '';
+      setMeshDraft({
+        name,
+        original: null,
+        vertices: [{ x: '0', y: '0', influences: [{ bone: firstBone, weight: '1' }] }],
+      });
+      setMeshError(null);
+      setNewAttachmentName('');
+    });
+  };
+
+  const handleEditMeshAttachment = (name: string) => {
+    const attachment = activeSkinData?.attachments?.[name];
+    if (!attachment || attachment.type !== 'mesh') return;
+    guardDiscardThen(() => {
+      const vertices = attachment.vertices ?? [];
+      const weights = attachment.weights ?? [];
+      setMeshDraft({
+        name,
+        original: name,
+        vertices: vertices.map((v, i) => ({
+          x: String(v[0]),
+          y: String(v[1]),
+          originalIndex: i,
+          influences: (weights[i]?.bones ?? []).map((bone, j) => ({
+            bone,
+            weight: String(weights[i]?.weights?.[j] ?? 0),
+          })),
+        })),
+      });
+      setMeshError(null);
+    });
+  };
+
+  const handleDeleteMeshAttachment = (name: string) => {
+    if (!activeSkinData) return;
+    const deleteIt = () => {
+      if (name === newAttachmentName.trim()) setNewAttachmentError(null);
+      const { [name]: _removed, ...rest } = activeSkinData.attachments;
+      setSkeleton2d(entityId, {
+        ...skeleton,
+        skins: { ...skeleton.skins, [selectedSkin]: { ...activeSkinData, attachments: rest } },
+      });
+      if (meshDraft?.original === name) {
+        setMeshDraft(null);
+        setMeshError(null);
+      }
+    };
+    // Deleting the attachment currently open in an unsaved draft would discard
+    // those edits the same way switching targets or adding a new attachment
+    // does, so it goes through the same confirm dialog rather than clearing
+    // silently. Deleting an unrelated attachment while a different draft is
+    // open does not touch that draft, so it proceeds without a prompt.
+    if (meshDraft?.original === name) {
+      void confirm('Discard unsaved mesh edits?').then((ok) => {
+        if (ok) deleteIt();
+      });
+      return;
+    }
+    deleteIt();
+  };
+
+  const handleApplyMesh = () => {
+    if (!meshDraft) return;
+    if (meshDraft.vertices.length === 0) {
+      setMeshError('A mesh attachment needs at least one vertex.');
+      return;
+    }
+    const vertices: [number, number][] = [];
+    const weights: VertexWeights2d[] = [];
+    for (let i = 0; i < meshDraft.vertices.length; i += 1) {
+      const vertex = meshDraft.vertices[i];
+      const x = Number(vertex.x);
+      const y = Number(vertex.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        setMeshError(`Vertex ${i + 1} has a non-numeric position.`);
+        return;
+      }
+      const bones: string[] = [];
+      const vertexWeights: number[] = [];
+      let total = 0;
+      for (let j = 0; j < vertex.influences.length; j += 1) {
+        const influence = vertex.influences[j];
+        const bone = influence.bone.trim();
+        if (!bone) {
+          setMeshError(`Vertex ${i + 1} influence ${j + 1} has no bone.`);
+          return;
+        }
+        if (!boneNames.has(bone)) {
+          setMeshError(
+            `Vertex ${i + 1} references unknown bone "${bone}". Add that bone or fix the name.`,
+          );
+          return;
+        }
+        const weight = Number(influence.weight);
+        if (!Number.isFinite(weight)) {
+          setMeshError(`Vertex ${i + 1} influence ${j + 1} has a non-numeric weight.`);
+          return;
+        }
+        bones.push(bone);
+        vertexWeights.push(weight);
+        total += weight;
+      }
+      if (total <= 0) {
+        setMeshError(
+          `Vertex ${i + 1} has zero total weight — give it at least one bone with a positive weight.`,
+        );
+        return;
+      }
+      vertices.push([x, y]);
+      weights.push({ bones, weights: vertexWeights });
+    }
+
+    // Vertex/weight edits must preserve the mesh's texture and topology. Map
+    // original indices through deletions so surviving triangles and UVs keep
+    // referring to the same vertices; new vertices start with a neutral UV.
+    const original = meshDraft.original === null
+      ? undefined
+      : activeSkinData?.attachments[meshDraft.original];
+    const remappedIndices = new Map<number, number>();
+    const uvs: [number, number][] = meshDraft.vertices.map((vertex, index) => {
+      if (vertex.originalIndex === undefined) return [0, 0];
+      remappedIndices.set(vertex.originalIndex, index);
+      return original?.uvs?.[vertex.originalIndex] ?? [0, 0];
+    });
+    const triangles: number[] = [];
+    const originalTriangles = original?.triangles ?? [];
+    for (let i = 0; i + 2 < originalTriangles.length; i += 3) {
+      const a = remappedIndices.get(originalTriangles[i]);
+      const b = remappedIndices.get(originalTriangles[i + 1]);
+      const c = remappedIndices.get(originalTriangles[i + 2]);
+      if (a !== undefined && b !== undefined && c !== undefined) triangles.push(a, b, c);
+    }
+
+    const attachment: AttachmentData2d = {
+      type: 'mesh',
+      textureId: original?.textureId ?? '',
+      vertices,
+      uvs,
+      triangles,
+      weights,
+    };
+    const skin = activeSkinData ?? { name: selectedSkin, attachments: {} };
+    setSkeleton2d(entityId, {
+      ...skeleton,
+      skins: {
+        ...skeleton.skins,
+        [selectedSkin]: {
+          ...skin,
+          attachments: { ...skin.attachments, [meshDraft.name]: attachment },
+        },
+      },
+    });
+    setMeshError(null);
+    setMeshDraft(null);
   };
 
   const handlePlayAnimation = (animName: string) => {
@@ -261,12 +510,275 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
         <select
           value={selectedSkin}
           onChange={(e) => handleSkinChange(e.target.value)}
+          aria-label="Active skin"
           className="w-full px-2 py-1 bg-zinc-800 rounded text-sm"
         >
           {Object.keys(skeleton.skins).map(skinName => (
             <option key={skinName} value={skinName}>{skinName}</option>
           ))}
         </select>
+      </div>
+
+      {/* Mesh Attachments (#9732) */}
+      <div className="border-t border-zinc-700 pt-3">
+        <label className="text-sm font-medium mb-1 flex items-center gap-1">
+          Mesh Attachments
+          <InfoTooltip text="Define deformable meshes: vertices and the bone weights that skin them. No chat or command needed." />
+        </label>
+
+        {meshAttachments.length === 0 ? (
+          <div className="text-xs text-zinc-400 mb-2">No mesh attachments in this skin</div>
+        ) : (
+          <div className="space-y-1 mb-2">
+            {meshAttachments.map(([name, attachment]) => (
+              <div key={name} className="flex items-center gap-2 text-xs bg-zinc-800 rounded px-2 py-1">
+                <span className="flex-1 truncate">
+                  {name} ({attachment.vertices?.length ?? 0} verts)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleEditMeshAttachment(name)}
+                  className="px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 rounded"
+                  aria-label={`Edit mesh attachment ${name}`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteMeshAttachment(name)}
+                  className="p-1 hover:bg-red-600 rounded"
+                  aria-label={`Delete mesh attachment ${name}`}
+                >
+                  <Trash2 className="w-3 h-3" aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <label htmlFor={attachmentNameId} className="mb-1 block text-xs text-zinc-400">
+          Attachment name
+        </label>
+        <div className="flex gap-2">
+          <input
+            id={attachmentNameId}
+            type="text"
+            value={newAttachmentName}
+            onChange={(e) => {
+              setNewAttachmentName(e.target.value);
+              setNewAttachmentError(null);
+            }}
+            aria-invalid={newAttachmentError ? true : undefined}
+            aria-describedby={newAttachmentError ? `${attachmentNameId}-error` : undefined}
+            placeholder="Attachment name"
+            className="flex-1 px-2 py-1 bg-zinc-800 rounded text-sm"
+            onKeyDown={(e) => e.key === 'Enter' && handleAddMeshAttachment()}
+          />
+          <button
+            type="button"
+            onClick={handleAddMeshAttachment}
+            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
+            aria-label="Add mesh attachment"
+          >
+            <Plus className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        {newAttachmentError && (
+          <div id={`${attachmentNameId}-error`} className="mt-1 text-xs text-red-400" role="alert">
+            {newAttachmentError}
+          </div>
+        )}
+
+        {meshDraft && (
+          <div className="mt-2 bg-zinc-800 rounded p-2 space-y-2">
+            <div className="text-sm font-medium">Mesh: {meshDraft.name}</div>
+
+            {meshDraft.vertices.map((vertex, vi) => (
+              <div key={vi} className="border-t border-zinc-700 pt-2 first:border-t-0 first:pt-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs text-zinc-400 w-14">Vertex {vi + 1}</span>
+                  <input
+                    type="number"
+                    value={vertex.x}
+                    onChange={(e) =>
+                      updateDraft(d => ({
+                        ...d,
+                        vertices: d.vertices.map((v, i) => (i === vi ? { ...v, x: e.target.value } : v)),
+                      }))
+                    }
+                    className="w-16 px-2 py-1 bg-zinc-900 rounded text-sm"
+                    step="0.1"
+                    aria-label={`Vertex ${vi + 1} X`}
+                  />
+                  <input
+                    type="number"
+                    value={vertex.y}
+                    onChange={(e) =>
+                      updateDraft(d => ({
+                        ...d,
+                        vertices: d.vertices.map((v, i) => (i === vi ? { ...v, y: e.target.value } : v)),
+                      }))
+                    }
+                    className="w-16 px-2 py-1 bg-zinc-900 rounded text-sm"
+                    step="0.1"
+                    aria-label={`Vertex ${vi + 1} Y`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateDraft(d => ({ ...d, vertices: d.vertices.filter((_, i) => i !== vi) }))
+                    }
+                    className="p-1 hover:bg-red-600 rounded ml-auto"
+                    aria-label={`Remove vertex ${vi + 1}`}
+                  >
+                    <Trash2 className="w-3 h-3" aria-hidden="true" />
+                  </button>
+                </div>
+
+                <div className="pl-14 space-y-1">
+                  {vertex.influences.map((influence, ii) => (
+                    <div key={ii} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        list="skeleton-bone-names"
+                        value={influence.bone}
+                        onChange={(e) =>
+                          updateDraft(d => ({
+                            ...d,
+                            vertices: d.vertices.map((v, i) =>
+                              i === vi
+                                ? {
+                                    ...v,
+                                    influences: v.influences.map((inf, j) =>
+                                      j === ii ? { ...inf, bone: e.target.value } : inf,
+                                    ),
+                                  }
+                                : v,
+                            ),
+                          }))
+                        }
+                        placeholder="Bone"
+                        className="flex-1 px-2 py-1 bg-zinc-900 rounded text-sm"
+                        aria-label={`Vertex ${vi + 1} influence ${ii + 1} bone`}
+                      />
+                      <input
+                        type="number"
+                        value={influence.weight}
+                        onChange={(e) =>
+                          updateDraft(d => ({
+                            ...d,
+                            vertices: d.vertices.map((v, i) =>
+                              i === vi
+                                ? {
+                                    ...v,
+                                    influences: v.influences.map((inf, j) =>
+                                      j === ii ? { ...inf, weight: e.target.value } : inf,
+                                    ),
+                                  }
+                                : v,
+                            ),
+                          }))
+                        }
+                        className="w-16 px-2 py-1 bg-zinc-900 rounded text-sm"
+                        step="0.1"
+                        aria-label={`Vertex ${vi + 1} influence ${ii + 1} weight`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateDraft(d => ({
+                            ...d,
+                            vertices: d.vertices.map((v, i) =>
+                              i === vi
+                                ? { ...v, influences: v.influences.filter((_, j) => j !== ii) }
+                                : v,
+                            ),
+                          }))
+                        }
+                        className="p-1 hover:bg-red-600 rounded"
+                        aria-label={`Remove influence ${ii + 1} from vertex ${vi + 1}`}
+                      >
+                        <Trash2 className="w-3 h-3" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateDraft(d => ({
+                        ...d,
+                        vertices: d.vertices.map((v, i) =>
+                          i === vi
+                            ? {
+                                ...v,
+                                influences: [
+                                  ...v.influences,
+                                  { bone: skeleton.bones[0]?.name ?? '', weight: '1' },
+                                ],
+                              }
+                            : v,
+                        ),
+                      }))
+                    }
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                    aria-label={`Add influence to vertex ${vi + 1}`}
+                  >
+                    + Add influence
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <datalist id="skeleton-bone-names">
+              {skeleton.bones.map(b => (
+                <option key={b.name} value={b.name} />
+              ))}
+            </datalist>
+
+            <button
+              type="button"
+              onClick={() =>
+                updateDraft(d => ({
+                  ...d,
+                  vertices: [
+                    ...d.vertices,
+                    { x: '0', y: '0', influences: [{ bone: skeleton.bones[0]?.name ?? '', weight: '1' }] },
+                  ],
+                }))
+              }
+              className="text-xs text-blue-400 hover:text-blue-300 block"
+            >
+              + Add vertex
+            </button>
+
+            {meshError && (
+              <div className="text-xs text-red-400" role="alert">
+                {meshError}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleApplyMesh}
+                className="flex-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
+              >
+                Apply Mesh Attachment
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMeshDraft(null);
+                  setMeshError(null);
+                }}
+                className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* IK Constraints */}

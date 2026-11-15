@@ -221,7 +221,7 @@ function onUpdate(dt) {
   cooldown -= dt;
 
   // Fire on input
-  if (forge.input.justPressed("fire") && cooldown <= 0) {
+  if (forge.input.justPressed("action_primary") && cooldown <= 0) {
     const pos = forge.getTransform(entityId)?.position;
     if (pos) {
       const id = forge.spawn("sphere", { name: "Projectile", position: [pos[0], pos[1] + 0.5, pos[2] - 1] });

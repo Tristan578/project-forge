@@ -24,12 +24,14 @@ mod component_resync;
 mod core_systems;
 mod material;
 mod performance;
+mod observability_bridge;
 mod physics;
 mod audio;
 mod query;
 mod animation;
 mod particles;
 mod scene_io;
+mod render_errors;
 // Editor-only modules. Every item in each of these three files is reachable
 // only from the `#[cfg(not(feature = "runtime"))]` block in
 // `SelectionPlugin::build()` below, so the whole module is gated rather than
@@ -70,9 +72,11 @@ use crate::core::{
     pending_commands::PendingCommands,
     physics::PhysicsPlugin,
     physics_2d_sim::Physics2dPlugin,
+    simulation_clock::SimulationClockPlugin,
     animation_clip::AnimationClipPlugin,
     post_processing::PostProcessingPlugin,
     quality::QualitySettings,
+    render_errors::RenderErrorReportingPlugin,
     scene,
     scene_file::SceneName,
     scene_graph::{self, SceneGraphCache},
@@ -84,7 +88,7 @@ use crate::core::{
 // NOT editor-only: `apply_reverb_zone_commands` is registered in the
 // always-active block, so this import cannot ride the `runtime`-gated group
 // below. The set carries ordering only, never a run condition.
-use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet};
+use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet, in_play_mode};
 
 // Editor-only imports
 #[cfg(not(feature = "runtime"))]
@@ -215,6 +219,12 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
                 }),
         );
 
+    // Replace Bevy 0.19's default RenderErrorHandler, which quits the app on
+    // ANY wgpu error and leaves the editor frozen with no explanation. Ours
+    // never quits; it skips a one-off error or stops rendering, and reports
+    // either to the editor (`RENDER_ERROR`). Policy: `core/render_errors.rs`.
+    app.add_plugins(RenderErrorReportingPlugin);
+
     // Insert the glTF memory directory resource (shared with the "memory" asset source reader)
     app.insert_resource(core::asset_manager::GltfMemoryDir(gltf_memory_dir));
 
@@ -229,6 +239,9 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
         .add_plugins(Physics2dPlugin)
+        // Pinned simulation clock for deterministic replay (#10007). Registered
+        // in both builds: an exported game is replayed the way Play mode is.
+        .add_plugins(SimulationClockPlugin)
         .add_plugins(AnimationClipPlugin)
         .add_plugins(ShaderEffectsPlugin)
         .add_plugins(CustomWgslPlugin)
@@ -384,7 +397,10 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, query::process_terrain_queries)
             .add_systems(Update, query::process_quality_queries)
             .add_systems(Update, query::process_reverb_zone_queries)
-            .add_systems(Update, query::process_play_state_queries);
+            .add_systems(Update, query::process_play_state_queries)
+            // Render-error reports (#8887). Always-active: a published game can
+            // hit a GPU error as easily as the editor can.
+            .add_systems(Update, render_errors::emit_render_error_reports);
 
         // Joint reads and the joint / gravity / debug-toggle drains run in BOTH
         // builds (#9550). `core::commands::physics::dispatch` accepts and queues
@@ -574,6 +590,8 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, physics::apply_force_applications2d)
             .add_systems(Update, (
                 physics::apply_impulse_applications2d,
+                physics::apply_linear_velocity2d_sets,
+                physics::apply_angular_velocity2d_sets,
                 physics::apply_raycast2d_requests,
             ))
             // Collision/raycast systems (always-active, split to stay under tuple limit)
@@ -622,9 +640,20 @@ impl Plugin for SelectionPlugin {
         #[cfg(feature = "webgpu")]
         app.add_systems(Update, particles::sync_hanabi_effects);
 
+        // The custom-WGSL hot-swap that `apply_scene_load` queues for a scene
+        // carrying custom shader code. The editor build registers the same
+        // system inside `EditorApplySet` below; a `runtime` build has no such
+        // set, so it is registered here, once, for that build only (#10195).
+        #[cfg(feature = "runtime")]
+        app.add_systems(Update, material::apply_custom_wgsl_source_updates);
+
         app
             // glTF scene spawn system (always-active): spawns loaded glTF scenes as children
             .add_systems(Update, scene_io::apply_gltf_scene_spawn)
+            // Scene load (always-active): an exported game boots by handing its
+            // scene to the runtime engine through `load_scene`, so the drain
+            // must exist in a `runtime` build too (#10195).
+            .add_systems(Update, scene_io::apply_scene_load)
             // Animation systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 animation::register_gltf_animations,
@@ -661,11 +690,12 @@ impl Plugin for SelectionPlugin {
             // Sorting layers (always-active): update SortingLayerConfig resource
             .add_systems(Update, sprite::apply_set_sorting_layers)
             .add_systems(Update, sprite::sync_sprite_z_with_sorting_config)
-            // Tile paint/erase/fill (always-active)
+            // Tile paint/erase/fill/collision-shape (always-active)
             .add_systems(Update, (
                 sprite::apply_paint_tile_requests,
                 sprite::apply_erase_tile_requests,
                 sprite::apply_fill_tiles_requests,
+                sprite::apply_set_tile_collision_shape_requests,
             ))
             // Animated tiles (always-active)
             .add_systems(Update, sprite::animate_tilemap_tiles)
@@ -675,8 +705,17 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, sprite::handle_sprite_and_camera2d_queries)
             .add_systems(Update, sprite::handle_sprite_sheet_state_queries)
             .add_systems(Update, sprite::handle_sprite_animator_state_queries)
-            // 2D camera systems (always-active): project type + Camera2d management
-            .add_systems(Update, sprite::apply_project_type_changes)
+            // 2D camera systems (always-active): project type + Camera2d management.
+            // `.after(apply_scene_load)` is load-bearing (#10227): the loader
+            // queues the scene file's `metadata.projectType` into the queue
+            // this system drains, and without the edge Bevy may run the drain
+            // first, leaving the loaded scene's dimension unapplied for a
+            // frame — long enough for the SCENE_LOADED handler's follow-up
+            // export (`checkpointRecovery.matchesExpected`) to read the OLD
+            // type. `apply_scene_export` is ordered after this system below
+            // for the same reason. Pinned by `scene_file.rs`'s
+            // `project_type_persistence_tests`.
+            .add_systems(Update, sprite::apply_project_type_changes.after(scene_io::apply_scene_load))
             .add_systems(Update, sprite::apply_camera_2d_updates)
             .add_systems(Update, sprite::sync_camera_2d_rendering)
             // 2D play-mode systems: camera bounds clamping + pixel-perfect snapping
@@ -706,7 +745,117 @@ impl Plugin for SelectionPlugin {
             // LOD runtime: distance-based LOD level switching + performance metrics
             .add_systems(Update, performance::update_lod_levels)
             .add_systems(Update, performance::regenerate_missing_lod_meshes)
-            .add_systems(Update, performance::collect_performance_metrics);
+            .add_systems(Update, performance::collect_performance_metrics)
+            // Script-facing command drains must stay active in exported games.
+            .add_systems(Update, (
+                core_systems::apply_pending_transforms,
+                core_systems::apply_pending_visibility,
+                entity_factory::apply_material_updates,
+                game::process_game_component_queries,
+            ))
+            .add_systems(Update, (
+                game::apply_set_game_camera_requests,
+                game::apply_set_active_game_camera_requests,
+                game::apply_camera_shake_requests,
+                game::process_game_camera_queries,
+            ))
+            .add_systems(Update, (
+                skeleton2d::apply_skeleton2d_creates,
+                skeleton2d::apply_bone2d_adds,
+                skeleton2d::apply_bone2d_removes,
+                skeleton2d::apply_bone2d_updates,
+                skeleton2d::apply_skeletal_animation2d_plays,
+                skeleton2d::apply_skeleton2d_skin_sets,
+                skeleton2d::handle_skeleton2d_query,
+            ));
+
+        // Per-system-group CPU timing (performance.FR-1.OP-01/OP-04, #9880).
+        // Always-present: a capture session stays inert until JS calls
+        // `set_system_timing_capture`, so idle overhead is a single branch per
+        // bracket per frame. Each bracket is ordered around the systems it
+        // actually measures via `.before`/`.after`; the brackets take no anchor
+        // resources, so they add no ordering edge beyond that pair and cannot
+        // perturb the order of the systems they wrap. Each group is named for
+        // exactly what its anchor covers:
+        //   - EntitySync   -> `emit_play_tick_system` (the per-frame entity-state
+        //                     emit; Rust-side serialization only, NOT user-script
+        //                     CPU, which runs off-frame in the JS Worker). Its
+        //                     own bracket is `run_if(in_play_mode)`: the wrapped
+        //                     system is a near-instant early return outside Play
+        //                     mode, so an unconditional bracket would still fire
+        //                     and record a fabricated near-zero value in Edit
+        //                     mode instead of leaving the group unmeasured.
+        //   - TransformApply -> `apply_pending_transforms` (that one JS->engine
+        //                     drain only, NOT every command drain).
+        //   - Physics      -> Rapier's `PhysicsSet` in `PostUpdate`, which is the
+        //                     schedule `RapierPhysicsPlugin` steps the simulation
+        //                     in (SyncBackend -> StepSimulation -> Writeback). An
+        //                     `Update` bracket ordered around `PlaySystemSet`
+        //                     would see only joint lifecycle / gameplay systems
+        //                     and never the solver, reporting a physics-heavy
+        //                     frame as cheap. When physics is not enabled the set
+        //                     has no members and the ordering is simply inert.
+        // Rendering/GPU (OP-02) is not instrumented, so it is never recorded and
+        // reaches the UI as "unknown", not 0.
+        app.init_resource::<crate::core::system_timing::SystemTimingBuffer>()
+            .init_resource::<observability_bridge::SystemTimingScratch>()
+            .add_systems(First, observability_bridge::apply_system_timing_capture_request)
+            // `.after(ModeRestoreSet)`: `apply_mode_change_requests` (in that
+            // set) is the system that mutates `EngineMode`, and it carries no
+            // ordering relationship to these two run_if(in_play_mode) brackets
+            // on its own — an unconstrained mode flip landing between them in
+            // the same frame would let `begin` see Play (recording a start)
+            // and `end` see the new Edit (its run_if false, so it never
+            // consumes that start). The stale start then survives to a LATER
+            // frame's `end`, which mistakes it for that frame's own begin and
+            // records an elapsed spanning many frames instead of the intended
+            // single-frame window. Ordering after `ModeRestoreSet` means both
+            // brackets observe the SAME already-settled mode for this frame, so
+            // they can never split across a transition (#9880).
+            .add_systems(
+                Update,
+                observability_bridge::begin_entity_sync_timing
+                    .before(scripts::emit_play_tick_system)
+                    .after(ModeRestoreSet)
+                    .run_if(in_play_mode),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::end_entity_sync_timing
+                    .after(scripts::emit_play_tick_system)
+                    .after(ModeRestoreSet)
+                    .run_if(in_play_mode),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::begin_transform_apply_timing
+                    .before(core_systems::apply_pending_transforms),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::end_transform_apply_timing
+                    .after(core_systems::apply_pending_transforms),
+            )
+            // Both physics backends (3D `PhysicsPlugin`, 2D `Physics2dPlugin`)
+            // are always registered and each schedules its OWN `PhysicsSet`
+            // chain in `PostUpdate`, so the bracket orders before both
+            // SyncBackends and after both Writebacks — a 2D-only game would
+            // otherwise leave the rapier2d solver (its real cost) outside the
+            // window. Ordering against a set with no members (the unused backend
+            // in a given scene) is inert, so this adds no constraint there.
+            .add_systems(
+                PostUpdate,
+                observability_bridge::begin_physics_timing
+                    .before(bevy_rapier3d::prelude::PhysicsSet::SyncBackend)
+                    .before(bevy_rapier2d::prelude::PhysicsSet::SyncBackend),
+            )
+            .add_systems(
+                PostUpdate,
+                observability_bridge::end_physics_timing
+                    .after(bevy_rapier3d::prelude::PhysicsSet::Writeback)
+                    .after(bevy_rapier2d::prelude::PhysicsSet::Writeback),
+            )
+            .add_systems(Last, observability_bridge::commit_and_emit_system_timings);
 
         // Editor-only systems and observers
         #[cfg(not(feature = "runtime"))]
@@ -723,12 +872,10 @@ impl Plugin for SelectionPlugin {
                 // the drains themselves stay unconditional.
                 .configure_sets(Update, ResyncDrainSet.after(EditorApplySet))
                 .add_systems(Update, (
-                    core_systems::apply_pending_transforms,
                     core_systems::apply_pending_renames,
                     core_systems::apply_pending_snap_settings,
                     material::apply_pending_coordinate_mode,
                     entity_factory::apply_duplicate_requests,
-                    entity_factory::apply_material_updates,
                     entity_factory::apply_light_updates,
                     entity_factory::apply_ambient_light_updates,
                 ).in_set(EditorApplySet))
@@ -762,7 +909,6 @@ impl Plugin for SelectionPlugin {
                 .add_systems(Update, material::apply_remove_custom_shader_slot_requests.in_set(EditorApplySet))
                 .add_systems(Update, material::restitch_custom_shaders.in_set(EditorApplySet))
                 .add_systems(Update, (
-                    core_systems::apply_pending_visibility,
                     core_systems::apply_pending_clear_selection,
                     core_systems::apply_pending_gizmo_mode,
                 ).in_set(EditorApplySet))
@@ -808,10 +954,12 @@ impl Plugin for SelectionPlugin {
                     core::terrain::collect_terrain_changes,
                     procedural::emit_terrain_changes,
                 ).chain().in_set(EditorSystemSet))
-                .add_systems(Update, (
-                    scene_io::apply_scene_export,
-                    scene_io::apply_scene_load,
-                ))
+                // `.after(apply_project_type_changes)` is load-bearing (#10227):
+                // the export writes `Res<ProjectType>` into `metadata.projectType`,
+                // and a load queued in the same frame must have been applied by
+                // the drain before the export reads the resource, or the
+                // exported scene carries the type of the scene it REPLACED.
+                .add_systems(Update, scene_io::apply_scene_export.after(sprite::apply_project_type_changes))
                 .add_systems(Update, (
                     scene_io::apply_new_scene,
                     scene_io::apply_gltf_import,
@@ -828,29 +976,15 @@ impl Plugin for SelectionPlugin {
                     game::apply_game_component_adds,
                     game::apply_game_component_updates,
                     game::apply_game_component_removals,
-                    game::process_game_component_queries,
-                ))
-                .add_systems(Update, (
-                    game::apply_set_game_camera_requests,
-                    game::apply_set_active_game_camera_requests,
-                    game::apply_camera_shake_requests,
-                    game::process_game_camera_queries,
                 ))
                 .add_systems(Update, (
                     edit_mode::apply_edit_mode_requests,
                     edit_mode::emit_edit_mode_selection,
                 ))
                 .add_systems(Update, (
-                    skeleton2d::apply_skeleton2d_creates,
-                    skeleton2d::apply_bone2d_adds,
-                    skeleton2d::apply_bone2d_removes,
-                    skeleton2d::apply_bone2d_updates,
                     skeleton2d::apply_skeletal_animation2d_creates,
                     skeleton2d::apply_keyframe2d_adds,
-                    skeleton2d::apply_skeletal_animation2d_plays,
-                    skeleton2d::apply_skeleton2d_skin_sets,
                     skeleton2d::apply_ik_chain2d_creates,
-                    skeleton2d::handle_skeleton2d_query,
                     skeleton2d::apply_auto_weight_skeleton2d,
                     skeleton2d::apply_add_mesh_attachment_requests,
                 ))

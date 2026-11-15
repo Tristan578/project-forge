@@ -1037,6 +1037,10 @@ describe('physicsJointHandlers', () => {
 // GAMEPLAY HANDLERS
 // ===========================================================================
 
+// PF-1148: the handlers now hand the store what building the component did to
+// the request. These values are all in range, so that report is empty.
+const NO_CORRECTIONS = expect.objectContaining({ corrections: [] });
+
 describe('gameplayHandlers', () => {
   // -------------------------------------------------------------------------
   // add_game_component
@@ -1065,7 +1069,7 @@ describe('gameplayHandlers', () => {
           gravityScale: 1,
           canDoubleJump: false,
         },
-      });
+      }, NO_CORRECTIONS);
     });
 
     it('adds character_controller with custom props', async () => {
@@ -1083,7 +1087,7 @@ describe('gameplayHandlers', () => {
           gravityScale: 1,
           canDoubleJump: true,
         },
-      });
+      }, NO_CORRECTIONS);
     });
 
     it('adds health component', async () => {
@@ -1100,7 +1104,7 @@ describe('gameplayHandlers', () => {
           currentHp: 200,
           invincibilitySecs: 2,
         }),
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds collectible component', async () => {
@@ -1113,7 +1117,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('coin', expect.objectContaining({
         type: 'collectible',
         collectible: expect.objectContaining({ value: 10, rotateSpeed: 60 }),
-      }));
+      }), NO_CORRECTIONS);
     });
 
     // The handler is a second call site into the wire layer, and it is the one a
@@ -1135,6 +1139,8 @@ describe('gameplayHandlers', () => {
         // -100.0, 100.0)` clamps it. The store used to keep 180 while the engine
         // spun the coin at 100, and nothing reported the disagreement.
         collectible: expect.objectContaining({ rotateSpeed: 100 }),
+      }), expect.objectContaining({
+        corrections: [{ component: 'collectible', field: 'rotateSpeed', requested: 180, applied: 100, reason: 'clamped' }],
       }));
     });
 
@@ -1148,7 +1154,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('lava', expect.objectContaining({
         type: 'damageZone',
         damageZone: { damagePerSecond: 50, oneShot: true },
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds checkpoint component', async () => {
@@ -1160,7 +1166,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('cp1', expect.objectContaining({
         type: 'checkpoint',
         checkpoint: { autoSave: true },
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds teleporter component', async () => {
@@ -1173,7 +1179,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('tp1', expect.objectContaining({
         type: 'teleporter',
         teleporter: { targetPosition: [5, 0, 5], cooldownSecs: 2 },
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds moving_platform component', async () => {
@@ -1187,7 +1193,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('plat1', expect.objectContaining({
         type: 'movingPlatform',
         movingPlatform: expect.objectContaining({ speed: 3, waypoints, loopMode: 'loop' }),
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds trigger_zone component', async () => {
@@ -1200,7 +1206,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('zone1', expect.objectContaining({
         type: 'triggerZone',
         triggerZone: { eventName: 'door_open', oneShot: true },
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds spawner component', async () => {
@@ -1213,7 +1219,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('sp1', expect.objectContaining({
         type: 'spawner',
         spawner: expect.objectContaining({ entityType: 'sphere', intervalSecs: 1, maxCount: 10 }),
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds follower component', async () => {
@@ -1226,7 +1232,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('enemy1', expect.objectContaining({
         type: 'follower',
         follower: expect.objectContaining({ targetEntityId: 'player', speed: 5, stopDistance: 2 }),
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds projectile component', async () => {
@@ -1239,7 +1245,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('bullet', expect.objectContaining({
         type: 'projectile',
         projectile: expect.objectContaining({ speed: 30, damage: 20, gravity: true }),
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('adds win_condition component', async () => {
@@ -1252,7 +1258,7 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('goal', expect.objectContaining({
         type: 'winCondition',
         winCondition: expect.objectContaining({ conditionType: 'reachGoal', targetEntityId: 'flag' }),
-      }));
+      }), NO_CORRECTIONS);
     });
 
     it('collapses an unknown conditionType the way the engine does', async () => {
@@ -1268,6 +1274,10 @@ describe('gameplayHandlers', () => {
       expect(store.addGameComponent).toHaveBeenCalledWith('goal', expect.objectContaining({
         type: 'winCondition',
         winCondition: expect.objectContaining({ conditionType: 'score', targetEntityId: 'flag' }),
+      }), expect.objectContaining({
+        corrections: [{
+          component: 'winCondition', field: 'conditionType', requested: 'reach_goal', applied: 'score', reason: 'invalid-replaced',
+        }],
       }));
     });
   });
@@ -1285,17 +1295,23 @@ describe('gameplayHandlers', () => {
       expect(result.error).toContain('Unknown component type');
     });
 
-    it('updates health component', async () => {
+    it('updates the named health fields and keeps the rest (#10144)', async () => {
+      const health = {
+        type: 'health' as const,
+        health: { maxHp: 100, currentHp: 100, invincibilitySecs: 2, respawnOnDeath: false, respawnPoint: [4, 5, 6] as [number, number, number], despawnOnDeath: false },
+      };
       const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
         entityId: 'player',
         componentType: 'health',
         properties: { maxHp: 50, currentHp: 25 },
-      });
+      }, { allGameComponents: { player: [health] } });
       expect(result.success).toBe(true);
-      expect(store.updateGameComponent).toHaveBeenCalledWith('player', expect.objectContaining({
+      // The full component: `objectContaining` would hide the unnamed fields
+      // being reset to defaults, which is the defect this pins.
+      expect(store.updateGameComponent).toHaveBeenCalledWith('player', {
         type: 'health',
-        health: expect.objectContaining({ maxHp: 50, currentHp: 25 }),
-      }));
+        health: { ...health.health, maxHp: 50, currentHp: 25 },
+      }, NO_CORRECTIONS);
     });
   });
 

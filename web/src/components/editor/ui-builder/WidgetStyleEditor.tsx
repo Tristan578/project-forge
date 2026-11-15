@@ -44,7 +44,7 @@ export function WidgetStyleEditor() {
               <span className="text-zinc-400">Background Color</span>
               <input
                 type="text"
-                value={widget.style.backgroundColor || ''}
+                value={widget.style.backgroundColor ?? ''}
                 onChange={(e) => handleChange('backgroundColor', e.target.value || null)}
                 className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
                 placeholder="transparent, #000, rgba(0,0,0,0.5)"

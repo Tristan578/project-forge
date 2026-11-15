@@ -18,7 +18,10 @@ import type {
   TokenEstimate,
 } from '@/lib/game-creation/types';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 import { buildPlan } from '@/lib/game-creation/planBuilder';
+import { entitySetupExecutor } from '@/lib/game-creation/executors/entitySetupExecutor';
+import { worldBuildExecutor } from '@/lib/game-creation/executors/worldBuildExecutor';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -226,6 +229,36 @@ describe('runPipeline', () => {
     await runPipeline(plan, trackingRegistry, ctx, callbacks);
     // After complete callback fires, status should be completed
     expect(statuses).toContain('completed');
+  });
+
+  it.each([
+    {
+      executor: entitySetupExecutor,
+      input: { entity: { name: 'Crate', role: 'decoration' }, entityId: 'crate-1', scene: 'MainScene', projectType: '3d' },
+    },
+    {
+      executor: worldBuildExecutor,
+      input: { entities: [{ entityId: 'ground-1', name: 'Ground', entityType: 'cube', position: [0, 0, 0], scale: [40, 1, 40] }] },
+    },
+  ])('does not replay an accepted $executor.name spawn when confirmation times out', async ({ executor, input }) => {
+    vi.useFakeTimers();
+    try {
+      const plan = makePlan({
+        steps: [makeStep('spawn-step', 'scene_create', { executor: executor.name, input, maxRetries: 2 })],
+      });
+      const ctx = makeContext(controller.signal);
+      // The engine accepted the mutation, but its query answer has not arrived.
+      // A cache miss cannot prove that dispatching the same spawn again is safe.
+      ctx.observeEntity = vi.fn(() => undefined);
+      const pending = runPipeline(plan, makeRegistry(executor), ctx);
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await pending;
+      expect(result.status).toBe('failed');
+      expect(result.steps[0].error?.code).toBe('EFFECT_TIMED_OUT');
+      expect(vi.mocked(ctx.dispatchCommand).mock.calls.filter(([command]) => command === 'spawn_entity')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retries a failing step up to maxRetries times', async () => {
@@ -634,6 +667,37 @@ describe('runPipeline', () => {
     expect(resolvedAll).toEqual([]);
   });
 
+  // #9998: `scene_create` reads the brief's completion mode off the context.
+  // The brief must be the PLAN's — the one the steps were built from — even
+  // when the caller hands in a context that already carries some other brief.
+  it('hands every executor the plan\'s own brief as ctx.gdd, replacing any the caller supplied', async () => {
+    const seen: Array<Readonly<OrchestratorGDD> | undefined> = [];
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['scene_create', {
+        name: 'scene_create',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          seen.push(ctx.gdd);
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+    const plan = makePlan({ steps: [makeStep('step_0'), makeStep('step_1')] });
+    plan.gdd = { ...plan.gdd, completionMode: 'sandbox' };
+    const callerCtx: ExecutorContext = {
+      ...makeContext(controller.signal),
+      gdd: { ...plan.gdd, completionMode: 'narrative' },
+    };
+
+    await runPipeline(plan, probeRegistry, callerCtx);
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe(plan.gdd);
+    expect(seen[1]).toBe(plan.gdd);
+    expect(seen[0]?.completionMode).toBe('sandbox');
+  });
+
   it('resolveStepOutputs returns an empty list when no step matches', async () => {
     let resolvedAll: Record<string, unknown>[] | undefined;
 
@@ -1028,6 +1092,65 @@ describe('runPipeline', () => {
     expect(attempts).toBe(2);
     expect(result.steps[0].status).toBe('failed');
     expect(result.status).toBe('failed');
+  });
+
+  // #10202 review (Sentry): the runner's generic catch turns ANY throw into
+  // `retryable: true`. That is right for a transient provider fault and wrong
+  // for `EngineDispatchThrewError` — the engine already threw mid-apply and the
+  // store locked saves, so a second dispatch of the same scene-replacing
+  // command lands on a viewport that cannot be trusted. `planBuilder` gives
+  // `scene_create` `maxRetries: 1`, which is what made the second call real.
+  describe('an executor that throws', () => {
+    function throwingRegistry(thrown: unknown, onCall: () => void): Map<ExecutorName, ExecutorDefinition> {
+      return makeRegistry({
+        name: 'scene_create',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          onCall();
+          throw thrown;
+        },
+        userFacingErrorMessage: 'Scene creation failed.',
+      });
+    }
+
+    it('is NOT retried when it threw EngineDispatchThrewError, even with maxRetries: 1', async () => {
+      let attempts = 0;
+      const plan = makePlan({
+        steps: [
+          makeStep('step_0', 'scene_create', { maxRetries: 1 }),
+          makeStep('step_1', 'verify_all_scenes'),
+        ],
+      });
+      const result = await runPipeline(
+        plan,
+        throwingRegistry(new EngineDispatchThrewError('new_scene', 'RuntimeError: unreachable'), () => { attempts += 1; }),
+        makeContext(controller.signal),
+      );
+
+      expect(attempts).toBe(1);
+      expect(result.steps[0].status).toBe('failed');
+      expect(result.steps[0].error?.retryable).toBe(false);
+      expect(result.steps[0].error?.message).toBe('RuntimeError: unreachable');
+      expect(result.steps[0].error?.userFacingMessage).toBe('Scene creation failed.');
+      expect(result.steps[1].status).toBe('skipped');
+      expect(result.status).toBe('failed');
+    });
+
+    it('IS retried when it threw anything else — the existing contract', async () => {
+      let attempts = 0;
+      const plan = makePlan({ steps: [makeStep('step_0', 'scene_create', { maxRetries: 1 })] });
+      const result = await runPipeline(
+        plan,
+        throwingRegistry(new Error('provider hiccup'), () => { attempts += 1; }),
+        makeContext(controller.signal),
+      );
+
+      expect(attempts).toBe(2);
+      expect(result.steps[0].status).toBe('failed');
+      expect(result.steps[0].error?.code).toBe('EXCEPTION');
+      expect(result.steps[0].error?.retryable).toBe(true);
+      expect(result.status).toBe('failed');
+    });
   });
 
   it('fires onPlanStatusChange when plan status transitions', async () => {

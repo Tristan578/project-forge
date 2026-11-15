@@ -6,6 +6,8 @@ import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * Returns pending moderation appeals for admin review.
  * Supports pagination via ?limit=N&offset=N and optional ?status=pending|approved|rejected
  */
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -26,8 +28,11 @@ export async function GET(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     const searchParams = req.nextUrl.searchParams;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `limit` query param is the same as an omitted one, not a distinct value
     const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `offset` query param is the same as an omitted one, not a distinct value
     const offset = parseInt(searchParams.get('offset') || '0', 10);
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `status` query param is the same as an omitted one, not a distinct value
     const statusFilter = searchParams.get('status') || 'pending';
 
     const validStatuses = ['pending', 'approved', 'rejected'];
@@ -80,6 +85,7 @@ export async function GET(req: NextRequest) {
         reason: a.reason,
         status: a.status,
         userId: a.userId,
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored userName is unset, same as absent; falls back to a display placeholder
         userName: a.userName || 'Unknown',
         userEmail: a.userEmail,
         createdAt: a.createdAt.toISOString(),
@@ -90,9 +96,13 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation/appeals' });
     console.error('Failed to fetch appeals:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch appeals' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

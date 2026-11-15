@@ -8,6 +8,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/compon
 import { TemplateGallery } from '../TemplateGallery';
 import { useEditorStore } from '@/stores/editorStore';
 import { AnalyticsEvent } from '@/lib/analytics/posthog';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -30,6 +31,13 @@ vi.mock('@/lib/analytics/posthog', async (importOriginal) => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }));
 
+// The toast's own behaviour (draft + reveal, never a send) is pinned in
+// customizeWithAi.test.ts; here only WHEN the gallery offers it (#10172).
+const mockOfferCustomizeWithAi = vi.fn();
+vi.mock('@/lib/chat/customizeWithAi', () => ({
+  offerCustomizeWithAi: (...args: unknown[]) => mockOfferCustomizeWithAi(...args),
+}));
+
 vi.mock('@/data/templates', () => ({
   TEMPLATE_REGISTRY: [
     {
@@ -50,6 +58,12 @@ describe('TemplateGallery', () => {
     .fn()
     .mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
   const mockNewScene = vi.fn();
+  // `newScene()` returns false for three unrelated facts — the engine REFUSED,
+  // there is no dispatcher yet and the call was DEFERRED, or browser storage
+  // refused the registry write that precedes the dispatch — and this is what
+  // separates them (#10202 review). `null` reads as the engine refusing, the
+  // state the pre-existing rejection test describes.
+  const mockNewSceneRefusal = vi.fn<() => 'engine_not_attached' | 'engine_refused' | 'registry_not_cleared' | null>(() => null);
 
   function setupStore() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +71,7 @@ describe('TemplateGallery', () => {
       const state = {
         loadTemplate: mockLoadTemplate,
         newScene: mockNewScene,
+        newSceneRefusal: mockNewSceneRefusal,
       };
       return typeof selector === 'function' ? selector(state) : state;
     });
@@ -65,6 +80,7 @@ describe('TemplateGallery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLoadTemplate.mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
+    mockNewSceneRefusal.mockReturnValue(null);
     setupStore();
   });
 
@@ -108,6 +124,110 @@ describe('TemplateGallery', () => {
     fireEvent.click(screen.getByText('Blank Project').closest('button')!);
     expect(mockNewScene).toHaveBeenCalled();
     expect(mockOnClose).toHaveBeenCalled();
+  });
+
+  // #10056: the blank-project branch fired GAME_CREATED and closed the dialog
+  // no matter what `newScene()` returned, reporting a blank project the engine
+  // never accepted — the same false success the template branch already guards.
+  it('Blank Project when the engine rejects keeps the gallery open and shows the reason', () => {
+    mockNewScene.mockReturnValueOnce(false);
+    render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+    fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+    expect(mockNewScene).toHaveBeenCalled();
+    expect(mockOnClose).not.toHaveBeenCalled();
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, expect.anything());
+    expect(screen.getByRole('alert')).toHaveTextContent('The engine did not accept a new scene. Please try again.');
+  });
+
+  // The other half of the same boolean. `newScene()` is ALSO false when there is
+  // no dispatcher yet — the ordinary cold open, since the engine mounts after
+  // the editor page — and the first fix for the line above read that as a
+  // refusal, so picking Blank Project on a still-loading editor put an error
+  // banner up and trapped the user in the dialog. Nothing was cleared because
+  // nothing needed to be: the editor is already blank.
+  it('Blank Project with no dispatcher starts the project (deferral is not an error)', () => {
+    mockNewScene.mockReturnValueOnce(false);
+    mockNewSceneRefusal.mockReturnValue('engine_not_attached');
+    render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+    fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+    expect(mockNewScene).toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(mockTrackEvent).toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
+    expect(mockOnClose).toHaveBeenCalled();
+  });
+
+  // #10202 review, round 2: the third reason for a `false` is the store
+  // refusing on its own because browser storage would not clear the
+  // prefab-instance registry before the dispatch. The engine was never asked,
+  // so the banner must not say it refused.
+  it('Blank Project names browser storage, not the engine, when the registry could not be cleared', async () => {
+    mockNewScene.mockReturnValueOnce(false);
+    mockNewSceneRefusal.mockReturnValue('registry_not_cleared');
+    render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+    fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked. Please try again.');
+    expect(alert).not.toHaveTextContent('engine did not accept');
+    expect(mockOnClose).not.toHaveBeenCalled();
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, expect.anything());
+  });
+
+  // #10202 review, M1: `newScene()` re-raises a dispatch the engine threw on,
+  // after locking saving (#10079, #10202). This path had no catch, so the
+  // throw became an unhandled rejection (the card's `onClick` drops the
+  // promise): the gallery stayed open with no explanation, `setError` never
+  // ran, and nothing said to reload.
+  describe('Blank Project when newScene throws (#10202)', () => {
+    /** A Node-level listener: with no catch, the dropped promise rejects and this fires. */
+    function watchUnhandledRejections() {
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+      return {
+        unhandled,
+        async settle() {
+          // Node reports an unhandled rejection once the microtask queue has
+          // drained, before the next check-phase callback runs.
+          await new Promise((resolve) => setImmediate(resolve));
+          process.off('unhandledRejection', unhandled);
+        },
+      };
+    }
+
+    it('stays open, tells the user to reload in the shared sentence, fires nothing and rejects nothing', async () => {
+      const watch = watchUnhandledRejections();
+      mockNewScene.mockImplementationOnce(() => { throw new EngineDispatchThrewError('new_scene', 'JsValue("serialize failed")'); });
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(ENGINE_THREW_RELOAD_GUIDANCE);
+      expect(alert).toHaveTextContent('JsValue("serialize failed")');
+      expect(alert).not.toHaveTextContent('try again');
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(mockOnClose).not.toHaveBeenCalled();
+      expect(mockTrackEvent).not.toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, expect.anything());
+      await watch.settle();
+      expect(watch.unhandled).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, M3: only the typed engine throw carries a lockout. A
+    // plain error out of the store set none, so the banner must not claim one.
+    it('reports a non-engine throw as a plain failure, never as an engine error with a lockout', async () => {
+      const watch = watchUnhandledRejections();
+      mockNewScene.mockImplementationOnce(() => { throw new Error('hydrate failed'); });
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('A new scene could not be created: hydrate failed');
+      expect(alert).not.toHaveTextContent('engine error');
+      expect(alert).not.toHaveTextContent(ENGINE_THREW_RELOAD_GUIDANCE);
+      expect(mockOnClose).not.toHaveBeenCalled();
+      await watch.settle();
+      expect(watch.unhandled).not.toHaveBeenCalled();
+    });
   });
 
   it('has role="dialog" on the modal', () => {
@@ -156,6 +276,15 @@ describe('TemplateGallery', () => {
       expect(mockTrackEvent).not.toHaveBeenCalled();
     });
 
+    it('offers no "Customize with AI" for a load that failed', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+      await screen.findByRole('alert');
+
+      expect(mockOfferCustomizeWithAi).not.toHaveBeenCalled();
+    });
+
     it('clears the error when the retry succeeds', async () => {
       render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
       fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
@@ -184,6 +313,16 @@ describe('TemplateGallery', () => {
         source: 'gallery',
       });
       expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('offers "Customize with AI" once, naming the template that loaded', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+
+      await waitFor(() => expect(mockOnClose).toHaveBeenCalled());
+      expect(mockOfferCustomizeWithAi).toHaveBeenCalledTimes(1);
+      expect(mockOfferCustomizeWithAi).toHaveBeenCalledWith('Platformer');
     });
 
     it('blocks a second selection while a load is in flight', async () => {

@@ -32,7 +32,9 @@ SCRIPT="$HERE/../cd-rolling-release.sh"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -76,16 +78,21 @@ fixture() {
   key="$(printf '%s %s' "$1" "$2" | tr '/ ' '__')"
   printf '%s\n%s' "$4" "$3" > "$TMP/fx/$key"
 }
+readonly -f fixture
 # fixture_nth <N> <METHOD> <path> <status> <body>: the answer for the Nth call only.
 fixture_nth() {
   local key
   key="$(printf '%s %s' "$2" "$3" | tr '/ ' '__')"
   printf '%s\n%s' "$5" "$4" > "$TMP/fx/$key.$1"
 }
+readonly -f fixture_nth
 reset_fixtures() { rm -f "$TMP/fx"/* "$TMP/cnt"/*; : > "$TMP/log"; : > "$TMP/out"; }
+readonly -f reset_fixtures
 count() { grep -c "^$1\$" "$TMP/log" || true; }
+readonly -f count
 # The LAST disposition written is the one cd.yml reads.
 last_disposition() { grep '^disposition=' "$TMP/out" | tail -1; }
+readonly -f last_disposition
 
 run() {
   (cd "$TMP" && PATH="$TMP/bin:$PATH" CURL_LOG="$TMP/log" FIXTURES="$TMP/fx" COUNTS="$TMP/cnt" \
@@ -93,6 +100,7 @@ run() {
     VERCEL_API_URL=https://api.example.test RR_POLL_ATTEMPTS="${ATTEMPTS:-3}" RR_POLL_INTERVAL_S=0 \
     GITHUB_OUTPUT="$TMP/out" bash "$SCRIPT" "$@" 2>&1)
 }
+readonly -f run
 
 RR=/v1/projects/prj_1/rolling-release
 PROJECT=/v9/projects/prj_1
@@ -105,6 +113,7 @@ ROLLBACK_BASE=/v1/projects/prj_1/rollback/dpl_base
 # the script reads. Note the wrapper and the nesting.
 LIVE_ACTIVE='{"rollingRelease":{"state":"ACTIVE","substate":null,"currentDeployment":{"id":"dpl_4ReF3BPyrssnUfUQC7f4aB7wH9jt","url":"spawnforge-75vgr46qg-tnolan.vercel.app","target":"production","createdAt":1788320738792,"readyState":"READY"},"canaryDeployment":{"id":"dpl_B6Ug75PArByBjN76t2EtanXNmBhj","url":"spawnforge-ia2589c6u-tnolan.vercel.app","target":"production","createdAt":1788323657956,"readyState":"READY"},"queuedDeploymentId":null,"currentCanaryPercentage":5,"activeStage":{"index":0,"isFinalStage":false,"targetPercentage":5,"requireApproval":false,"duration":10,"linearShift":true}}}'
 wrap() { printf '{"rollingRelease":%s}' "$1"; }
+readonly -f wrap
 
 # ---------------------------------------------------------------------------
 echo "=== lkg: the rollback target is the rolling-release BASE, never the canary ==="
@@ -635,6 +644,36 @@ fi
 echo ""
 echo "=== wiring ==="
 CD="$HERE/../../.github/workflows/cd.yml"
+# The single-quoted fragment intentionally matches the workflow's literal shell source.
+# shellcheck disable=SC2016
+WEB_FILTER="$(grep -F 'if echo "$CHANGED" | grep -qE' "$CD" | grep -F '^web/' | sed -E "s/.*grep -qE '([^']+)'.*/\1/")"
+if printf '%s\n' 'web/src/app/page.tsx' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' 'package.json' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' 'package-lock.json' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' 'packages/ui/src/index.ts' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' 'engine/src/lib.rs' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' '.transform-gizmo-fork/src/lib.rs' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' 'scripts/build-engine.sh' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' 'turbo.json' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' '.node-version' | grep -qE "$WEB_FILTER" \
+  && ! printf '%s\n' '.github/workflows/ci.yml' | grep -qE "$WEB_FILTER"; then
+  pass "web deploy filter includes runtime, shared packages, lockfiles and build inputs but excludes workflow-only changes"
+else
+  fail "web deploy filter must deploy web/package changes without deploying .github-only pushes (filter: $WEB_FILTER)"
+fi
+# shellcheck disable=SC2016  # workflow expressions are matched literally
+if grep -qF 'needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, check-validated, check-changes]' "$CD" \
+  && grep -qF "needs.check-changes.outputs.web-changed == 'true' &&" "$CD"; then
+  pass "staging deploy consumes the web-change result and skips non-web pushes"
+else
+  fail "staging deploy is not gated by check-changes.outputs.web-changed"
+fi
+# shellcheck disable=SC2016  # workflow expressions are matched literally
+if grep -qF "(needs.check-changes.outputs.web-changed == 'true' && needs.deploy-staging.result == 'success' && github.event_name == 'push')" "$CD"; then
+  pass "automatic production deploys require a web change while manual promotions remain available"
+else
+  fail "production push deploy is not gated by check-changes.outputs.web-changed"
+fi
 if grep -qF 'run: bash scripts/cd-rolling-release.sh lkg' "$CD"; then
   pass "cd.yml captures last-known-good through the script"
 else

@@ -32,6 +32,7 @@ pub mod procedural;
 pub mod query;
 pub mod resync;
 pub mod scene;
+pub mod simulation_clock;
 pub mod sprites;
 pub mod transform;
 
@@ -53,6 +54,7 @@ pub use procedural::*;
 pub use query::*;
 pub use resync::*;
 pub use scene::*;
+pub use simulation_clock::*;
 pub use sprites::*;
 pub use transform::*;
 
@@ -179,6 +181,8 @@ pub struct PendingCommands {
     pub remove_joint2d_requests: Vec<RemoveJoint2dRequest>,
     pub force_applications2d: Vec<ForceApplication2d>,
     pub impulse_applications2d: Vec<ImpulseApplication2d>,
+    pub linear_velocity2d_sets: Vec<LinearVelocity2dSet>,
+    pub angular_velocity2d_sets: Vec<AngularVelocity2dSet>,
     pub raycast2d_requests: Vec<Raycast2dRequest>,
     pub gravity2d_updates: Vec<Gravity2dUpdate>,
     pub debug_physics2d_toggles: Vec<DebugPhysics2dToggle>,
@@ -274,6 +278,7 @@ pub struct PendingCommands {
     pub paint_tile_requests: Vec<PaintTileRequest>,
     pub erase_tile_requests: Vec<EraseTileRequest>,
     pub fill_tiles_requests: Vec<FillTilesRequest>,
+    pub set_tile_collision_shape_requests: Vec<SetTileCollisionShapeRequest>,
     pub set_grid_2d_requests: Vec<SetGrid2dRequest>,
     // scene domain
     pub scene_export_requests: Vec<SceneExportRequest>,
@@ -304,6 +309,9 @@ pub struct PendingCommands {
     pub optimize_scene_requests: Vec<OptimizeSceneRequest>,
     pub set_lod_distances_requests: Vec<SetLodDistancesRequest>,
     pub set_simplification_backend_requests: Vec<SetSimplificationBackendRequest>,
+    // simulation clock (#10007): drained in `First` by
+    // `core::simulation_clock::apply_frame_rate_pin_requests`, in BOTH builds.
+    pub frame_rate_pin_requests: Vec<crate::core::simulation_clock::FrameRatePinRequest>,
 }
 
 // === Thread-Local Bridge Access ===

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, RefreshCw, RotateCcw, Save } from 'lucide-react';
 import { onEngineCrash, isEngineCrashed, getEngineCrashMessage, resetEngine, recoverEngine } from '@/hooks/useEngine';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 
 export function EngineCrashOverlay() {
   const [crashed, setCrashed] = useState(() => isEngineCrashed());
@@ -19,7 +20,10 @@ export function EngineCrashOverlay() {
 
   const handleRecoverEngine = useCallback(async () => {
     setRecovering(true);
-    const success = await recoverEngine('forge-canvas');
+    // The editor's engine canvas. This used to name 'forge-canvas', an id
+    // nothing renders, so recovery could only ever report "Canvas element
+    // not found" (#10007).
+    const success = await recoverEngine(EDITOR_CANVAS_ID);
     if (success) {
       setCrashed(false);
       setCrashMessage(null);

@@ -41,12 +41,14 @@ command -v git    >/dev/null 2>&1 || { echo "FATAL: git not found on host";    e
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 
 # --- fixture profiles --------------------------------------------------------
 # Safe profile — mirrors the committed HEAD: approval-gated, network/shell off.
 SAFE_TOML='model = "gpt-5.3-codex"
-approval_policy = "unless-allow-listed"
+approval_policy = "untrusted"
 
 [sandbox_workspace_write]
 allow = ["**/*"]
@@ -71,7 +73,7 @@ ONLY_NEVER='approval_policy = "never"
 
 [sandbox_workspace_write]
 network_access = false'
-ONLY_NETWORK='approval_policy = "unless-allow-listed"
+ONLY_NETWORK='approval_policy = "untrusted"
 
 [sandbox_workspace_write]
 network_access = true'
@@ -157,6 +159,7 @@ run_fixture() { # <content> → writes a fixture file, runs the guard against it
   rm -f "$tmp"
   return "$rc"
 }
+readonly -f run_fixture
 run_fixture_out() { # <content> → echoes the guard's combined output
   local content="$1" tmp
   tmp="$(mktemp)"
@@ -164,6 +167,7 @@ run_fixture_out() { # <content> → echoes the guard's combined output
   CODEX_CONFIG_PATH="$tmp" bash "$GUARD" 2>&1
   rm -f "$tmp"
 }
+readonly -f run_fixture_out
 
 # =============================================================================
 echo "== tripwire: script exists and is executable =="

@@ -7,7 +7,11 @@ export interface PublicationListItem {
   slug: string;
   title: string;
   description: string | null;
-  status: 'published' | 'unpublished' | 'processing';
+  // 'flagged' = auto-hidden pending moderation review (#8354). /api/publish/list
+  // returns publishedGames.status verbatim for every row the owner has, so this
+  // union must admit it — the value crosses a JSON boundary, which means
+  // TypeScript cannot catch the omission.
+  status: 'published' | 'unpublished' | 'processing' | 'flagged';
   version: number;
   url: string;
   createdAt: string;

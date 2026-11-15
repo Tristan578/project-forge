@@ -217,19 +217,107 @@ describe('generateUIRuntimeCode: binding update loop', () => {
 
 // ── anchor positions ───────────────────────────────────────────────────────────
 
-describe('generateUIRuntimeCode: anchor position logic', () => {
-  it('handles top_left anchor', () => {
-    expect(generate()).toContain("anchor === 'top_left'");
+describe('generateUIRuntimeCode: anchor + constraint position logic', () => {
+  // Execute the generated runtime against a real jsdom DOM and read back the
+  // inline styles it applies (ui.FR-1.OP-01). Asserting on rendered effect —
+  // not source substrings — keeps these tests honest as the generator evolves,
+  // and proves the exported runtime resolves the SAME layout as the editor
+  // preview (widgetRenderer.ts).
+  function runRuntime(widget: Record<string, unknown>): HTMLElement {
+    document.body.innerHTML = '<div id="forge-ui-root"></div>';
+    const uiData = JSON.stringify({
+      screens: [
+        {
+          id: 's1',
+          zIndex: 0,
+          visible: true,
+          showOnStart: true,
+          backgroundColor: 'transparent',
+          widgets: [{ id: 'w1', type: 'panel', config: {}, style: {}, ...widget }],
+        },
+      ],
+    });
+    // Indirect eval executes the self-invoking IIFE in the jsdom global scope.
+    (0, eval)(generateUIRuntimeCode(uiData));
+    const el = document.getElementById('ui-widget-s1-w1');
+    if (!el) throw new Error('widget element was not created');
+    return el as HTMLElement;
+  }
+
+  it('resolves top_left from the top-left origin', () => {
+    const el = runRuntime({ anchor: 'top_left', x: 10, y: 20, width: 30, height: 40 });
+    expect(el.style.left).toBe('10%');
+    expect(el.style.top).toBe('20%');
+    expect(el.style.width).toBe('30%');
+    expect(el.style.right).toBe('');
+    expect(el.style.bottom).toBe('');
   });
 
-  it('handles center anchor with transform', () => {
-    const code = generate();
-    expect(code).toContain("anchor === 'center'");
-    expect(code).toContain('translate(-50%, -50%)');
+  it('resolves top_right from the right edge', () => {
+    const el = runRuntime({ anchor: 'top_right', x: 100, y: 0, width: 20, height: 10 });
+    expect(el.style.right).toBe('0%');
+    expect(el.style.left).toBe('');
+    expect(el.style.top).toBe('0%');
   });
 
-  it('handles top_right anchor', () => {
-    expect(generate()).toContain("anchor === 'top_right'");
+  it('resolves center with both centering transforms', () => {
+    const el = runRuntime({ anchor: 'center', x: 50, y: 50, width: 20, height: 20 });
+    expect(el.style.left).toBe('50%');
+    expect(el.style.top).toBe('50%');
+    expect(el.style.transform).toContain('translateX(-50%)');
+    expect(el.style.transform).toContain('translateY(-50%)');
+  });
+
+  it('resolves bottom_center anchored to the bottom edge, centered horizontally', () => {
+    const el = runRuntime({ anchor: 'bottom_center', x: 50, y: 100, width: 40, height: 10 });
+    expect(el.style.bottom).toBe('0%');
+    expect(el.style.left).toBe('50%');
+    expect(el.style.transform).toContain('translateX(-50%)');
+    expect(el.style.transform).not.toContain('translateY');
+  });
+
+  it('resolves center_left (previously unsupported anchor) instead of dropping position', () => {
+    const el = runRuntime({ anchor: 'center_left', x: 0, y: 50, width: 20, height: 10 });
+    expect(el.style.left).toBe('0%');
+    expect(el.style.top).toBe('50%');
+    expect(el.style.transform).toContain('translateY(-50%)');
+  });
+
+  it('folds a pixel offset into calc() and emits min/max size bounds', () => {
+    const el = runRuntime({
+      anchor: 'top_left',
+      x: 10,
+      y: 20,
+      width: 5,
+      height: 5,
+      constraints: { offsetX: 16, offsetY: -8, minWidth: 44, minHeight: 44, maxWidth: 320 },
+    });
+    expect(el.style.left).toBe('calc(10% + 16px)');
+    expect(el.style.top).toBe('calc(20% - 8px)');
+    expect(el.style.minWidth).toBe('44px');
+    expect(el.style.minHeight).toBe('44px');
+    expect(el.style.maxWidth).toBe('320px');
+  });
+
+  it('offsets a right-anchored widget with a subtracted calc()', () => {
+    const el = runRuntime({
+      anchor: 'top_right',
+      x: 100,
+      y: 0,
+      width: 20,
+      height: 10,
+      constraints: { offsetX: -16, offsetY: 16 },
+    });
+    // right = (100 - x)% - offX  => calc(0% + 16px)
+    expect(el.style.right).toBe('calc(0% + 16px)');
+    expect(el.style.top).toBe('calc(0% + 16px)');
+  });
+
+  it('falls back to absolute positioning for a widget with no constraints (legacy scenes)', () => {
+    const el = runRuntime({ anchor: 'top_left', x: 25, y: 25, width: 10, height: 10 });
+    expect(el.style.left).toBe('25%');
+    expect(el.style.minWidth).toBe('');
+    expect(el.style.maxWidth).toBe('');
   });
 });
 

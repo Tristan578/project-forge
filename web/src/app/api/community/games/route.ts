@@ -5,18 +5,22 @@ import { eq, sql, and, or, ilike, desc } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'community-games', 30, 5 * 60 * 1000);
   if (limited) return limited;
 
   try {
     const searchParams = req.nextUrl.searchParams;
-    const query = searchParams.get('q') || '';
+    const query = searchParams.get('q') ?? '';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `sort` query param is the same as an omitted one, not a distinct value
     const sort = searchParams.get('sort') || 'trending';
     const tag = searchParams.get('tag');
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `page` query param is the same as an omitted one, not a distinct value
     const page = parseInt(searchParams.get('page') || '1', 10);
     const { limit } = parsePaginationParams(searchParams);
 
@@ -169,6 +173,7 @@ export async function GET(req: NextRequest) {
       description: g.description,
       slug: g.slug,
       authorId: g.authorId,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
       authorName: g.authorName || 'Unknown',
       playCount: g.playCount,
       likeCount: Number(g.likeCount),
@@ -186,9 +191,13 @@ export async function GET(req: NextRequest) {
     return response;
   } catch (error) {
     captureException(error, { route: '/api/community/games' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch games' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

@@ -99,7 +99,7 @@ export const config = {
   // --- Provider APIs (for Sunday weekly validation) ---
   meshyApiKey: process.env.MESHY_API_KEY || '',
   elevenlabsApiKey: process.env.ELEVENLABS_API_KEY || '',
-  sunoApiKey: process.env.SUNO_API_KEY || '',
+  // No sunoApiKey: Suno has no public API (#9522) and nothing here validates music.
 
   // Dev route for headless evaluation (bypasses Clerk auth)
   devRoute: '/dev',

@@ -8,10 +8,11 @@ import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { parseArgs } from './types';
 import {
-  generateWorld,
+  generateWorldWithStatus,
   validateWorldConsistency,
   healWorldConsistency,
   WORLD_PRESETS,
+  isWorldDescriptionTruncated,
   type GameWorld,
   type ConsistencyReport,
 } from '@/lib/ai/worldBuilder';
@@ -51,6 +52,12 @@ export function clearPersistedWorld(): void {
 /**
  * Attempt to generate a consistent world, retrying with issue context up to maxRetries.
  * Falls back to closest genre preset if all retries fail.
+ *
+ * `descriptionTruncated` reports whether the prompt actually sent for the returned
+ * world (premise + constraints + any retry notes) was shortened by generateWorld.
+ * It is false whenever the returned world is a preset — the retry-exhausted fallback
+ * below or a parse-failure fallback from generateWorld — since a preset was never
+ * shaped by the premise.
  */
 async function generateWithHealing(
   premise: string,
@@ -58,9 +65,15 @@ async function generateWithHealing(
   factionCount: number | undefined,
   regionCount: number | undefined,
   maxRetries = 2,
-): Promise<{ world: GameWorld; report: ConsistencyReport; fallback: boolean }> {
+): Promise<{
+  world: GameWorld;
+  report: ConsistencyReport;
+  fallback: boolean;
+  descriptionTruncated: boolean;
+}> {
   let lastWorld: GameWorld | null = null;
   let lastReport: ConsistencyReport | null = null;
+  let lastTruncated = false;
 
   // Build the full premise with constraints
   const constraintNote = [
@@ -83,14 +96,15 @@ async function generateWithHealing(
     }
 
     try {
-      const raw = await generateWorld(attemptPremise, genre);
+      const { world: raw, fallback: presetFallback } = await generateWorldWithStatus(attemptPremise, genre);
       const healed = healWorldConsistency(raw);
       const report = validateWorldConsistency(healed);
       lastWorld = healed;
       lastReport = report;
+      lastTruncated = !presetFallback && isWorldDescriptionTruncated(attemptPremise);
 
       if (report.valid) {
-        return { world: healed, report, fallback: false };
+        return { world: healed, report, fallback: false, descriptionTruncated: lastTruncated };
       }
     } catch (err) {
       // Fail-fast on errors that retrying would amplify or that indicate
@@ -117,7 +131,7 @@ async function generateWithHealing(
   // All retries exhausted — if the last world exists but failed validation,
   // return it with fallback: true so callers know it may be inconsistent.
   if (lastWorld) {
-    return { world: lastWorld, report: lastReport!, fallback: true };
+    return { world: lastWorld, report: lastReport!, fallback: true, descriptionTruncated: lastTruncated };
   }
 
   const presetKey = genre && WORLD_PRESETS[genre] ? genre : 'medieval_fantasy';
@@ -126,17 +140,32 @@ async function generateWithHealing(
     world: fallbackWorld,
     report: validateWorldConsistency(fallbackWorld),
     fallback: true,
+    descriptionTruncated: false,
   };
 }
 
 /** Produce a human-readable summary of a GameWorld for the AI to return. */
-function worldSummary(world: GameWorld, report: ConsistencyReport, fallback: boolean): string {
+function worldSummary(
+  world: GameWorld,
+  report: ConsistencyReport,
+  fallback: boolean,
+  descriptionTruncated: boolean,
+): string {
   const factionList = world.factions.map((f) => `${f.name} (${f.alignment})`).join(', ');
   const regionList = world.regions.map((r) => r.name).join(', ');
   const warningCount = report.issues.filter((i) => i.severity === 'warning').length;
   const errorCount = report.issues.filter((i) => i.severity === 'error').length;
 
-  const lines: string[] = [
+  const lines: string[] = [];
+
+  if (descriptionTruncated) {
+    lines.push(
+      '*Your description was shortened before generation, so the result may not reflect the full premise.*',
+      ``,
+    );
+  }
+
+  lines.push(
     fallback
       ? `Generated world using preset fallback (genre: ${world.genre})`
       : `Generated world: **${world.name}**`,
@@ -147,7 +176,7 @@ function worldSummary(world: GameWorld, report: ConsistencyReport, fallback: boo
     `**Regions (${world.regions.length}):** ${regionList}`,
     `**Timeline events:** ${world.timeline.length}`,
     `**Lore entries:** ${world.lore.length}`,
-  ];
+  );
 
   if (errorCount > 0) {
     lines.push(``, `*${errorCount} consistency error(s) found — review the consistency report for details.*`);
@@ -174,7 +203,7 @@ export const worldHandlers: Record<string, ToolHandler> = {
     const { premise, genre, factionCount, regionCount } = p.data;
 
     try {
-      const { world, report, fallback } = await generateWithHealing(
+      const { world, report, fallback, descriptionTruncated } = await generateWithHealing(
         premise,
         genre,
         factionCount,
@@ -183,7 +212,7 @@ export const worldHandlers: Record<string, ToolHandler> = {
 
       persistWorld(world);
 
-      const summary = worldSummary(world, report, fallback);
+      const summary = worldSummary(world, report, fallback, descriptionTruncated);
 
       return {
         success: true,
@@ -192,6 +221,7 @@ export const worldHandlers: Record<string, ToolHandler> = {
           world,
           consistencyReport: report,
           fallback,
+          descriptionTruncated,
         },
       };
     } catch (err) {

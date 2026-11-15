@@ -123,13 +123,13 @@ Log "Project root: $ProjectRoot"
 # Check provider API keys
 $HasMeshy = [bool]$env:MESHY_API_KEY
 $HasElevenLabs = [bool]$env:ELEVENLABS_API_KEY
-$HasSuno = [bool]$env:SUNO_API_KEY
-Log "Providers: Meshy=$HasMeshy, ElevenLabs=$HasElevenLabs, Suno=$HasSuno"
+# No Suno check: it has no public API and no music path runs here (#9522).
+Log "Providers: Meshy=$HasMeshy, ElevenLabs=$HasElevenLabs"
 
-if (-not $HasMeshy -and -not $HasElevenLabs -and -not $HasSuno) {
+if (-not $HasMeshy -and -not $HasElevenLabs) {
     Log "WARNING: No provider API keys set. Weekly validation will run"
-    Log "  vision scoring only (same as nightly). Set MESHY_API_KEY,"
-    Log "  ELEVENLABS_API_KEY, and/or SUNO_API_KEY in .env for full validation."
+    Log "  vision scoring only (same as nightly). Set MESHY_API_KEY and/or"
+    Log "  ELEVENLABS_API_KEY in .env for full validation."
 }
 
 # Pull latest main

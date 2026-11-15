@@ -9,16 +9,31 @@ import { useOnboardingStore, type OnboardingState } from '@/stores/onboardingSto
 import { useChatStore } from '@/stores/chatStore';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
 
+// The workspace store is mocked for the selector hook, and `getState` is what
+// `revealChat()` reads: `chatOverlayOpen` records the overlay being opened.
+const workspace = vi.hoisted(() => {
+  const state = {
+    chatOverlayOpen: false,
+    navigateDocs: vi.fn(),
+    setChatOverlayOpen: vi.fn((open: boolean) => {
+      state.chatOverlayOpen = open;
+    }),
+  };
+  return state;
+});
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(() => ({})),
+  useWorkspaceStore: Object.assign(vi.fn(() => ({})), { getState: () => workspace }),
 }));
 
 vi.mock('@/stores/onboardingStore', () => ({
   useOnboardingStore: vi.fn(() => ({})),
 }));
 
+const chat = vi.hoisted(() => ({ sendMessage: vi.fn(), setRightPanelTab: vi.fn() }));
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: vi.fn(() => vi.fn()),
+  useChatStore: Object.assign(vi.fn(() => vi.fn()), {
+    getState: () => ({ setRightPanelTab: chat.setRightPanelTab }),
+  }),
 }));
 
 vi.mock('@/lib/workspace/recentProjects', () => ({
@@ -29,8 +44,29 @@ vi.mock('@/components/editor/TemplateGallery', () => ({
   TemplateGallery: () => null,
 }));
 
+// A stand-in that lets a test start an idea without driving the real modal.
+const IDEA = vi.hoisted(() => ({
+  id: 'idea-1',
+  title: 'Gravity Garden',
+  description: 'Grow a garden by flipping gravity.',
+  genreMix: {
+    primary: { id: 'puzzle', name: 'Puzzle', description: '', trending: false, tags: [] },
+    secondary: { id: 'platformer', name: 'Platformer', description: '', trending: false, tags: [] },
+  },
+  mechanicCombo: {
+    mechanics: [{ id: 'gravity-flip', name: 'Gravity flip', description: '', complexity: 'low' as const, tags: [] }],
+  },
+  score: 80,
+  hooks: [],
+  targetAudience: 'casual players',
+}));
 vi.mock('@/components/editor/IdeaGeneratorModal', () => ({
-  IdeaGeneratorModal: () => null,
+  IdeaGeneratorModal: ({ isOpen, onStart }: { isOpen: boolean; onStart?: (idea: typeof IDEA) => void }) =>
+    isOpen ? (
+      <button type="button" onClick={() => onStart?.(IDEA)}>
+        Start this idea
+      </button>
+    ) : null,
 }));
 
 // Controllable TUTORIALS mock — default includes 'first-scene', tests can override
@@ -45,12 +81,13 @@ describe('WelcomeModal', () => {
     vi.resetModules();
     localStorage.clear();
     vi.clearAllMocks();
-    const workspaceState = { navigateDocs: vi.fn() } as unknown as WorkspaceState;
+    workspace.chatOverlayOpen = false;
+    const workspaceState = workspace as unknown as WorkspaceState;
     const onboardingState = { startTutorial: vi.fn() } as unknown as OnboardingState;
     vi.mocked(useWorkspaceStore).mockImplementation((selector) => selector(workspaceState));
     vi.mocked(useOnboardingStore).mockImplementation((selector) => selector(onboardingState));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useChatStore).mockImplementation((selector: any) => selector({ sendMessage: vi.fn() }));
+    vi.mocked(useChatStore).mockImplementation((selector: any) => selector({ sendMessage: chat.sendMessage }));
     vi.mocked(getRecentProjects).mockReturnValue([]);
   });
 
@@ -154,4 +191,17 @@ describe('WelcomeModal', () => {
     // Modal should be dismissed (dialog gone)
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+
+  it('reveals the chat when an idea is started, so the reply is on screen on desktop too (#10166)', () => {
+    render(<WelcomeModal />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Generate Ideas/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start this idea' }));
+
+    expect(chat.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chat.sendMessage.mock.calls[0][0]).toContain('Gravity Garden');
+    expect(chat.setRightPanelTab).toHaveBeenCalledWith('chat');
+    expect(workspace.chatOverlayOpen).toBe(true);
+  });
+
 });

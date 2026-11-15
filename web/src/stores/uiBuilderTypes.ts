@@ -17,6 +17,30 @@ export type WidgetAnchor =
   | 'center_left' | 'center' | 'center_right'
   | 'bottom_left' | 'bottom_center' | 'bottom_right';
 
+/**
+ * Per-widget responsive layout constraints (ui.FR-1.OP-01).
+ *
+ * Anchors decide WHICH edge/corner the percentage x/y are measured from;
+ * constraints refine the anchored layout with fixed pixel offsets and pixel
+ * size bounds so a screen adapts from 360px mobile to desktop without clipping
+ * core actions (e.g. a `minWidth`/`minHeight` keeps a 44px touch target
+ * tappable on a narrow phone even when its percentage width would shrink below
+ * it). All fields are optional at the widget level: a widget with no
+ * `constraints` resolves with pure percentage/anchor positioning, preserving the
+ * behaviour of every scene authored before this field existed.
+ *
+ * `offsetX`/`offsetY` are screen-space pixel nudges (positive = right/down);
+ * `min*`/`max*` are pixel bounds on the resolved size (`null` = unbounded).
+ */
+export interface WidgetConstraints {
+  offsetX: number;
+  offsetY: number;
+  minWidth: number | null;
+  maxWidth: number | null;
+  minHeight: number | null;
+  maxHeight: number | null;
+}
+
 export interface WidgetStyle {
   backgroundColor: string | null;
   borderWidth: number;
@@ -151,6 +175,11 @@ export interface UIWidgetBase {
   width: number;
   height: number;
   anchor: WidgetAnchor;
+  /**
+   * Optional responsive layout constraints. Absent/`null` means pure
+   * percentage + anchor positioning (backward-compatible default).
+   */
+  constraints?: WidgetConstraints | null;
   style: WidgetStyle;
   visible: boolean;
   interactable: boolean;

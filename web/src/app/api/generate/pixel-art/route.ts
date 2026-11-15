@@ -12,6 +12,7 @@ import {
   PIXEL_ART_DITHERING_MODES,
   PIXEL_ART_STYLES,
 } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const VALID_SIZES: number[] = [...PIXEL_ART_SIZES];
 const VALID_DITHERING: string[] = [...PIXEL_ART_DITHERING_MODES];
@@ -27,14 +28,14 @@ interface PixelArtParams {
   prompt: string;
   targetSize: number;
   palette: string;
-  customPalette?: string[];
+  customPalette?: string[] | undefined;
   dithering: string;
   ditheringIntensity: number;
   style: string;
   resolvedProvider: 'replicate';
 }
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   PixelArtParams,
   {
     status: string;
@@ -50,11 +51,16 @@ export const POST = createGenerationHandler<
   }
 >({
   route: '/api/generate/pixel-art',
+  panel: 'generate-pixel-art',
   provider: () => 'replicate',
   operation: 'pixel_art_generation',
   rateLimitKey: 'gen-pixel-art',
   successStatus: 201,
   tokenCost: () => PRICING.pixel_art_replicate,
+  // #10262: pixel-art has no `generation_type` enum member and therefore no
+  // `asyncJob` (see pollProviderStatus.ts), but its status route still accepts
+  // a caller-supplied jobId and must bind ownership the same way.
+  jobIdForOwnership: (result) => result.jobId,
   validate: (body) => {
     const { prompt, targetSize, palette, customPalette, dithering, ditheringIntensity, style, provider } = body;
 
@@ -138,3 +144,7 @@ export const POST = createGenerationHandler<
     };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

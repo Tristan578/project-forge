@@ -1,7 +1,11 @@
 # SpawnForge Engine API Reference
 
-> Generated from `web/src/data/commands.json`. 350 commands across 41 categories.
-> Last updated: 2026-03-30
+> Hand-written against `web/src/data/commands.json` — no generator emits this
+> file, so the "Generated from" claim it used to carry was itself a rotted
+> number's cover story. The manifest holds 383 commands across 41 categories,
+> measured 2026-10-05 and pinned by
+> `web/src/lib/config/__tests__/capabilityMatrix.test.ts`.
+> Last updated: 2026-10-05
 
 ## System Boundaries
 
@@ -93,7 +97,7 @@ Commands that are **not** undoable: scene export/load, play/stop/pause/resume, q
 
 ## Physics Commands (3D)
 
-**Rust-side:** `PhysicsData` + `PhysicsEnabled` ECS components, Rapier3D integration. `RapierConfiguration` is a Component (not Resource) in bevy_rapier3d 0.33.
+**Rust-side:** `PhysicsData` + `PhysicsEnabled` ECS components, Rapier3D integration. `RapierConfiguration` is a Component (not Resource) in bevy_rapier3d 0.35.
 
 | Command | Description | Undo |
 |---------|-------------|------|
@@ -431,6 +435,8 @@ tool above takes a rectangle, while the engine arm takes a `tiles` array of
 | `play` | Enter play mode (runs scripts, physics, animations). | No |
 | `stop` | Exit play mode, restore to pre-play snapshot. | No |
 | `pause` / `resume` | Pause/resume simulation. | No |
+| `pin_frame_rate` / `unpin_frame_rate` | Pin the simulation clock to `1/hz` s per rendered frame (`TimeUpdateStrategy::ManualDuration`, #10007) / return to the wall clock. Internal; the replay runner pins before its first tick and unpins on every exit. | No |
+| `replay_input_trace` | **JS-side** (`web/src/lib/playtest/`): replays a bounded input trace through the real input path on the pinned clock and reports an observed-state verdict. Not an engine arm. | No |
 | `get_mode` | Query current engine mode (edit/play/paused). | No |
 | `set_input_binding` | Map action name to a key. | No |
 | `set_input_preset` | Apply input preset (FPS, Platformer, TopDown, Racing). | No |
@@ -502,7 +508,7 @@ Pre-built behavior components: CharacterController, Health, Collectible, Enemy, 
 
 ## AI Asset Generation Commands (generation category)
 
-Integrates with Meshy (3D/texture), ElevenLabs (SFX/voice), Suno (music).
+Integrates with Meshy (3D/texture) and ElevenLabs (SFX/voice). Music generation is not available yet — its provider is being replaced (#9522) and `generate_music` is withheld from AI tool sets and refused by the route until then.
 
 | Command | Description | Undo |
 |---------|-------------|------|
@@ -510,7 +516,7 @@ Integrates with Meshy (3D/texture), ElevenLabs (SFX/voice), Suno (music).
 | `generate_texture` | Generate PBR texture maps from prompt. | No |
 | `generate_sfx` | Generate sound effects via ElevenLabs. | No |
 | `generate_voice` | Generate voice line from text + voice profile. | No |
-| `generate_music` | Generate background music via Suno. | No |
+| `generate_music` | Generate background music. **Not available yet** (#9522): withheld from AI tool sets, refused 503 by the route. | No |
 | `generate_skybox` | Generate HDR skybox from prompt. | No |
 | `generate_sprite` | Generate 2D sprite from prompt. | No |
 | `generate_sprite_sheet` | Generate sprite sheet from prompt. | No |

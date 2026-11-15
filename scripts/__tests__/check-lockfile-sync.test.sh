@@ -42,7 +42,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 
@@ -69,6 +71,7 @@ make_repo() {
   )
   echo "$repo"
 }
+readonly -f make_repo
 
 # Build a throwaway git repo whose committed lockfile carries package nodes with
 # platform metadata (os/cpu/libc) — the shape some npm versions rewrite. Echoes
@@ -102,6 +105,7 @@ make_repo_platform() {
   )
   echo "$repo"
 }
+readonly -f make_repo_platform
 
 # Stage a jq filter as a FILE in $1 and echo a regen stub that applies it to the
 # lockfile. Staging the program (rather than inlining it in the stub string)
@@ -112,6 +116,7 @@ jq_regen() {
   printf '%s\n' "$filter" > "$repo/.filter.jq"
   echo 'jq -f .filter.jq package-lock.json > .regen.json && mv .regen.json package-lock.json'
 }
+readonly -f jq_regen
 
 # Write a stub `npm ls --json` report into $1 carrying the given problem
 # strings, and echo the consistency-stub command that emits it. Staging the
@@ -123,6 +128,7 @@ ls_report() {
   jq -nc '{name: "root", version: "0.0.0", problems: $ARGS.positional}' --args "$@" > "$repo/.ls-report.json"
   echo 'cat .ls-report.json'
 }
+readonly -f ls_report
 
 # Run the gate inside $repo with a given regenerate stub; echo "<exit>|<output>".
 # $3 stubs the stage-1 consistency command and defaults to a problem-free `npm
@@ -141,6 +147,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 echo "=== check-lockfile-sync.sh tests ==="
 
@@ -581,9 +588,9 @@ if [ -f "$CI_YML" ]; then
   # GitHub runs the PR's OWN workflow file, so the mutation takes effect in the
   # very run that should have caught it. Count the key at ITS OWN indent level
   # first (4 spaces = job level; a deeper-indented step `if:` is legitimate and
-  # must not be counted) and require exactly one. actionlint flags duplicate
-  # keys, but it is not wired into this repo's CI — this pin is the backstop
-  # (#9031).
+  # must not be counted) and require exactly one. actionlint (the `actionlint`
+  # job, #8719) flags duplicate keys, but it runs from this same PR-controlled
+  # file — this pin is the independent backstop (#9031).
   ls_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ls_block" || true)"
   if [ "$ls_if_count" -ne 1 ]; then
     fail "lockfile-sync job has $ls_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"
@@ -827,7 +834,9 @@ fi
 # '$BASE_REGEN' appears in the script source (i.e. the echo references the
 # variable rather than hardcoding the command), so it must NOT be expanded here.
 # shellcheck disable=SC2016
-if grep -A2 'Fix: from the repo root' "$SCRIPT" | grep -qF '$BASE_REGEN'; then
+# Strip comments FIRST. Reading the raw file means a commented-out
+# `echo` still satisfies this pin, which is lesson 16 exactly.
+if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -A2 'Fix: from the repo root' | grep -qF '$BASE_REGEN'; then
   pass "remediation hint echoes \$BASE_REGEN (single-sourced, cannot drift)"
 else
   fail "remediation hint hardcodes the command instead of \$BASE_REGEN"

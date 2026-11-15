@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, fireEvent } from '@/test/utils/componentTestUtils';
 import { AutoSaveRecovery } from '../AutoSaveRecovery';
 
 // ---------------------------------------------------------------------------
@@ -27,9 +27,15 @@ vi.mock('lucide-react', async () => {
   return Object.fromEntries(Object.keys(actual).map(k => [k, () => null]));
 });
 
+vi.mock('@/lib/toast', () => ({
+  showError: vi.fn(),
+}));
+
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { loadAutoSaveEntry, deleteAutoSaveEntry } from '@/lib/storage/autoSave';
+import { showError } from '@/lib/toast';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -177,6 +183,114 @@ describe('AutoSaveRecovery', () => {
       await vi.advanceTimersByTimeAsync(210);
       // After poll, getWasmModule returned non-null, so poll should have stopped
       expect(vi.mocked(getWasmModule)).toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // PF-587: a rejected loadScene must NOT destroy the backup
+  // -------------------------------------------------------------------------
+
+  describe('PF-587: loadScene rejection preserves the backup', () => {
+    it('keeps the auto-save entry and shows an error when loadScene returns false', async () => {
+      vi.mocked(loadAutoSaveEntry).mockResolvedValue(makeEntry());
+      vi.mocked(getWasmModule).mockReturnValue({} as never);
+      const loadScene = vi.fn(() => false);
+      const setSceneName = vi.fn();
+      mockStore({ loadScene, setSceneName });
+      render(<AutoSaveRecovery />);
+      await flushPromises();
+      await flushPromises();
+
+      fireEvent.click(screen.getByRole('button', { name: /restore/i }));
+
+      // The load was attempted but rejected — the backup and the banner must
+      // survive so the user gets another chance, and the failure is surfaced.
+      // `rejectionStrandsEditor: false`: a restore over the intact current scene
+      // must not raise the save-locking banner (#10056).
+      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
+      expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
+      expect(setSceneName).not.toHaveBeenCalled();
+      expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
+    });
+
+    // #10202 review, M2: `loadScene` re-raises a dispatch the engine threw on,
+    // after locking saving (#10079, #10202). `handleRecover` had no catch, so
+    // the throw escaped the click handler as an uncaught error, the banner
+    // stayed, and the only toast anyone could see said "try again" — the
+    // wrong advice for a viewport that may be half-applied.
+    describe('a thrown restore (#10202)', () => {
+      /** Fires if the click handler lets the throw escape (React reports it through `window`). */
+      function watchUncaughtErrors() {
+        const uncaught = vi.fn();
+        window.addEventListener('error', uncaught);
+        return { uncaught, stop: () => window.removeEventListener('error', uncaught) };
+      }
+
+      it('keeps the backup and tells the user to reload, not to try again, when loadScene throws the engine error', async () => {
+        vi.mocked(loadAutoSaveEntry).mockResolvedValue(makeEntry());
+        vi.mocked(getWasmModule).mockReturnValue({} as never);
+        const loadScene = vi.fn(() => { throw new EngineDispatchThrewError('load_scene', 'JsValue("serialize failed")'); });
+        const setSceneName = vi.fn();
+        mockStore({ loadScene, setSceneName });
+        const watch = watchUncaughtErrors();
+        render(<AutoSaveRecovery />);
+        await flushPromises();
+        await flushPromises();
+
+        fireEvent.click(screen.getByRole('button', { name: /restore/i }));
+
+        expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
+        // The viewport may be half-applied, so the backup is the only trustworthy copy: keep it.
+        expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
+        expect(setSceneName).not.toHaveBeenCalled();
+        expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('JsValue("serialize failed")'));
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('try again'));
+        expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
+        watch.stop();
+        expect(watch.uncaught).not.toHaveBeenCalled();
+      });
+
+      // #10202 review, M3: only the typed engine throw carries a lockout; a
+      // plain error out of the store set none and is reported as what it is.
+      it('reports a non-engine throw as a plain failure, never as an engine error, and keeps the backup', async () => {
+        vi.mocked(loadAutoSaveEntry).mockResolvedValue(makeEntry());
+        vi.mocked(getWasmModule).mockReturnValue({} as never);
+        const loadScene = vi.fn(() => { throw new Error('hydrate failed'); });
+        mockStore({ loadScene });
+        const watch = watchUncaughtErrors();
+        render(<AutoSaveRecovery />);
+        await flushPromises();
+        await flushPromises();
+
+        fireEvent.click(screen.getByRole('button', { name: /restore/i }));
+
+        expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
+        expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith('The saved scene could not be restored: hydrate failed');
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+        expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
+        watch.stop();
+        expect(watch.uncaught).not.toHaveBeenCalled();
+      });
+    });
+
+    it('deletes the entry and dismisses the banner when loadScene succeeds', async () => {
+      vi.mocked(loadAutoSaveEntry).mockResolvedValue(makeEntry());
+      vi.mocked(getWasmModule).mockReturnValue({} as never);
+      const loadScene = vi.fn(() => true);
+      const setSceneName = vi.fn();
+      mockStore({ loadScene, setSceneName });
+      render(<AutoSaveRecovery />);
+      await flushPromises();
+      await flushPromises();
+
+      fireEvent.click(screen.getByRole('button', { name: /restore/i }));
+
+      expect(setSceneName).toHaveBeenCalledWith('Test Scene');
+      expect(vi.mocked(deleteAutoSaveEntry)).toHaveBeenCalledWith('proj-1');
+      expect(vi.mocked(showError)).not.toHaveBeenCalled();
     });
   });
 

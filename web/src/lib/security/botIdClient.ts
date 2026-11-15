@@ -20,6 +20,11 @@ export function registerBotIdProtection(): void {
     protect: [
       { path: '/api/generate/*', method: 'POST' },
       { path: '/api/billing/checkout', method: 'POST' },
+      // Game reports (#8354): a report is a takedown vote, so a script that
+      // can spend them cheaply is a platform-wide unpublish button. The
+      // mid-path wildcard matches the [id] route segment (the botid README
+      // documents this form as '/team/*/activate').
+      { path: '/api/community/games/*/report', method: 'POST' },
     ],
   });
 }

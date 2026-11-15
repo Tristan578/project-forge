@@ -60,6 +60,24 @@ describe('buildCompoundResult', () => {
     expect(result.summary).toContain('Failed');
     expect(result.summary).toContain('2 errors');
   });
+
+  it('carries an empty corrections list, and says nothing about adjusting, by default', () => {
+    const result = buildCompoundResult([{ action: 'spawn', success: true, entityId: 'a' }], { Cube: 'a' });
+    expect(result.corrections).toEqual([]);
+    expect(result.summary).toBe('Created 1 entities. Entity IDs: Cube=a');
+  });
+
+  it('carries the corrections and says each one under its entity’s name (PF-1148)', () => {
+    const correction = {
+      component: 'collectible', field: 'value', requested: 2.6, applied: 3, reason: 'rounded', entityId: 'a',
+    } as const;
+    const result = buildCompoundResult([{ action: 'spawn', success: true, entityId: 'a' }], { Coin: 'a' }, [correction]);
+    expect(result.corrections).toEqual([correction]);
+    expect(result.summary).toBe(
+      'Created 1 entities. Entity IDs: Coin=a. 1 value was adjusted to fit the engine’s limits: '
+      + '"Coin" Collectible value: you asked for 2.6, it was rounded to the whole number 3.',
+    );
+  });
 });
 
 describe('buildMaterialFromPartial', () => {
@@ -138,6 +156,22 @@ describe('buildPhysicsFromPartial', () => {
   });
 });
 
+describe('partial builder schema hardening (PF-1163)', () => {
+  it('keeps deprecated passthrough schemas out of the model-input boundary', () => {
+    const source = readFileSync(join(__dirname, '..', 'helpers.ts'), 'utf8');
+
+    expect(source).not.toContain('.passthrough()');
+  });
+
+  it('continues to discard unknown model-supplied fields', () => {
+    const unknownFields = { promptInjection: 'retain me', nested: { unsafe: true } };
+
+    expect(buildMaterialFromPartial(unknownFields)).toEqual(buildMaterialFromPartial({}));
+    expect(buildLightFromPartial(unknownFields)).toEqual(buildLightFromPartial({}));
+    expect(buildPhysicsFromPartial(unknownFields)).toEqual(buildPhysicsFromPartial({}));
+  });
+});
+
 describe('inferEntityType', () => {
   it('should detect point light', () => {
     expect(inferEntityType({ components: ['PointLight'] } as never)).toBe('point_light');
@@ -153,6 +187,24 @@ describe('inferEntityType', () => {
 
   it('should detect mesh', () => {
     expect(inferEntityType({ components: ['Mesh3d', 'Transform'] } as never)).toBe('mesh');
+  });
+
+  it('should detect terrain (PF-1162)', () => {
+    expect(inferEntityType({ components: ['TerrainEnabled'] } as never)).toBe('terrain');
+  });
+
+  it('should classify terrain before mesh when a node carries both (PF-1162)', () => {
+    // A terrain surface always also carries Mesh3d; the TerrainEnabled branch
+    // must be reached first or it degrades to a plain mesh.
+    expect(inferEntityType({ components: ['Mesh3d', 'TerrainEnabled'] } as never)).toBe('terrain');
+  });
+
+  it('classifies a node carrying only Sprite/SpriteData as unknown (PF-1162)', () => {
+    // The engine wire contract (scene_graph.rs detect_components) emits neither
+    // 'Sprite' nor 'SpriteData', so there is no sprite branch and such a node
+    // falls through to the shared 'unknown' fallback.
+    expect(inferEntityType({ components: ['Sprite'] } as never)).toBe('unknown');
+    expect(inferEntityType({ components: ['SpriteData'] } as never)).toBe('unknown');
   });
 
   it('should return unknown for empty components', () => {
@@ -376,6 +428,39 @@ describe('compoundHandlers does not shadow this module', () => {
     for (const name of SHARED) {
       expect(imported.has(name)).toBe(true);
     }
+  });
+});
+
+describe('inferEntityType has no private copy outside this module (PF-1162)', () => {
+  // PF-1162: three further private copies of inferEntityType lived in the
+  // engine and ai layers, with divergent fallbacks ('entity' vs 'unknown') and
+  // a dead 'Sprite'/'SpriteData' branch the engine never emits. They were
+  // collapsed onto this module's canonical implementation. This guard is the
+  // handlers-directory shadow guard above, widened repo-wide: any file that
+  // re-declares `function inferEntityType` instead of importing it reintroduces
+  // a second classification vocabulary and fails here.
+  const CONSUMERS = [
+    join(__dirname, '..', '..', '..', 'engine', 'entityIndex.ts'),
+    join(__dirname, '..', '..', '..', 'ai', 'sceneContext.ts'),
+    join(__dirname, '..', '..', '..', 'ai', 'accessibilityGenerator.ts'),
+  ] as const;
+
+  // `\s*` (not `^` at column zero) so a block-scoped shadow inside a function
+  // body is caught too — the same reasoning as the handlers guard above.
+  it.each(CONSUMERS)('%s declares no local inferEntityType', (file) => {
+    const source = readFileSync(file, 'utf8');
+    expect(source).not.toMatch(/^\s*(?:export\s+)?(?:async\s+)?function\s+inferEntityType\b/m);
+    expect(source).not.toMatch(/^\s*(?:export\s+)?(?:const|let|var)\s+inferEntityType\b/m);
+  });
+
+  it.each(CONSUMERS)('%s imports inferEntityType from the canonical helpers module', (file) => {
+    const source = readFileSync(file, 'utf8');
+    // A value import (not `import type`) of inferEntityType from the shared
+    // helpers module. `import\s+{` cannot match `import type {`.
+    const valueImports = [
+      ...source.matchAll(/import\s+{([^}]*)}\s*from\s*'@\/lib\/chat\/handlers\/helpers'/g),
+    ].flatMap((m) => m[1].split(',').map((s) => s.trim()));
+    expect(valueImports).toContain('inferEntityType');
   });
 });
 

@@ -12,13 +12,20 @@ vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
   rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
 }));
-vi.mock('@/lib/tokens/pricing', () => ({
-  TOKEN_PACKAGES: {
-    spark: { tokens: 500, price: 499 },
-    blaze: { tokens: 2000, price: 1499 },
-    inferno: { tokens: 5000, price: 2999 },
-  },
-}));
+// Spread the actual module: `@/lib/auth/api-auth` (automocked below) reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
+// via `@/lib/ai/tierAccess` / `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return {
+    ...actual,
+    TOKEN_PACKAGES: {
+      spark: { tokens: 500, price: 499 },
+      blaze: { tokens: 2000, price: 1499 },
+      inferno: { tokens: 5000, price: 2999 },
+    },
+  };
+});
 vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 }),
 }));
@@ -145,6 +152,34 @@ describe('POST /api/tokens/purchase', () => {
         }),
       })
     );
+  });
+
+  it('sets exactly one of customer / customer_email (Stripe rejects both)', async () => {
+    const { POST } = await import('./route');
+    const post = () =>
+      POST(new NextRequest('http://localhost:3000/api/tokens/purchase', {
+        method: 'POST',
+        body: JSON.stringify({ package: 'spark' }),
+      }));
+
+    // Existing Stripe customer: `customer`, and no `customer_email` key at all.
+    expect((await post()).status).toBe(200);
+    const withCustomer = mockCreateCheckoutSession.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(withCustomer.customer).toBe('cus_123');
+    expect(Object.hasOwn(withCustomer, 'customer_email')).toBe(false);
+
+    // No Stripe customer yet: `customer_email`, and no `customer` key at all.
+    vi.mocked(authenticateRequest).mockResolvedValue({
+      ok: true as const,
+      ctx: {
+        clerkId: 'clerk_1',
+        user: { id: 'user_1', tier: 'creator', stripeCustomerId: null, email: 'test@test.com' } as never,
+      },
+    });
+    expect((await post()).status).toBe(200);
+    const withEmail = mockCreateCheckoutSession.mock.calls[1]?.[0] as Record<string, unknown>;
+    expect(withEmail.customer_email).toBe('test@test.com');
+    expect(Object.hasOwn(withEmail, 'customer')).toBe(false);
   });
 
   it('returns 500 when Stripe throws', async () => {

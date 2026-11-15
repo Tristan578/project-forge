@@ -558,6 +558,41 @@ describe('parseSkeletonWire2d', () => {
     expect(parsed?.ikConstraints[0].boneChain).toEqual(['a', 'b']);
   });
 
+  it('carries mesh vertex weights back into the store (#9732)', () => {
+    // The store now models `weights`, so the return trip must keep them: the
+    // inspector's mesh editor writes weights, `setSkeleton2d` echoes a full
+    // `create_skeleton2d`, and the engine answers with `SKELETON2D_UPDATED`
+    // routed through here. Dropping weights here would blank the skinning the
+    // creator just authored on the very next inbound frame.
+    const parsed = parseSkeletonWire2d({
+      skins: {
+        default: {
+          name: 'default',
+          attachments: {
+            cloak: {
+              type: 'mesh',
+              textureId: 'tex',
+              vertices: [[0, 0], [1, 0]],
+              uvs: [[0, 0], [1, 0]],
+              triangles: [],
+              weights: [
+                { bones: ['spine'], weights: [1] },
+                { bones: ['spine', 'hip'], weights: [0.4, 0.6] },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const cloak = parsed?.skins.default.attachments.cloak;
+    expect(cloak?.type).toBe('mesh');
+    expect(cloak?.weights).toEqual([
+      { bones: ['spine'], weights: [1] },
+      { bones: ['spine', 'hip'], weights: [0.4, 0.6] },
+    ]);
+  });
+
   it('returns null for anything that is not a skeleton object', () => {
     // `AutoRiggingPanel` shows a failure message on null, so this is the branch
     // that decides whether a bad generation reports or throws.

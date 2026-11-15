@@ -1,12 +1,28 @@
 //! Sprite and 2D camera pending commands.
 
 use super::PendingCommands;
+use crate::core::project_type::ProjectType;
 
 // === Request Structs ===
 
-#[derive(Debug, Clone)]
+/// Switch the engine's `ProjectType` resource (and with it the 2D camera), or
+/// only re-report it.
+///
+/// Typed, not a string: the `set_project_type` command parses its payload
+/// with `ProjectType::from_wire` and refuses anything else, so it always
+/// queues `Some`. `load_scene` queues the scene file's own
+/// `metadata.projectType` as it stands (#10227): `Some` for a file that
+/// states its dimension, `None` for one saved before the field existed. The
+/// drain resolves either through `ProjectType::apply_request` — `None` leaves
+/// the resource alone — and emits `PROJECT_TYPE_CHANGED` with the resulting
+/// type for every request, so a key-less scene inherits the session's
+/// dimension while a store that drifted still converges on the engine.
+/// Nothing unrecognised can reach `apply_project_type_changes`, so the system
+/// has no branch that drops a request on the floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetProjectTypeRequest {
-    pub project_type: String,
+    /// The type to apply, or `None` to re-report the current one unchanged.
+    pub project_type: Option<ProjectType>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +171,21 @@ pub struct FillTilesRequest {
     pub tiles: Vec<TilePlacement>,
 }
 
+/// Deferred edit to a tile cell's authored metadata; does not create runtime colliders.
+#[derive(Debug, Clone)]
+pub struct SetTileCollisionShapeRequest {
+    /// Scene entity ID carrying the existing tilemap.
+    pub entity_id: String,
+    /// Zero-based index of an existing layer.
+    pub layer: usize,
+    /// Zero-based column within the tilemap's stored cells.
+    pub x: usize,
+    /// Zero-based row within the tilemap's stored cells.
+    pub y: usize,
+    /// Supported silhouette to store on the cell.
+    pub shape: crate::core::tilemap::CollisionShape,
+}
+
 // === Grid 2D Request Structs ===
 
 #[derive(Debug, Clone)]
@@ -261,6 +292,12 @@ impl PendingCommands {
         self.fill_tiles_requests.push(request);
     }
 
+    /// Enqueue a metadata edit for later validation and application by the bridge system.
+    /// Returning from this method does not confirm that a cell changed.
+    pub fn queue_set_tile_collision_shape(&mut self, request: SetTileCollisionShapeRequest) {
+        self.set_tile_collision_shape_requests.push(request);
+    }
+
     pub fn queue_set_grid_2d(&mut self, request: SetGrid2dRequest) {
         self.set_grid_2d_requests.push(request);
     }
@@ -346,6 +383,12 @@ pub fn queue_erase_tile_from_bridge(request: EraseTileRequest) -> bool {
 
 pub fn queue_fill_tiles_from_bridge(request: FillTilesRequest) -> bool {
     super::with_pending(|pc| pc.queue_fill_tiles(request)).is_some()
+}
+
+/// Enqueue an authored shape edit through the pending-command resource.
+/// Returns whether the queue was available, not whether the cell edit was applied.
+pub fn queue_set_tile_collision_shape_from_bridge(request: SetTileCollisionShapeRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_tile_collision_shape(request)).is_some()
 }
 
 pub fn queue_set_grid_2d_from_bridge(request: SetGrid2dRequest) -> bool {

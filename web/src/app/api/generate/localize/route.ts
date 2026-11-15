@@ -13,9 +13,12 @@ import {
 } from '@/lib/i18n/gameLocalization';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
+import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const CHUNK_SIZE = 200;
 
@@ -25,11 +28,12 @@ interface LocalizeParams {
   targetLocales: string[];
 }
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   LocalizeParams,
   { locales: Record<string, LocaleBundle> }
 >({
   route: '/api/generate/localize',
+  panel: 'ai-chat',
   // Batch route: matches `export const maxDuration` above so the generation
   // agent derives its step-timeout cap against the real 120s budget.
   maxDurationSeconds: 120,
@@ -120,7 +124,13 @@ export const POST = createGenerationHandler<
     targetLocales: params.targetLocales,
   }),
   execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
-    const anthropicProvider = createAnthropic({ apiKey });
+    // A platform key can be a federated Bearer token (#8858); passing it as
+    // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
+    // omitUndefinedValues: `AnthropicClientAuth` admits an explicit
+    // `apiKey: undefined` (another caller relies on that), but the vendor
+    // `AnthropicProviderSettings` this feeds doesn't accept the key at all
+    // when its value is undefined.
+    const anthropicProvider = createAnthropic(omitUndefinedValues(anthropicClientAuthForKey(apiKey)));
     const result: Record<string, LocaleBundle> = {};
 
     // Resolve consent + a single trace id once for the whole localize op — every
@@ -141,7 +151,9 @@ export const POST = createGenerationHandler<
           prompt,
           maxOutputTokens: 4096,
           experimental_telemetry: { isEnabled: true },
-          abortSignal,
+          // `ai`'s AbortSignal option is a vendor type without `| undefined`;
+          // conditional spread omits the key entirely rather than casting.
+          ...(abortSignal !== undefined ? { abortSignal } : {}),
         });
 
         captureAiGeneration({
@@ -171,3 +183,7 @@ export const POST = createGenerationHandler<
     return { locales: result };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

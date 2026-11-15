@@ -298,7 +298,7 @@ function passageToNodes(
             const choiceNode: ChoiceNode = {
               id: choiceId,
               type: 'choice',
-              text: promptText || undefined,
+              ...(promptText ? { text: promptText } : {}),
               choices,
             };
             nodes.push(choiceNode);

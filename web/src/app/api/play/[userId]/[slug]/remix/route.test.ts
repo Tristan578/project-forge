@@ -21,7 +21,7 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 vi.mock('@/lib/db/schema', () => ({
-  publishedGames: { id: 'id', title: 'title', slug: 'slug', userId: 'user_id', projectId: 'project_id' },
+  publishedGames: { id: 'id', title: 'title', slug: 'slug', userId: 'user_id', projectId: 'project_id', status: 'status', publishedSceneData: 'published_scene_data' },
   projects: { id: 'id', userId: 'user_id', sceneData: 'scene_data', name: 'name' },
   users: { id: 'id', clerkId: 'clerk_id' },
   gameForks: {},
@@ -143,6 +143,8 @@ describe('POST /api/play/[userId]/[slug]/remix', () => {
       id: 'game-uuid',
       title: 'My Game',
       projectId: 'orig-project-id',
+      status: 'published',
+      publishedSceneData: null,
     }]);
     // Project data lookup
     mockDb.limit.mockResolvedValueOnce([{ sceneData: { entities: [] } }]);
@@ -216,6 +218,8 @@ describe('POST /api/play/[userId]/[slug]/remix', () => {
       id: 'game-uuid',
       title: 'My Game',
       projectId: 'orig-project-id',
+      status: 'published',
+      publishedSceneData: null,
     }]);
     mockDb.limit.mockResolvedValueOnce([{ sceneData: sourceScene }]);
 
@@ -244,4 +248,60 @@ describe('POST /api/play/[userId]/[slug]/remix', () => {
     // And the row we read from is untouched.
     expect(sourceScene.entities[0].scriptData?.enabled).toBe(true);
   });
+  async function remixFixture(game: Record<string, unknown>) {
+    const { safeAuth } = await import('@/lib/auth/safe-auth');
+    vi.mocked(safeAuth).mockResolvedValue({ userId: 'clerk-remixer' });
+    const { getDb } = await import('@/lib/db/client');
+    const db = {
+      select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([])
+        .mockResolvedValueOnce([{ id: 'remixer-uuid' }])
+        .mockResolvedValueOnce([{ id: 'creator-uuid' }])
+        .mockResolvedValueOnce([{
+          id: 'game-uuid', title: 'My Game', projectId: 'orig-project-id',
+          status: 'published', publishedSceneData: { entities: [] }, ...game,
+        }]),
+      insert: vi.fn().mockReturnThis(), values: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(getDb).mockReturnValue(db as unknown as ReturnType<typeof getDb>);
+    const { POST } = await import('./route');
+    const response = await POST(new NextRequest('http://localhost/api/play/user-1/my-game/remix', {
+      method: 'POST',
+    }), { params: Promise.resolve({ userId: 'user-1', slug: 'my-game' }) });
+    return { response, db };
+  }
+
+  it.each(['unpublished', 'flagged'])('refuses a %s publication before reading scene data', async status => {
+    const { response, db } = await remixFixture({ status });
+    const { createProject } = await import('@/lib/projects/service');
+    expect(response.status).toBe(404);
+    expect(db.limit).toHaveBeenCalledTimes(3);
+    expect(createProject).not.toHaveBeenCalled();
+    expect(db.where).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      args: expect.arrayContaining([{ op: 'eq', args: ['status', 'published'] }]),
+    }));
+  });
+
+  it('copies and quarantines the published snapshot without fetching later private edits', async () => {
+    const publishedSceneData = { entities: [{ scriptData: { source: 'published-code', enabled: true } }] };
+    const { response, db } = await remixFixture({ publishedSceneData });
+    const { createProject } = await import('@/lib/projects/service');
+    expect(response.status).toBe(201);
+    expect(db.limit).toHaveBeenCalledTimes(3);
+    expect(createProject).toHaveBeenCalledWith('remixer-uuid', 'My Game (Remix)', {
+      entities: [{ scriptData: { source: 'published-code', enabled: false } }],
+    });
+    expect(publishedSceneData.entities[0].scriptData.enabled).toBe(true);
+  });
+
+  it.each([[], 'invalid'])('rejects malformed snapshots without falling back to private edits', async publishedSceneData => {
+    const { response, db } = await remixFixture({ publishedSceneData });
+    const { createProject } = await import('@/lib/projects/service');
+    expect(response.status).toBe(500);
+    expect(db.limit).toHaveBeenCalledTimes(3);
+    expect(createProject).not.toHaveBeenCalled();
+  });
+
 });

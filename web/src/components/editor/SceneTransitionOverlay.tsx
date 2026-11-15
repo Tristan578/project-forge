@@ -13,6 +13,7 @@ export function SceneTransitionOverlay() {
   const typeClass = type === 'fade'
     ? 'scene-transition-fade'
     : type === 'wipe'
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank direction is not a member of the direction enum; treated as unset
     ? `scene-transition-wipe scene-transition-wipe-${direction || 'left'}`
     : '';
 

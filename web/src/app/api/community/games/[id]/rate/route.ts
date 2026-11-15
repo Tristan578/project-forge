@@ -5,6 +5,8 @@ import { gameRatings } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +14,7 @@ const rateSchema = z.object({
   rating: z.number().finite().min(1).max(5),
 });
 
-export async function POST(
+async function POST_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -57,6 +59,10 @@ export async function POST(
     });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/rate' });
-    return NextResponse.json({ error: 'Failed to rate game' }, { status: 500 });
+    return redactedJson({ error: 'Failed to rate game' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

@@ -35,7 +35,7 @@ interface QueuedRequest<T> {
   priority: Priority;
   resolve: (value: T) => void;
   reject: (error: Error) => void;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 // ---------------------------------------------------------------------------

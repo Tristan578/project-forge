@@ -106,7 +106,8 @@ if (hasGatewayKey) {
 console.log('\nProvider APIs (optional — for Sunday validation):');
 warn('MESHY_API_KEY', !!config.meshyApiKey, 'not set — 3D model validation disabled');
 warn('ELEVENLABS_API_KEY', !!config.elevenlabsApiKey, 'not set — audio validation disabled');
-warn('SUNO_API_KEY', !!config.sunoApiKey, 'not set — music validation disabled');
+// No SUNO_API_KEY line: Suno has no public API, so the key cannot be minted,
+// and no autoforge path calls music generation (#9522, docs/guides/platform-keys.md).
 
 // Sentry
 console.log('\nObservability (optional):');

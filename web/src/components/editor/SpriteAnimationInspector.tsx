@@ -1,9 +1,13 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 
 export function SpriteAnimationInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const spriteSheets = useEditorStore((s) => s.spriteSheets);
   const spriteAnimators = useEditorStore((s) => s.spriteAnimators);
@@ -101,8 +105,9 @@ export function SpriteAnimationInspector() {
           <h3 className="text-sm font-semibold text-white">Playback</h3>
           <div className="space-y-2">
             <div>
-              <label className="mb-1 block text-xs text-gray-300">Current Clip</label>
+              <label htmlFor={fieldId('current-clip')} className="mb-1 block text-xs text-gray-300">Current Clip</label>
               <select
+                id={fieldId('current-clip')}
                 value={animator.currentClip ?? ''}
                 onChange={(e) => handlePlayClip(e.target.value)}
                 className="w-full rounded bg-gray-700 px-2 py-1 text-xs text-white"
@@ -131,10 +136,11 @@ export function SpriteAnimationInspector() {
               </button>
             </div>
             <div>
-              <label className="mb-1 block text-xs text-gray-300">
+              <label htmlFor={fieldId('speed')} className="mb-1 block text-xs text-gray-300">
                 Speed: {animator.speed.toFixed(2)}x
               </label>
               <input
+                id={fieldId('speed')}
                 type="range"
                 min="0.1"
                 max="3.0"

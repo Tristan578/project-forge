@@ -50,6 +50,7 @@ import { zBehavior } from '../behaviorVocabulary';
 import { GDD_SCOPES } from '@/lib/config/enums';
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
 import { setWinnabilityStateReader } from '@/stores/slices';
+import { isSceneFileEnvelope } from '@/lib/scenes/sceneValidation';
 import { createTestHarness } from '@/__integration__/harness';
 import type { TestHarness } from '@/__integration__/harness';
 import type { SceneNode } from '@/stores/slices/types';
@@ -92,6 +93,16 @@ function attachFakeEngine(harness: TestHarness): Recorded[] {
     // Read key by key behind `Object.hasOwn` — the payload crossed a plan
     // boundary and a bare index would walk the prototype chain.
     const bag = (payload ?? {}) as Record<string, unknown>;
+
+    // Scene persistence requires an explicit non-mutating engine verdict.
+    // This fake checks the envelope; Rust decoder tests own component fidelity.
+    if (command === 'validate_scene') {
+      try {
+        return { success: typeof bag.json === 'string' && isSceneFileEnvelope(JSON.parse(bag.json)) };
+      } catch {
+        return { success: false };
+      }
+    }
 
     if (command === 'toggle_physics') {
       const rawTarget = Object.hasOwn(bag, 'entityId') ? bag['entityId'] : undefined;

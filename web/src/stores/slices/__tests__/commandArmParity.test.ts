@@ -29,12 +29,13 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  readEngineArms,
+  productionSources,
+  WEB_SRC_DIR,
+} from '@/lib/engine/__tests__/engineCommandArms';
 
-// __dirname is web/src/stores/slices/__tests__ — five levels below the repo root.
-const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
-const ENGINE_COMMANDS_DIR = join(REPO_ROOT, 'engine', 'src', 'core', 'commands');
 const SLICES_DIR = join(__dirname, '..');
-const WEB_SRC_DIR = join(REPO_ROOT, 'web', 'src');
 
 /**
  * Names the store dispatches that no implemented engine arm handles. Each entry
@@ -64,7 +65,15 @@ const UNDISPATCHED_AT_BASELINE = [
   'apply_force', 'list_joints', 'set_physics2d', 'update_physics2d',
   'toggle_physics2d', 'remove_physics2d', 'set_2d_collider_shape',
   'set_2d_body_type', 'create_2d_joint', 'update_2d_joint', 'remove_2d_joint',
-  'apply_force2d', 'apply_impulse2d', 'raycast2d', 'get_physics2d',
+  // 'raycast2d' left this list in #9271: the physics channel dispatches it
+  // now, correlating the answer through raycast2dRegistry. The gate noticing
+  // that is the gate working — a waiver outlives the gap it waived.
+  'apply_force2d', 'apply_impulse2d', 'get_physics2d',
+  // Armed by #9763. Dispatched from the SCRIPT WORKER, which pushes a command
+  // name into a queue rather than calling dispatchCommand with a literal, so
+  // this scanner cannot see the caller — exactly as for apply_force2d and
+  // apply_impulse2d beside them.
+  'set_linear_velocity_2d', 'set_angular_velocity_2d',
   'enable_physics_debug', 'disable_physics_debug', 'apply_impulse', 'raycast',
   'get_joint', 'set_physics_2d_enabled', 'get_physics_2d', 'get_joint_2d',
   'list_joints_2d', 'apply_force_2d', 'apply_impulse_2d', 'get_terrain',
@@ -86,150 +95,46 @@ const ALLOWED_UNDISPATCHED: Record<string, string> = Object.fromEntries(
   ]),
 );
 
-/** Text of a brace-balanced block starting at `openIndex` (which must be a `{`). */
-function blockAt(source: string, openIndex: number): string {
-  let depth = 0;
-  for (let i = openIndex; i < source.length; i++) {
-    if (source[i] === '{') depth++;
-    else if (source[i] === '}' && --depth === 0) return source.slice(openIndex, i);
-  }
-  // Unbalanced braces mean the parse is unreliable — say so rather than
-  // silently returning a truncated body that would under-report arms.
-  throw new Error(`unbalanced braces starting at offset ${openIndex}`);
-}
-
-/** `[name, body]` for every `fn <namePattern>(...) { ... }` in `source`. */
-function fnBodies(source: string, namePattern: string): Array<[string, string]> {
-  const bodies: Array<[string, string]> = [];
-  const sig = new RegExp(`fn (${namePattern})\\s*\\(`, 'g');
-  let m: RegExpExecArray | null;
-  while ((m = sig.exec(source)) !== null) {
-    const open = source.indexOf('{', sig.lastIndex);
-    if (open !== -1) bodies.push([m[1], blockAt(source, open)]);
-  }
-  return bodies;
-}
-
-const NOT_IMPLEMENTED = /is not implemented|Not yet implemented/;
-
-interface EngineArms {
-  implemented: Set<string>;
-  stubbed: Set<string>;
-  /** Names `route_domain` sends to a domain module. Anything else is unreachable. */
-  routed: Set<string>;
-  /** Arms that exist and are not stubs, but that `route_domain` never names. */
-  armedButUnrouted: Set<string>;
-  fileCount: number;
-  dispatchBodyCount: number;
-}
-
-/**
- * Body of a TOP-LEVEL `fn <name>(...)`, i.e. one whose `fn` starts at column 0.
- *
- * `fnBodies` matches the signature anywhere in the file, which is right for
- * scanning handlers but wrong for a named singleton: `mod.rs` mentions
- * `fn route_domain(` twice more inside indented string literals in its own
- * `route_domain_parity` tests, and a whole-file match counts those as real
- * definitions. Anchoring on the newline is exactly what the Rust-side scanner
- * does, and it fails closed — a definition this cannot find reports as absent,
- * never as empty-but-present.
- */
-function topLevelFnBody(source: string, name: string): string | undefined {
-  const at = source.indexOf(`\nfn ${name}(`);
-  if (at === -1) return undefined;
-  const open = source.indexOf('{', at);
-  return open === -1 ? undefined : blockAt(source, open);
-}
-
-/** Every command name listed in `fn route_domain`, whatever domain it maps to. */
-function readRoutedNames(): Set<string> {
-  const source = readFileSync(join(ENGINE_COMMANDS_DIR, 'mod.rs'), 'utf8');
-  // `route_domain` is private, so match on `fn` alone rather than `pub fn`. An
-  // anchor written `pub fn route_domain` matches nothing and reads exactly like
-  // "the router names no commands" — a scanner failure that looks like a pass.
-  const body = topLevelFnBody(source, 'route_domain');
-  if (body === undefined) {
-    throw new Error('mod.rs has no top-level `fn route_domain(` — the scanner is broken');
-  }
-  // Comments are stripped first: PF-1181 left explanatory comments in
-  // `route_domain` naming the twenty command names it deleted, and a raw scan
-  // would read those back as still routed.
-  const arms = body
-    .split('\n')
-    .map((line) => {
-      const at = line.indexOf('//');
-      return at === -1 ? line : line.slice(0, at);
-    })
-    .join('\n');
-  // What is left is nothing but match arms, so every quoted lower-snake token
-  // in it is a command name.
-  return new Set([...arms.matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]));
-}
-
-function readEngineArms(): EngineArms {
-  const files = readdirSync(ENGINE_COMMANDS_DIR).filter((f) => f.endsWith('.rs'));
-  const sources = files.map((f) => readFileSync(join(ENGINE_COMMANDS_DIR, f), 'utf8'));
-
-  // Handlers whose whole body is a not-implemented error. An arm delegating to
-  // one of these is stubbed even though the arm itself looks ordinary.
-  const stubHandlers = new Set<string>();
-  for (const source of sources) {
-    for (const [name, body] of fnBodies(source, '\\w+')) {
-      if (NOT_IMPLEMENTED.test(body)) stubHandlers.add(name);
-    }
-  }
-
-  const implemented = new Set<string>();
-  const stubbed = new Set<string>();
-  let dispatchBodyCount = 0;
-
-  for (const source of sources) {
-    // Scoped to `dispatch` bodies: a whole-file scan matches quoted payload
-    // VALUES ("mask", "high", "toggle") as if they were command names.
-    for (const [, body] of fnBodies(source, 'dispatch')) {
-      dispatchBodyCount++;
-      for (const arm of body.matchAll(/"([a-z0-9_]+)"\s*(?:=>|\|)/g)) {
-        const window = body.slice(arm.index ?? 0, (arm.index ?? 0) + 200);
-        // Two stub shapes: delegated to a stub handler, or written inline in the
-        // arm itself (`=> Some(Err("Not yet implemented: x".to_string()))`).
-        const handler = window.match(/\bhandle_\w+/)?.[0];
-        const inlineStub = NOT_IMPLEMENTED.test(window.split('\n')[0]);
-        if (inlineStub || (handler !== undefined && stubHandlers.has(handler))) {
-          stubbed.add(arm[1]);
-        } else {
-          implemented.add(arm[1]);
-        }
-      }
-    }
-  }
-  // An `a | b => handler` group where the handler is a stub marks every name in
-  // the group; a name reached both ways is not implemented.
-  for (const name of stubbed) implemented.delete(name);
-
-  // An arm the router never names cannot run, so it does not count as
-  // implemented. Tracked separately so the checks below can prove this
-  // subtraction is really happening rather than being vacuous.
-  const routed = readRoutedNames();
-  const armedButUnrouted = new Set([...implemented].filter((name) => !routed.has(name)));
-  for (const name of armedButUnrouted) implemented.delete(name);
-
-  return {
-    implemented,
-    stubbed,
-    routed,
-    armedButUnrouted,
-    fileCount: files.length,
-    dispatchBodyCount,
-  };
-}
-
 interface StoreDispatches {
   /** Command name -> the slice file that dispatches it. */
   names: Map<string, string>;
-  /** Files holding a dispatch whose command name this scanner cannot read. */
+  /**
+   * Every dispatch CALL whose command name this scanner cannot read, as
+   * `file:line <the call as written>`, so the failure names the site rather
+   * than a count.
+   */
   unreadable: string[];
   fileCount: number;
 }
+
+/**
+ * Every dispatch call in a slice, whatever its arguments. The lookbehind keeps
+ * a DEFINITION (`function dispatchSceneCommand(`) out: it is not a call.
+ *
+ * Two call shapes exist in the slices. `dispatchCommand(…)` is the plain one.
+ * `dispatchSceneCommand(<dispatcher>, '<name>', …)` is `sceneSlice`'s
+ * chokepoint for the two scene-replacing commands: it takes the dispatcher
+ * first so it can wrap the engine throw as `EngineDispatchThrewError`
+ * (#10202), and the name is still a literal, one argument in. Routing
+ * `load_scene` / `new_scene` through it removed the only literal
+ * `dispatchCommand('load_scene'` sites in the tree, and a scanner that knew one
+ * shape stopped seeing the slice's two most safety-critical dispatches — while
+ * its "can I read every call" guard, which counted only `dispatchCommand(`,
+ * stayed green and let the reverse-parity check blame the engine commands
+ * instead (#10202 review board, round 2).
+ */
+const DISPATCH_CALL = /(?<!function )\b(?:dispatchCommand|dispatchSceneCommand)\(/g;
+
+/**
+ * The same two shapes, with the command name captured. A match here starts at
+ * the same offset as its `DISPATCH_CALL` match, which is how the two are
+ * paired below.
+ */
+const READABLE_DISPATCH =
+  /(?<!function )\b(?:dispatchCommand\(\s*|dispatchSceneCommand\(\s*[A-Za-z_$][\w$]*\s*,\s*)'([a-z0-9_]+)'/g;
+
+/** The shapes `READABLE_DISPATCH` reads, for the failure message. */
+const READABLE_SHAPES = "`dispatchCommand('<name>'` and `dispatchSceneCommand(<dispatcher>, '<name>'`";
 
 function readStoreDispatches(): StoreDispatches {
   const names = new Map<string, string>();
@@ -238,40 +143,42 @@ function readStoreDispatches(): StoreDispatches {
 
   for (const file of files) {
     const source = readFileSync(join(SLICES_DIR, file), 'utf8');
-    // A dispatch built from a variable is invisible to a literal scan, so the pin
-    // would silently stop covering it. Report rather than under-report.
-    const allCalls = source.match(/dispatchCommand\(/g)?.length ?? 0;
-    const literalCalls = source.match(/dispatchCommand\(\s*'/g)?.length ?? 0;
-    if (literalCalls !== allCalls) {
-      unreadable.push(`${file} (${allCalls - literalCalls} non-literal)`);
-    }
-
-    for (const m of source.matchAll(/dispatchCommand\(\s*'([a-z0-9_]+)'/g)) {
+    const readableAt = new Set<number>();
+    for (const m of source.matchAll(READABLE_DISPATCH)) {
+      readableAt.add(m.index);
       if (!names.has(m[1])) names.set(m[1], file);
+    }
+    // A dispatch built from a variable — or through a wrapper this scanner has
+    // not been taught — is invisible to a literal scan, so the pin would
+    // silently stop covering it. Report EACH such call, by line, rather than
+    // under-report.
+    for (const call of source.matchAll(DISPATCH_CALL)) {
+      if (readableAt.has(call.index)) continue;
+      const line = source.slice(0, call.index).split('\n').length;
+      const lineEnd = source.indexOf('\n', call.index);
+      const asWritten = source.slice(call.index, lineEnd === -1 ? undefined : lineEnd).trim();
+      unreadable.push(`${file}:${line} ${asWritten}`);
     }
   }
   return { names, unreadable, fileCount: files.length };
 }
 
-function productionSources(dir: string): string[] {
-  const sources: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name !== '__tests__') sources.push(...productionSources(full));
-    } else if (/\.(?:ts|tsx)$/.test(entry.name) && !/\.(?:test|spec)\./.test(entry.name)) {
-      sources.push(readFileSync(full, 'utf8'));
-    }
-  }
-  return sources;
-}
-
-/** Commands passed at a literal browser dispatch call site outside tests. */
+/**
+ * Commands passed at a literal browser dispatch call site outside tests — the
+ * plain dispatcher spellings, plus `sceneSlice`'s chokepoint shape (see
+ * `DISPATCH_CALL`), which is the only place `load_scene` and `new_scene` are
+ * dispatched from the editor.
+ */
 function readBrowserDispatches(): Set<string> {
   const names = new Set<string>();
   for (const source of productionSources(WEB_SRC_DIR)) {
     for (const match of source.matchAll(
       /\b(?:dispatchCommand|engineDispatch|dispatch)\(\s*['"]([a-z0-9_]+)['"]/g,
+    )) {
+      names.add(match[1]);
+    }
+    for (const match of source.matchAll(
+      /\bdispatchSceneCommand\(\s*[A-Za-z_$][\w$]*\s*,\s*['"]([a-z0-9_]+)['"]/g,
     )) {
       names.add(match[1]);
     }
@@ -319,10 +226,25 @@ describe('store command names have engine dispatch arms', () => {
     it('can read the command name of every dispatch call', () => {
       expect(
         store.unreadable,
-        'This pin only sees string-literal command names. Either inline the name at ' +
-          'the dispatch site or teach this scanner about the new shape — a dispatch it ' +
-          'cannot read is a dispatch it silently stops covering.',
+        `This pin reads a command name only at ${READABLE_SHAPES}. The calls listed ` +
+          'use another shape — a name held in a variable, a new wrapper, a different ' +
+          'argument order. Either write the name as a literal at the call, or teach BOTH ' +
+          '`readStoreDispatches` and `readBrowserDispatches` the new shape. A dispatch ' +
+          'this scanner cannot read is a dispatch it silently stops covering, and the ' +
+          'first symptom would be the reverse-parity check below blaming the engine ' +
+          'commands rather than this file.',
       ).toEqual([]);
+    });
+
+    it('sees the two scene-replacing commands through the sceneSlice chokepoint', () => {
+      // `load_scene` and `new_scene` are dispatched ONLY as
+      // `dispatchSceneCommand(dispatchCommand, '<name>', …)` (#10202). If either
+      // scanner stops reading that shape, the slice's two most safety-critical
+      // dispatches drop out of this pin silently — this is the alarm for that.
+      expect(storeDispatches.get('load_scene')).toBe('sceneSlice.ts');
+      expect(storeDispatches.get('new_scene')).toBe('sceneSlice.ts');
+      expect(browserDispatches.has('load_scene')).toBe(true);
+      expect(browserDispatches.has('new_scene')).toBe(true);
     });
 
     it.each([

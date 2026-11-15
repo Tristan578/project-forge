@@ -329,4 +329,148 @@ describe('ElevenLabsClient', () => {
       );
     });
   });
+
+  // PF-1301 / #9522: music moved from Suno to ElevenLabs `/v1/music`, which
+  // returns audio bytes inline exactly like sound-generation.
+  describe('generateMusic', () => {
+    it('POSTs to /v1/music with the xi-api-key header and a music body', async () => {
+      const fakeBuffer = new Uint8Array([1, 2, 3, 4]).buffer;
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(fakeBuffer),
+      } as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      const result = await client.generateMusic({
+        prompt: 'upbeat chiptune adventure',
+        musicLengthMs: 30000,
+        forceInstrumental: true,
+      });
+
+      expect(typeof result.audioBase64).toBe('string');
+      expect(result.audioBase64.length).toBeGreaterThan(0);
+      expect(result.durationSeconds).toBe(30);
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.elevenlabs.io/v1/music',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+            'xi-api-key': mockApiKey,
+          }),
+        })
+      );
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.prompt).toBe('upbeat chiptune adventure');
+      expect(body.music_length_ms).toBe(30000);
+      expect(body.force_instrumental).toBe(true);
+      expect(body.model_id).toBe('music_v1');
+    });
+
+    it('defaults length to 30000ms, instrumental true, model music_v1', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([9]).buffer),
+      } as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      const result = await client.generateMusic({ prompt: 'calm ambient' });
+
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.music_length_ms).toBe(30000);
+      expect(body.force_instrumental).toBe(true);
+      expect(body.model_id).toBe('music_v1');
+      expect(result.durationSeconds).toBe(30);
+    });
+
+    it('clamps length into the ElevenLabs 3000-600000ms range', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+      } as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await client.generateMusic({ prompt: 'too short', musicLengthMs: 500 });
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).music_length_ms).toBe(3000);
+
+      vi.mocked(fetch).mockClear();
+      await client.generateMusic({ prompt: 'too long', musicLengthMs: 9_000_000 });
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).music_length_ms).toBe(600000);
+    });
+
+    it('passes forceInstrumental=false and a custom modelId through', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+      } as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await client.generateMusic({
+        prompt: 'song with vocals',
+        forceInstrumental: false,
+        modelId: 'music_v2',
+      });
+
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.force_instrumental).toBe(false);
+      expect(body.model_id).toBe('music_v2');
+    });
+
+    it('throws a Music-labelled error on a non-ok response', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve('Invalid API key'),
+      } as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await expect(client.generateMusic({ prompt: 'x' })).rejects.toThrow(
+        'ElevenLabs Music API error (401): Invalid API key'
+      );
+    });
+
+    it('falls back to "Unknown error" when response.text() rejects', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: () => Promise.reject(new Error('body error')),
+      } as unknown as Response);
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await expect(client.generateMusic({ prompt: 'x' })).rejects.toThrow(
+        'ElevenLabs Music API error (503): Unknown error'
+      );
+    });
+
+    it('rejects an empty successful audio response', async () => {
+      vi.mocked(fetch).mockResolvedValue(new Response(new Uint8Array(), { status: 200 }));
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await expect(client.generateMusic({ prompt: 'calm ambient' })).rejects.toThrow('Music generation produced no audio');
+    });
+
+    it.each([NaN, Infinity, -Infinity])('uses the default duration for non-finite milliseconds %s', async (musicLengthMs) => {
+      vi.mocked(fetch).mockResolvedValue(new Response(new Uint8Array([1])));
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      const result = await client.generateMusic({ prompt: 'calm ambient', musicLengthMs });
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).music_length_ms).toBe(30000);
+      expect(result.durationSeconds).toBe(30);
+    });
+
+    it('forwards a pre-aborted composed signal to fetch', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+      } as Response);
+
+      const controller = new AbortController();
+      controller.abort(new Error('deadline exceeded'));
+
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await client.generateMusic({ prompt: 'x', signal: controller.signal });
+
+      const capturedSignal = vi.mocked(fetch).mock.calls[0][1]?.signal as AbortSignal;
+      expect(capturedSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedSignal.aborted).toBe(true);
+    });
+  });
 });

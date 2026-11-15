@@ -225,6 +225,49 @@ describe('build_world handler', () => {
     expect(result.message).toContain('3');
   });
 
+  it('reports when an oversized premise is truncated', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    const result = await worldHandlers.build_world({ premise: 'x'.repeat(1501) }, makeContext());
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(true);
+    expect(result.message).toMatch(/description.+shortened/i);
+  });
+
+  it('does not report truncation at the prompt limit', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    const result = await worldHandlers.build_world({ premise: 'x'.repeat(1500) }, makeContext());
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(false);
+    expect(result.message).not.toMatch(/description.+shortened/i);
+  });
+
+  it('reports truncation when constraints push the sent prompt over the limit', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    // 1490 chars is under the limit alone; the appended "[Constraints: ...]" note pushes it over.
+    const result = await worldHandlers.build_world(
+      { premise: 'x'.repeat(1490), factionCount: 3, regionCount: 2 },
+      makeContext(),
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(true);
+    expect(result.message).toMatch(/description.+shortened/i);
+  });
+
+  it('does not report truncation when premise plus constraints stay within the limit', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    const result = await worldHandlers.build_world(
+      { premise: 'x'.repeat(1400), factionCount: 3, regionCount: 2 },
+      makeContext(),
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(false);
+    expect(result.message).not.toMatch(/description.+shortened/i);
+  });
+
   it('falls back to preset when AI returns unparseable JSON', async () => {
     const encoder = new TextEncoder();
     vi.mocked(fetch).mockResolvedValue({
@@ -240,6 +283,29 @@ describe('build_world handler', () => {
     const result = await worldHandlers.build_world({ premise: 'test', genre: 'medieval_fantasy' }, makeContext());
     // Falls back to preset (which we then self-heal + validate)
     expect(result.success).toBe(true);
+  });
+
+  it('does not report truncation when an oversized premise fell back to a preset', async () => {
+    const encoder = new TextEncoder();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"text_delta","text":"not json"}\ndata: [DONE]\n'));
+          controller.close();
+        },
+      }),
+    } as Response);
+    const result = await worldHandlers.build_world(
+      { premise: 'x'.repeat(1501), genre: 'medieval_fantasy' },
+      makeContext(),
+    );
+    expect(result.success).toBe(true);
+    // The preset was not shaped by the premise, so it cannot have been truncated.
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(false);
+    expect(result.message).not.toMatch(/description.+shortened/i);
   });
 
   it('surfaces auth errors immediately (does not fall back)', async () => {

@@ -108,14 +108,16 @@ fi
 
 echo ""
 echo "=== Taskboard ==="
-if command -v taskboard >/dev/null 2>&1; then
-  if taskboard start --port 3010 2>/dev/null; then
-    echo "Taskboard: running at http://localhost:3010"
-  else
-    echo "Taskboard: already running or failed to start — visit http://localhost:3010"
-  fi
+# Always through the launcher: it resolves the ONE shared database path and
+# passes it to the binary itself, waits for the API and verifies its identity.
+# A raw start would let the binary fall back to its own default path (#9995).
+# It is a no-op when the server is already up, and it exits non-zero with the
+# reason (binary not found, database missing) — reported here, never fatal.
+if TASKBOARD_START_OUT="$(node .claude/hooks/taskboard-launch.mjs start 2>&1)"; then
+  echo "Taskboard: running at http://localhost:3010"
 else
-  echo "WARNING: taskboard CLI not installed — skipping"
+  echo "WARNING: taskboard did not start — skipping. Reason:"
+  printf '  %s\n' "$TASKBOARD_START_OUT"
 fi
 
 # ---------- done ----------------------------------------------------------

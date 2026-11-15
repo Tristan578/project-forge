@@ -458,9 +458,12 @@
             "description": "Optical depth for transmission"
           },
           "attenuationDistance": {
-            "type": "number",
+            "type": [
+              "number",
+              "null"
+            ],
             "minimum": 0,
-            "description": "Distance light travels before being attenuated. Use null for infinity."
+            "description": "Distance light travels before being attenuated: a finite number >= 0. Send null for infinity (no attenuation), which is the default."
           },
           "attenuationColor": {
             "type": "array",
@@ -690,7 +693,7 @@
     },
     {
       "name": "set_custom_wgsl_source",
-      "description": "Set the scene-global custom WGSL shader source code. All entities with shaderType='custom_wgsl' use this code. WebGPU only \u2014 WebGL2 falls back to standard PBR. The userCode is a WGSL function body receiving base_color, world_pos, world_normal, uv, time, user_params_0..3, user_color and must return vec4<f32>.",
+      "description": "Set the scene-global custom WGSL shader source code. All entities with shaderType='custom_wgsl' use this code. WebGPU only — WebGL2 falls back to standard PBR. The userCode is a WGSL function body receiving base_color, world_pos, world_normal, uv, time, user_params_0..3, user_color and must return vec4<f32>.",
       "category": "materials",
       "parameters": {
         "type": "object",
@@ -1531,11 +1534,20 @@
     },
     {
       "name": "undo",
-      "description": "Undo the last action",
+      "description": "Undo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.",
       "category": "history",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "engine",
+              "completion_mode"
+            ],
+            "description": "History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history."
+          }
+        }
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
@@ -1544,11 +1556,20 @@
     },
     {
       "name": "redo",
-      "description": "Redo the last undone action",
+      "description": "Redo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.",
       "category": "history",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "engine",
+              "completion_mode"
+            ],
+            "description": "History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history."
+          }
+        }
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
@@ -1616,7 +1637,7 @@
     },
     {
       "name": "play",
-      "description": "Enter play mode \u2014 starts game simulation, snapshots scene state",
+      "description": "Enter play mode — starts game simulation, snapshots scene state",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -1629,7 +1650,7 @@
     },
     {
       "name": "stop",
-      "description": "Stop play mode \u2014 restores scene to pre-play state",
+      "description": "Stop play mode — restores scene to pre-play state",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -1642,7 +1663,7 @@
     },
     {
       "name": "pause",
-      "description": "Pause play mode \u2014 freezes simulation",
+      "description": "Pause play mode — freezes simulation",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -1665,6 +1686,81 @@
       "requiredScope": "scene:write",
       "destructive": false,
       "visibility": "public"
+    },
+    {
+      "name": "replay_input_trace",
+      "description": "Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and, for a recorded trace, whether exactly one collectible was collected. A strategy run asserts movement only (the bot's plan does not aim for a collectible) and reports collectiblesCollected without asserting it. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "playerEntityId": {
+            "type": "string",
+            "description": "Entity whose displacement proves input reached the runtime"
+          },
+          "collectibleEntityIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Collectibles expected to be collected. Defaults to every entity carrying a collectible component."
+          },
+          "trace": {
+            "type": "object",
+            "description": "A recorded input trace: { version: 1, fixtureId, actionNames, durationMs, frames: [{ tick, actions: { <name>: { pressed, axis? } } }] }"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "explorer",
+              "speedrunner",
+              "completionist",
+              "random",
+              "cautious"
+            ],
+            "description": "AI gameplay-bot strategy to plan and replay instead of a recorded trace"
+          }
+        },
+        "required": [
+          "playerEntityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "pin_frame_rate",
+      "description": "Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock. Stop releases a pin that is in force during Play; a pin made in Edit, or queued in the frame Play stops, stays until unpin_frame_rate. Physics tracks the pin only at hz >= 60 (Rapier caps its step at 1/60 s); below that, gameplay systems step 1/hz per frame while physics steps 1/60.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "hz": {
+            "type": "number",
+            "description": "Simulation rate in Hz (ticks per second of game time), integer 4-240 (default 60). The engine always advances exactly one tick per rendered frame; hz sets how long that tick is. 4 Hz (a 250 ms tick) is the floor because Bevy clamps any longer step to 250 ms."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "unpin_frame_rate",
+      "description": "Return the simulation clock to the wall clock after pin_frame_rate; the next frame is measured from now. Stop does this for a pin in force during Play; a pin made in Edit stays until this command.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
     },
     {
       "name": "get_mode",
@@ -1722,6 +1818,10 @@
           "deadZone": {
             "type": "number",
             "description": "Dead zone for axis (default 0.1)"
+          },
+          "player": {
+            "type": "integer",
+            "description": "Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player."
           }
         },
         "required": [
@@ -1744,6 +1844,10 @@
           "actionName": {
             "type": "string",
             "description": "Name of the action to remove"
+          },
+          "player": {
+            "type": "integer",
+            "description": "Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player."
           }
         },
         "required": [
@@ -1757,7 +1861,7 @@
     },
     {
       "name": "set_input_preset",
-      "description": "Apply a built-in input preset (replaces all bindings)",
+      "description": "Merge a built-in input preset into a player's bindings (additive; the preset's own actions win on name collisions)",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -1771,6 +1875,10 @@
               "racing"
             ],
             "description": "Preset name"
+          },
+          "player": {
+            "type": "integer",
+            "description": "Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player."
           }
         },
         "required": [
@@ -1784,7 +1892,7 @@
     },
     {
       "name": "get_input_bindings",
-      "description": "Get all current input action bindings and active preset",
+      "description": "Get all current input action bindings and active preset, including any additional local players' maps under `players`",
       "category": "query",
       "parameters": {
         "type": "object",
@@ -2111,7 +2219,7 @@
         "properties": {
           "dataBase64": {
             "type": "string",
-            "description": "Base64-encoded glTF/GLB file data"
+            "description": "Base64-encoded glTF/GLB file data (a data:model/gltf-binary;base64, header is accepted). A model whose images are KTX2 or Basis Universal (KHR_texture_basisu), or that is not a readable glTF/GLB, is refused with the reason; use PNG or JPEG textures."
           },
           "name": {
             "type": "string",
@@ -2137,7 +2245,7 @@
         "properties": {
           "dataBase64": {
             "type": "string",
-            "description": "Base64-encoded image data (PNG/JPG)"
+            "description": "Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64, which is typed by its first bytes: a PNG signature is image/png, a JPEG marker is image/jpeg, and anything else is refused. Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named."
           },
           "name": {
             "type": "string",
@@ -4626,7 +4734,7 @@
             },
             "minItems": 2,
             "maxItems": 2,
-            "description": "Sculpt center [x, z] in WORLD space \u2014 the engine subtracts the terrain entity's transform to find the brush cell, so an offset terrain sculpts where you clicked, not where it would have been at the origin"
+            "description": "Sculpt center [x, z] in WORLD space — the engine subtracts the terrain entity's transform to find the brush cell, so an offset terrain sculpts where you clicked, not where it would have been at the origin"
           },
           "radius": {
             "type": "number",
@@ -4964,6 +5072,107 @@
           "prefabId": {
             "type": "string",
             "description": "Prefab ID or name"
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "create_prefab_instance",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "nest_prefab",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "parentPrefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "childPrefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "parentPrefabId",
+          "childPrefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "apply_prefab_to_instances",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "list_prefab_instances",
+      "description": "Inspect saved editor link metadata for a prefab by ID or name, including overridden field names. Records do not verify scene entity placement or propagation. This read is not advertised to the in-app chat model.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Source prefab whose instances to list"
           }
         },
         "required": [
@@ -5421,6 +5630,33 @@
       "visibility": "public"
     },
     {
+      "name": "set_completion_mode",
+      "description": "Set how the open scene's game counts as complete. \"win\" (what a scene with no mode plays as) lets Play start only when at least one win condition the player can complete exists; \"endless\", \"sandbox\" and \"narrative\" let a game with no win condition play and pass verification. A win condition the scene does have is still validated in every mode. Saved with the scene file and undoable from Scene Settings. Set it when the creator asks for a sandbox, endless or story game; never infer it from entity names.",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "win",
+              "endless",
+              "sandbox",
+              "narrative"
+            ],
+            "description": "win: requires a completable win condition. endless: score or survival, no final win. sandbox: a toy with no goal. narrative: ends through authored story progression."
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "add_game_component",
       "description": "Add a pre-built game component (e.g., CharacterController, Health, Collectible) to an entity",
       "category": "game_components",
@@ -5445,7 +5681,8 @@
               "spawner",
               "follower",
               "projectile",
-              "win_condition"
+              "win_condition",
+              "dialogue_trigger"
             ],
             "description": "Type of game component to add"
           },
@@ -5466,7 +5703,7 @@
     },
     {
       "name": "update_game_component",
-      "description": "Update properties of an existing game component",
+      "description": "Update properties of an existing game component. Only the named properties change; every other property keeps its current value. Fails if the entity has no component of that type (use add_game_component to add one)",
       "category": "game_components",
       "parameters": {
         "type": "object",
@@ -5489,13 +5726,14 @@
               "spawner",
               "follower",
               "projectile",
-              "win_condition"
+              "win_condition",
+              "dialogue_trigger"
             ],
             "description": "Type of game component to update"
           },
           "properties": {
             "type": "object",
-            "description": "Property values to update"
+            "description": "Property values to update; unnamed properties keep their current values"
           }
         },
         "required": [
@@ -5534,7 +5772,8 @@
               "spawner",
               "follower",
               "projectile",
-              "win_condition"
+              "win_condition",
+              "dialogue_trigger"
             ],
             "description": "Name of component to remove"
           }
@@ -6084,7 +6323,7 @@
     },
     {
       "name": "generate_music",
-      "description": "Generate background music from text description",
+      "description": "Generate background music from text description. Not available yet: the music provider is being replaced (#9522), so this command is withheld from AI tool sets and refused by the route until then.",
       "category": "generation",
       "parameters": {
         "type": "object",
@@ -6619,7 +6858,7 @@
               "medium",
               "high"
             ],
-            "description": "Maximum mechanic complexity to include (default: high \u2014 includes all)"
+            "description": "Maximum mechanic complexity to include (default: high — includes all)"
           },
           "trendingOnly": {
             "type": "boolean",
@@ -6996,6 +7235,36 @@
               "bottom_right"
             ]
           },
+          "constraints": {
+            "type": "object",
+            "description": "Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds. Omitted sub-fields are preserved when updating an existing widget; bounds keep core actions tappable (e.g. 44px) from mobile to desktop.",
+            "properties": {
+              "offsetX": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on X (positive = right)"
+              },
+              "offsetY": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on Y (positive = down)"
+              },
+              "minWidth": {
+                "type": ["number", "null"],
+                "description": "Minimum width in px (>= 0), or null for unconstrained"
+              },
+              "maxWidth": {
+                "type": ["number", "null"],
+                "description": "Maximum width in px (>= 0), or null for unconstrained"
+              },
+              "minHeight": {
+                "type": ["number", "null"],
+                "description": "Minimum height in px (>= 0), or null for unconstrained"
+              },
+              "maxHeight": {
+                "type": ["number", "null"],
+                "description": "Maximum height in px (>= 0), or null for unconstrained"
+              }
+            }
+          },
           "parentWidgetId": {
             "type": "string",
             "description": "Parent widget ID for nesting"
@@ -7054,6 +7323,36 @@
           },
           "visible": {
             "type": "boolean"
+          },
+          "constraints": {
+            "type": ["object", "null"],
+            "description": "Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds; omitted sub-fields are merged onto the widget's existing constraints. Pass null to clear all constraints (back to pure anchor/percentage layout).",
+            "properties": {
+              "offsetX": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on X (positive = right)"
+              },
+              "offsetY": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on Y (positive = down)"
+              },
+              "minWidth": {
+                "type": ["number", "null"],
+                "description": "Minimum width in px (>= 0), or null for unconstrained"
+              },
+              "maxWidth": {
+                "type": ["number", "null"],
+                "description": "Maximum width in px (>= 0), or null for unconstrained"
+              },
+              "minHeight": {
+                "type": ["number", "null"],
+                "description": "Minimum height in px (>= 0), or null for unconstrained"
+              },
+              "maxHeight": {
+                "type": ["number", "null"],
+                "description": "Maximum height in px (>= 0), or null for unconstrained"
+              }
+            }
           },
           "config": {
             "type": "object",
@@ -10385,6 +10684,63 @@
       "visibility": "public"
     },
     {
+      "name": "set_tile_collision_shape",
+      "description": "Author stored collision-shape metadata for one tilemap cell. These shapes do not affect play physics yet.",
+      "category": "tilemap",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Scene entity ID carrying the existing tilemap",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "layerIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based index of an existing tilemap layer",
+            "maximum": 4294967295
+          },
+          "x": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based column of an existing cell within the tilemap",
+            "maximum": 4294967295
+          },
+          "y": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based row of an existing cell within the tilemap",
+            "maximum": 4294967295
+          },
+          "shape": {
+            "type": "string",
+            "enum": [
+              "none",
+              "full",
+              "halfTop",
+              "halfBottom",
+              "slopeLeft",
+              "slopeRight"
+            ],
+            "description": "Stored silhouette for the cell: none (unauthored), full, halfTop, halfBottom, slopeLeft or slopeRight. Runtime colliders are not implemented."
+          }
+        },
+        "required": [
+          "entityId",
+          "layerIndex",
+          "x",
+          "y",
+          "shape"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "fill_tiles",
       "description": "Fill an inclusive rectangular range of one tilemap layer with a single tile",
       "category": "tilemap",
@@ -11728,6 +12084,79 @@
       "visibility": "internal"
     },
     {
+      "name": "capture_performance_report",
+      "description": "Start a timed, manifest-pinned performance capture of the running scene: a warm-up, then a capture window of animation-frame times (default 10 s + 60 s). Returns immediately with status 'pending' and a captureId; poll get_performance_report for progress and the finished report (p50/p95/p99 frame time, first-interactive time, memory availability, fixture checksum, build SHA, exact browser version, GPU, backend, viewport, cache state, sample count, and a pass/fail/unknown verdict per budget of the device profile). A metric the browser cannot measure is reported as 'unknown', never 0, and never passes a budget. Authoring changes, scene/project changes and engine restarts invalidate an active capture without publishing a report, even if Undo restores the scene. Keep the editor workload unchanged until completion. Refused while another capture runs or when the engine is not loaded. Same controls as the profiler's Run capture button.",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "warmupSeconds": {
+            "type": "integer",
+            "description": "Warm-up before measuring, whole seconds 0-60 (default 10). The frame-time budget is only judged on the profile protocol (10 s warm-up, 60 s capture)."
+          },
+          "captureSeconds": {
+            "type": "integer",
+            "description": "Capture window, whole seconds 5-300 (default 60)."
+          },
+          "profileId": {
+            "type": "string",
+            "description": "Device profile whose budgets judge the run, as id@version (default 'desktop@1': p95 frame time <= 16.7 ms, cold first interactive <= 5 s)."
+          },
+          "cacheState": {
+            "type": "string",
+            "enum": [
+              "warm",
+              "cold",
+              "unknown"
+            ],
+            "description": "Declare the asset-cache state of the run. Omit to detect it from the engine binary's resource timing (unknown when it cannot be told)."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "set_performance_baseline",
+      "description": "Pin a captured performance report as the baseline that compare_performance_reports uses by default (persisted in this browser), or clear the pin. Defaults to the latest report. Capturing never changes the pin, so a baseline pinned manually in the profiler survives later captures. Same as the profiler's Pin as baseline / Unpin baseline button.",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "description": "Report to pin (from get_performance_report). Defaults to the latest report of this session."
+          },
+          "clear": {
+            "type": "boolean",
+            "description": "Clear the pinned baseline instead of setting one."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "cancel_performance_capture",
+      "description": "Cancel the running performance capture. No report is kept. Errors when no capture is running. Same as the profiler's Cancel capture button.",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
       "name": "create_leaderboard",
       "description": "Define a leaderboard for the current published game. Leaderboards are identified by name and can be sorted highest-first (desc) or lowest-first (asc). Call this once per leaderboard during game setup.",
       "category": "publishing",
@@ -11756,11 +12185,11 @@
           },
           "minScore": {
             "type": "number",
-            "description": "Optional minimum score bound \u2014 submissions below this are rejected with 400"
+            "description": "Optional minimum score bound — submissions below this are rejected with 400"
           },
           "maxScore": {
             "type": "number",
-            "description": "Optional maximum score bound \u2014 submissions above this are rejected with 400 (useful for anti-cheat)"
+            "description": "Optional maximum score bound — submissions above this are rejected with 400 (useful for anti-cheat)"
           }
         },
         "required": [
@@ -11868,7 +12297,7 @@
     },
     {
       "name": "build_world",
-      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size \u2014 use sparingly.",
+      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size — use sparingly.",
       "category": "world_building",
       "parameters": {
         "type": "object",
@@ -12019,7 +12448,7 @@
         "properties": {
           "gameDescription": {
             "type": "string",
-            "description": "Natural language description of the game \u2014 genre, progression feel, player goals. Used to select and tune the economy. Example: 'A fast-paced roguelike where players collect souls and unlock meta-upgrades between runs.'"
+            "description": "Natural language description of the game — genre, progression feel, player goals. Used to select and tune the economy. Example: 'A fast-paced roguelike where players collect souls and unlock meta-upgrades between runs.'"
           },
           "preset": {
             "type": "string",
@@ -12059,7 +12488,7 @@
           },
           "duration": {
             "type": "number",
-            "description": "Desired total duration in seconds (1\u201360, default 10)"
+            "description": "Desired total duration in seconds (1–60, default 10)"
           }
         },
         "required": [
@@ -12132,6 +12561,459 @@
         },
         "required": [
           "cutsceneId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": true,
+      "visibility": "public"
+    },
+    {
+      "name": "get_joint_2d",
+      "description": "Query the 2D joint attached to an entity",
+      "category": "physics2d",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID whose 2D joint to read"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "list_joints_2d",
+      "description": "List every 2D joint in the scene",
+      "category": "physics2d",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "get_camera_2d",
+      "description": "Query the scene's 2D camera settings",
+      "category": "camera",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_add_track",
+      "description": "Add a track (lane) to the music arrangement editor. Manual/AI parity with the Music Arrangement panel.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Optional track name; auto-named 'Track N' when omitted"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_delete_track",
+      "description": "Delete a music arrangement track and every clip on it. Undoable in the arrangement editor.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Arrangement track id to delete"
+          }
+        },
+        "required": [
+          "trackId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_set_track_muted",
+      "description": "Mute or unmute a music arrangement track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Arrangement track id to mute or unmute"
+          },
+          "muted": {
+            "type": "boolean",
+            "description": "Whether the track is silenced in the arrangement"
+          }
+        },
+        "required": [
+          "trackId",
+          "muted"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_rename_track",
+      "description": "Rename a music arrangement track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Arrangement track id to rename"
+          },
+          "name": {
+            "type": "string",
+            "description": "New track name"
+          }
+        },
+        "required": [
+          "trackId",
+          "name"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_add_clip",
+      "description": "Place an imported or generated audio asset as a clip on a music arrangement track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Track to place the clip on"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "description": "Audio asset name/id the clip plays from"
+          },
+          "sourceDurationSeconds": {
+            "type": "number",
+            "description": "Full source length in seconds (the trim ceiling)"
+          },
+          "startOffset": {
+            "type": "number",
+            "description": "Seconds along the timeline where the clip begins (default 0)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional clip label; defaults to the source name"
+          }
+        },
+        "required": [
+          "trackId",
+          "sourceUrl",
+          "sourceDurationSeconds"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_move_clip",
+      "description": "Move a music arrangement clip along its timeline and optionally to another track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to move"
+          },
+          "startOffset": {
+            "type": "number",
+            "description": "New timeline position in seconds (clamped to >= 0)"
+          },
+          "trackId": {
+            "type": "string",
+            "description": "Optional target track id; ignored when the track is unknown"
+          }
+        },
+        "required": [
+          "clipId",
+          "startOffset"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_trim_clip",
+      "description": "Adjust a music arrangement clip's trimmed source window (clamped to legal bounds).",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to trim"
+          },
+          "trimStart": {
+            "type": "number",
+            "description": "Seconds into the source where playback starts"
+          },
+          "trimEnd": {
+            "type": "number",
+            "description": "Seconds into the source where playback ends"
+          }
+        },
+        "required": [
+          "clipId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_set_loop",
+      "description": "Toggle looping on a music arrangement clip and optionally set its loop window.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to update"
+          },
+          "loopEnabled": {
+            "type": "boolean",
+            "description": "Whether the trimmed window repeats to fill its duration"
+          },
+          "trimStart": {
+            "type": "number",
+            "description": "Optional loop-window start in seconds"
+          },
+          "trimEnd": {
+            "type": "number",
+            "description": "Optional loop-window end in seconds"
+          }
+        },
+        "required": [
+          "clipId",
+          "loopEnabled"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_delete_clip",
+      "description": "Delete a clip from the music arrangement. Undoable in the arrangement editor.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to delete"
+          }
+        },
+        "required": [
+          "clipId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_set_tempo",
+      "description": "Set the music arrangement tempo in beats per minute (clamped to 20-400).",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "bpm": {
+            "type": "number",
+            "description": "Tempo in BPM (20-400)"
+          }
+        },
+        "required": [
+          "bpm"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "validate_scene",
+      "description": "Validate a serialized .forge SceneFile with the engine decoder without applying or saving it. Internal checkpoint preflight.",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "json": {
+            "type": "string",
+            "description": "Complete serialized .forge SceneFile JSON"
+          }
+        },
+        "required": [
+          "json"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "create_checkpoint",
+      "description": "Save a named recovery checkpoint of the whole project (a restorable snapshot of every scene)",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Optional label for the checkpoint; defaults to a timestamp"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "list_checkpoints",
+      "description": "List saved recovery checkpoints for the current project, newest first",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "get_performance_report",
+      "description": "Read the latest (or a named) performance report and the capture status. While a capture runs the status carries its phase and progress (0-1); once finished the report carries the measurement manifest (build SHA, fixture checksum and id, OS, exact browser version, GPU, backend, viewport, device memory, cache state, sample count), p50/p95/p99 frame time, first-interactive time, memory availability, every budget's observed value, limit and pass/fail/unknown status, and the overall verdict. Values the browser could not measure are 'unknown'. Raw frame samples are omitted unless includeSamples is true.",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "description": "A report id from this session or the pinned baseline. Defaults to the latest report."
+          },
+          "includeSamples": {
+            "type": "boolean",
+            "description": "Include the raw frame-time samples (thousands of numbers). Default false: only their count."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "compare_performance_reports",
+      "description": "Compare a performance report (default: latest) with a baseline (default: pinned). Fixture checksum, exact browser version and backend must be known and equal; source, first-interactive timing basis, device profile and capture protocol must match. Hidden-tab captures and known warm-versus-cold cache states are incompatible: no deltas or directional claim. Unknown cache state on either side is an advisory and retains deltas; equal cache conditions are not established. Compatible reports return p50/p95/p99 and first-interactive deltas with improved, regressed, unchanged (within 5% on p95), or inconclusive.",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "description": "Report to compare. Defaults to the latest report."
+          },
+          "baselineReportId": {
+            "type": "string",
+            "description": "Report to compare against. Defaults to the pinned baseline."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "restore_checkpoint",
+      "description": "Restore a recovery checkpoint by ID, replacing the active project with its snapshot",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "checkpointId": {
+            "type": "string",
+            "description": "ID of the checkpoint to restore"
+          }
+        },
+        "required": [
+          "checkpointId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": true,
+      "visibility": "public"
+    },
+    {
+      "name": "delete_checkpoint",
+      "description": "Delete a saved recovery checkpoint by ID (missing IDs are a no-op)",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "checkpointId": {
+            "type": "string",
+            "description": "ID of the checkpoint to delete"
+          }
+        },
+        "required": [
+          "checkpointId"
         ]
       },
       "tokenCost": 0,

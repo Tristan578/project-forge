@@ -88,6 +88,10 @@ export function describeToolAction(
       return 'Replace the current project setup with a game built from a description';
     case 'start_from_idea':
       return `Replace the current scene with a new game scaffolded from ${quoted(input.title, 'an idea')}`;
+    case 'restore_checkpoint':
+      return `Discard the current project and restore checkpoint ${quoted(input.checkpointId, '')}`.trim();
+    case 'delete_checkpoint':
+      return `Permanently delete the recovery checkpoint ${quoted(input.checkpointId, '')}`.trim();
 
     // --- overwrites authored source --------------------------------------
     case 'set_script':

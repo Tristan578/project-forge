@@ -85,6 +85,23 @@ export const WASM_FETCH_TIMEOUT_MS = 60_000;
 export const ENGINE_GLOBAL_TIMEOUT_MS = 30_000;
 
 /**
+ * Per-origin deadline for the `/play` engine loader's GLUE import (#7580).
+ *
+ * `/play` tries the engine CDN and then same-origin. Each origin's glue import
+ * (a few KB) gets this budget so a CDN that stalls rather than fails still
+ * leaves time for the same-origin fallback: two of these fit under
+ * ENGINE_GLOBAL_TIMEOUT_MS. The ~23 MiB binary is NOT bounded per origin — it
+ * runs under the global budget alone, as it did before the CDN was tried
+ * first, so a slow-but-working link keeps the time it always had.
+ *
+ * The "two fit" arithmetic assumes the WebGPU adapter probe, which runs inside
+ * the same global budget with its own GPU_INIT_TIMEOUT_MS cap, answers
+ * promptly (it does on every browser measured); a probe that takes seconds
+ * eats the slack.
+ */
+export const PLAY_ENGINE_ORIGIN_TIMEOUT_MS = 12_000;
+
+/**
  * Deadline for the published-game metadata fetch on `/play`.
  *
  * Bounds the "Loading game..." spinner. Deliberately much shorter than the
@@ -100,6 +117,33 @@ export const PLAY_GAME_FETCH_TIMEOUT_MS = 15_000;
  * `play` command is meaningful.
  */
 export const PLAY_ENGINE_SETTLE_MS = 500;
+
+/**
+ * Longest `/play` waits for the engine to accept `load_scene` after
+ * `init_engine` (#10196).
+ *
+ * The engine's command queue exists only after the Bevy app's first update,
+ * which measured ~1.3 s on the reference machine; a command sent before that
+ * answers "PendingCommands resource not initialized". Well under
+ * `ENGINE_GLOBAL_TIMEOUT_MS`, and long enough for a slow integrated GPU.
+ */
+export const PLAY_SCENE_LOAD_TIMEOUT_MS = 10_000;
+
+/** Poll interval while `/play` waits for the engine to accept commands. */
+export const PLAY_SCENE_LOAD_RETRY_MS = 50;
+
+/**
+ * Longest an exported game waits for the engine to accept `load_scene`.
+ *
+ * The engine's command queue only exists after the Bevy app's first update
+ * (about 1.3 s after `init_engine` on the #10013 reference machine), so the
+ * exported loader retries the "not initialized" refusal until this deadline
+ * (`lib/export/sceneLoadFragment.ts`).
+ */
+export const EXPORTED_SCENE_LOAD_TIMEOUT_MS = 30_000;
+
+/** Poll interval of that wait. */
+export const EXPORTED_SCENE_LOAD_RETRY_MS = 50;
 
 // ---------------------------------------------------------------------------
 // API / Server timeouts
@@ -277,6 +321,14 @@ export const TIP_COOLDOWN_MS = 30_000;
 /** Feature gating error TTL */
 export const ERROR_TTL_MS = 30_000;
 
+/**
+ * Feature gating success TTL (#9725). The capabilities body is per-user (BYOK),
+ * so a session-long client cache would keep serving the previous user's
+ * availability after a sign-out/sign-in. Matches the route's
+ * `Cache-Control: private, max-age=60`.
+ */
+export const CAPABILITIES_TTL_MS = 60_000;
+
 /** Health endpoint cache TTL */
 export const HEALTH_CACHE_TTL_MS = 30_000;
 
@@ -285,6 +337,25 @@ export const BRIDGE_CACHE_TTL_MS = 60_000;
 
 /** Docs index empty-response cache TTL */
 export const DOCS_EMPTY_CACHE_TTL_MS = 30_000;
+
+// ---------------------------------------------------------------------------
+// Confirmed engine effects (#9899, operation family ai.FR-1.OP-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * How long `observeEngineEffect` keeps querying the engine for a spawn/transform
+ * to appear before returning `timed-out`. The #9899 acceptance criteria pin the
+ * negative case to a 5-second observation deadline.
+ */
+export const ENGINE_EFFECT_OBSERVATION_DEADLINE_MS = 5_000;
+
+/**
+ * Gap between engine queries while observing a pending effect. Small enough that
+ * the confirmed half of the response lands promptly once the deferred command
+ * applies, but not so tight that it spins the event loop — each poll fires one
+ * `get_entity_details` and the engine needs a frame to answer it.
+ */
+export const ENGINE_EFFECT_POLL_INTERVAL_MS = 50;
 
 // ---------------------------------------------------------------------------
 // Circuit breaker timing

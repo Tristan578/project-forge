@@ -1,22 +1,22 @@
 ---
 title: Known Limitations & Workarounds
 description: What SpawnForge can and can't do today, with workarounds for common gaps
-lastUpdated: 2026-03-16
+lastUpdated: 2026-09-15
 relatedFiles:
   - docs/known-limitations.md
 ---
 
 # Known Limitations & Workarounds
 
-SpawnForge is feature-complete for most game creation workflows. This guide covers the few areas with genuine constraints and how to work around them.
+SpawnForge has implemented feature areas with different levels of verification and completeness. This guide describes known gaps and available workarounds.
 
-## What's Fully Working
+## Implemented feature areas
 
-These features are complete, tested, and production-ready:
+These areas have implementations; the capability matrix records their current workflow status.
 
 - **2D Engine**: Sprites, tilemaps, 2D physics (Rapier2D), joints, sprite animation, camera
 - **3D Engine**: PBR materials, skeletal animation, physics (Rapier3D), particles, terrain, CSG, LOD
-- **AI Creation**: 322 MCP commands, natural language chat, compound actions, asset generation
+- **AI Creation**: 383 registered MCP commands, natural language chat, compound actions, asset generation (3D models, textures, sound effects, voice; music generation is not available yet, see limitation 6)
 - **Audio**: Spatial audio, bus mixer, reverb zones, adaptive music, snapshots
 - **Scripting**: TypeScript + visual scripting with 73 node types
 - **Export**: HTML5 bundles, cloud publishing, mobile touch controls
@@ -52,6 +52,12 @@ These features are complete, tested, and production-ready:
 **What's missing**: The editor itself is not optimized for mobile screens (no touch-based entity manipulation).
 **Workaround**: Use a tablet in landscape mode for light editing. Full editing requires desktop/laptop.
 
+### 6. Music Generation — Not Available Yet
+**What works**: Sound effects and voice lines generate normally; music you upload yourself plays through the same audio system (buses, spatial audio, adaptive stems).
+**What's missing**: The Generate Music dialog, the Asset panel's "Generate Music" item, the Audio inspector's Music button, the `generate_music` command and `forge.ai.generateMusic` all show an explicit unavailable state while the music provider is replaced. Nothing is charged.
+**Workaround**: Upload a track from the Asset panel, or generate a sound effect and loop it.
+**Timeline**: Tracked in known-limitations.md (music generation entry); returns when the new provider is wired.
+
 ## Performance Targets
 
 | Scenario | Target | Current |
@@ -67,3 +73,7 @@ These features are complete, tested, and production-ready:
 - **Native mobile app export**: Focus is browser-first. PWA + touch controls cover mobile play. Native stores add review delays and 30% revenue cut.
 - **VR/AR support**: WebXR is promising but the ecosystem isn't mature enough for a game creation tool. Revisiting in 2027.
 - **MMO networking**: Real-time multiplayer is deferred. The architecture supports it (async channels, entity IDs), but the infrastructure investment is significant.
+
+## Linked prefab editing
+
+Flat prefab copies remain available. The saved-link inspector shows metadata only. Linked scene placement, nested entity creation and propagation are unavailable, with disabled UI controls and explicit command errors. Engine integration remains on [#9811](https://github.com/Tristan578/project-forge/issues/9811).

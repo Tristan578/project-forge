@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
 import { DOCS_URL } from '../lib/site';
 import { hasValidClerkKey } from '../lib/clerk';
+import { DOCS_COMMIT_META_NAME, commitStampOf } from '../lib/commit';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,14 +14,24 @@ export const metadata: Metadata = {
     default: 'SpawnForge Documentation',
     template: '%s | SpawnForge Docs',
   },
+  // Count-free on purpose: the previous "350 commands across 41 categories"
+  // was a hard-coded number nothing compared against the manifest, and it
+  // rotted. The measured count lives in the pages that read the manifest and
+  // in docs/capability-matrix.md, which a test pins (#9720).
   description:
-    'API reference, MCP command documentation, and getting started guides for SpawnForge — the AI-powered game creation platform. 350 commands across 41 categories.',
+    'API reference, MCP command documentation, a per-entry-point capability matrix, and getting started guides for SpawnForge — the AI-powered game creation platform.',
   openGraph: {
     title: 'SpawnForge Documentation',
     description:
       'MCP command reference and API docs for SpawnForge — the AI-native browser game engine.',
     siteName: 'SpawnForge Docs',
     type: 'website',
+  },
+  // The deployed commit, so scripts/post-deploy-docs-check.sh can prove the
+  // production alias is serving THIS build and not the previous one. See
+  // lib/commit.ts; pinned by app/__tests__/layout-commit-stamp.test.ts.
+  other: {
+    [DOCS_COMMIT_META_NAME]: commitStampOf(process.env),
   },
 };
 

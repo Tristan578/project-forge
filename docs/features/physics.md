@@ -66,9 +66,6 @@ forge.physics.applyForce(entityId, 0, 10, 0);
 
 // Apply instant impulse (one-time push)
 forge.physics.applyImpulse(entityId, 0, 5, 0);
-
-// Set velocity directly
-forge.physics.setVelocity(entityId, 0, 0, -5);
 ```
 
 ## Debug Visualization

@@ -2,7 +2,8 @@
   "mcpServers": {
     "context7": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
+      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "alwaysLoad": true
     },
     "neon": {
       "command": "npx",
@@ -15,9 +16,12 @@
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
     },
-    "github": {
+    "github-local": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"]
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
     },
     "sentry": {
       "command": "npx",
@@ -42,6 +46,10 @@
         "UPSTASH_REDIS_REST_URL": "${UPSTASH_REDIS_REST_URL}",
         "UPSTASH_REDIS_REST_TOKEN": "${UPSTASH_REDIS_REST_TOKEN}"
       }
+    },
+    "taskboard": {
+      "command": "git",
+      "args": ["-c", "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs", "spawnforge-taskboard", "mcp"]
     }
   }
 }

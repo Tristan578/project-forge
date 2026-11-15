@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 // Mock the editor store module
@@ -20,9 +20,26 @@ vi.mock('@/lib/audio/entityAudioGraph', () => ({
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
-import { releaseEntityAudio } from '@/lib/audio/entityAudioGraph';
+import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/entityAudioGraph';
 import { handleTransformEvent } from '../transformEvents';
+import * as autoSave from '@/lib/storage/autoSave';
+import { CHECKPOINT_EXPORT_PREFIX, SCENE_LOADED_EVENT } from '@/lib/scenes/checkpointRecovery';
+import { SCENE_EXPORTED_EVENT } from '@/lib/engine/sceneExportWire';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+import { createSceneTestStore } from '@/stores/slices/__tests__/sceneSliceTestStore';
+import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
+import { createCheckpoint, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { projectFixture, sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
+import {
+  readEntityObservation,
+  clearEntityObservations,
+} from '@/lib/game-creation/engineObservation';
+import {
+  savePrefabInstancesToStorage,
+  stagePrefabInstancesForExport,
+  savePrefab,
+} from '@/lib/prefabs/prefabStore';
 
 describe('handleTransformEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -43,6 +60,27 @@ describe('handleTransformEvent', () => {
       mockSetGet.get
     );
     expect(result).toBe(false);
+  });
+
+  // #9899: the answer to a `get_entity_details` query lands here and feeds the
+  // confirmed-effect cache the orchestrator's `observeEntity` reads.
+  describe('QUERY_ENTITY_DETAILS', () => {
+    beforeEach(() => clearEntityObservations());
+
+    it('records the queried entity into the observation cache and consumes the event', () => {
+      const result = handleTransformEvent(
+        'QUERY_ENTITY_DETAILS',
+        { entityId: 'crate-1', position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(readEntityObservation('crate-1')).toEqual({
+        entityId: 'crate-1',
+        transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+    });
   });
 
   describe('SELECTION_CHANGED', () => {
@@ -607,6 +645,33 @@ describe('handleTransformEvent', () => {
   });
 
   describe('SCENE_EXPORTED', () => {
+    it('forwards checkpoint exports without overwriting recovery or autosave state', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as unknown as StoreState);
+      localStorage.setItem('forge:autosave', 'previous autosave');
+      sessionStorage.setItem('forge:scene-last-json', 'previous recovery');
+      const storageWrite = vi.spyOn(Storage.prototype, 'setItem');
+      const cacheWrite = vi.spyOn(autoSave, 'setLastExportedScene');
+      const receive = vi.fn();
+      window.addEventListener(SCENE_EXPORTED_EVENT, receive);
+      const payload = { json: '{"entities":[]}', name: 'Recovery candidate', requestId: CHECKPOINT_EXPORT_PREFIX + 'capture-42' };
+      try {
+        expect(handleTransformEvent('SCENE_EXPORTED', payload, mockSetGet.set, mockSetGet.get)).toBe(true);
+        expect(receive).toHaveBeenCalledTimes(1);
+        expect(receive).toHaveBeenCalledWith(expect.objectContaining({ detail: payload }));
+        expect(storageWrite).not.toHaveBeenCalled();
+        expect(cacheWrite).not.toHaveBeenCalled();
+        expect(useEditorStore.setState).not.toHaveBeenCalled();
+        expect(localStorage.getItem('forge:autosave')).toBe('previous autosave');
+        expect(sessionStorage.getItem('forge:scene-last-json')).toBe('previous recovery');
+      } finally {
+        window.removeEventListener(SCENE_EXPORTED_EVENT, receive);
+        storageWrite.mockRestore();
+        cacheWrite.mockRestore();
+        localStorage.clear();
+        sessionStorage.clear();
+      }
+    });
+
     it('dispatches forge:scene-exported DOM event', () => {
       const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
@@ -794,12 +859,334 @@ describe('handleTransformEvent', () => {
         configurable: true,
       });
     });
+
+    // scene.FR-1 N1: linked prefab instances live in the prefab store, not the
+    // ECS, so the engine's raw export knows nothing about them. This is the
+    // single choke point every persistence consumer (autosave, panic
+    // recovery, and every `forge:scene-exported` DOM listener) goes through —
+    // folding here, once, means recovering ANY of them keeps the instances.
+    describe('prefab-instance fold (scene.FR-1 N1)', () => {
+      beforeEach(() => {
+        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
+      });
+
+      it('folds the live registry into the JSON every downstream consumer receives', () => {
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_1', prefabId: 'src', overrides: { name: 'X' } }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const detail = (call?.[0] as CustomEvent).detail as { json: string };
+        const parsed = JSON.parse(detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_1', prefabId: 'src', overrides: { name: 'X' } }]);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('leaves the JSON untouched when the registry is empty', () => {
+        savePrefabInstancesToStorage([]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+        const rawJson = '{"formatVersion":1,"sceneName":"S","entities":[]}';
+
+        handleTransformEvent('SCENE_EXPORTED', { json: rawJson, name: 'S' }, mockSetGet.set, mockSetGet.get);
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        expect((call?.[0] as CustomEvent).detail).toMatchObject({ json: rawJson });
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('embeds the transitive prefab DEFINITIONS the instances link to (portability)', () => {
+        const source = savePrefab('Source', 'cat', '', {
+          entityType: 'cube', name: 'Source', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        });
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_1', prefabId: source.id, overrides: {} }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabDefinitions).toHaveLength(1);
+        expect(parsed.prefabDefinitions[0].id).toBe(source.id);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('prefers the registry STAGED at request time over the live one (race fix)', () => {
+        // The user requested this export while instance A was active, then
+        // (before the answer arrived) loaded a different scene, overwriting
+        // the LIVE registry with instance B. The fold must reflect A.
+        stagePrefabInstancesForExport('req-race', [{ instanceId: 'pfi_A', prefabId: 'a', overrides: {} }]);
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_B', prefabId: 'b', overrides: {} }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S', requestId: 'req-race' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_A', prefabId: 'a', overrides: {} }]);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('falls back to the live registry for an uncorrelated export (nothing staged)', () => {
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_live', prefabId: 'live', overrides: {} }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S' }, // no requestId
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_live', prefabId: 'live', overrides: {} }]);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('take-once: a second export with the same requestId falls back to the live registry', () => {
+        stagePrefabInstancesForExport('req-once', [{ instanceId: 'pfi_A', prefabId: 'a', overrides: {} }]);
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_B', prefabId: 'b', overrides: {} }]);
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S', requestId: 'req-once' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S', requestId: 'req-once' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_B', prefabId: 'b', overrides: {} }]);
+
+        dispatchSpy.mockRestore();
+      });
+    });
+
+    // #9998: the completion mode is frontend-only, so the engine export never
+    // carries it. This handler is the one choke point every persistence
+    // consumer reads — the `.forge` download and the cloud PUT (both
+    // `forge:scene-exported` listeners), localStorage autosave, the IndexedDB
+    // cache and the panic backup — so the fold happens here, once.
+    describe('completion-mode fold (#9998)', () => {
+      const RAW = '{"formatVersion":3,"sceneName":"S","entities":[]}';
+
+      function exportWith(completionMode: string | undefined, requestId?: string) {
+        savePrefabInstancesToStorage([]);
+        vi.mocked(useEditorStore.getState).mockReturnValue({
+          ...actions,
+          autoSaveEnabled: true,
+          sceneGraph: { nodes: {}, rootIds: [], completionMode },
+        } as unknown as StoreState);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+        const cacheWrite = vi.spyOn(autoSave, 'setLastExportedScene');
+        try {
+          handleTransformEvent('SCENE_EXPORTED', { json: RAW, name: 'S', requestId }, mockSetGet.set, mockSetGet.get);
+          const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === SCENE_EXPORTED_EVENT);
+          return {
+            detailJson: ((call?.[0] as CustomEvent).detail as { json: string }).json,
+            cachedJson: cacheWrite.mock.calls[0]?.[0],
+          };
+        } finally {
+          dispatchSpy.mockRestore();
+          cacheWrite.mockRestore();
+        }
+      }
+
+      afterEach(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
+
+      it.each(['win', 'endless', 'sandbox', 'narrative'])(
+        'writes the live %s mode into every consumer of the export',
+        (mode) => {
+          const { detailJson, cachedJson } = exportWith(mode);
+
+          expect(JSON.parse(detailJson).completionMode).toBe(mode);
+          expect(JSON.parse(cachedJson ?? '{}').completionMode).toBe(mode);
+          expect(JSON.parse(localStorage.getItem('forge:autosave') ?? '{}').completionMode).toBe(mode);
+          expect(JSON.parse(sessionStorage.getItem('forge:scene-last-json') ?? '{}').completionMode).toBe(mode);
+        },
+      );
+
+      it('leaves a scene whose mode was never chosen byte-identical (legacy resave)', () => {
+        const { detailJson } = exportWith(undefined);
+
+        expect(detailJson).toBe(RAW);
+        expect(localStorage.getItem('forge:autosave')).toBe(RAW);
+      });
+
+      it('does not touch a checkpoint read-back, which callers compare against the engine', () => {
+        const { detailJson } = exportWith('sandbox', `${CHECKPOINT_EXPORT_PREFIX}read-1`);
+
+        expect(detailJson).toBe(RAW);
+      });
+    });
   });
 
   describe('SCENE_LOADED', () => {
     beforeEach(() => {
       clearStagedSceneAudio();
+      takeStagedSceneCompletionMode();
     });
+
+    it('notifies checkpoint recovery only after scene metadata and audio are adopted', () => {
+      stageSceneAudio(JSON.stringify({
+        entities: [{ entityId: 'speaker', audioData: { assetId: 'incoming-audio', bus: 'music' } }],
+      }));
+      const receive = vi.fn(() => ({
+        stateWrites: [...vi.mocked(useEditorStore.setState).mock.calls],
+        audioReset: vi.mocked(resetEntityAudioGraphForScene).mock.calls.length,
+      }));
+      window.addEventListener(SCENE_LOADED_EVENT, receive);
+      try {
+        expect(handleTransformEvent('SCENE_LOADED', { name: 'Confirmed scene' }, mockSetGet.set, mockSetGet.get)).toBe(true);
+        expect(receive).toHaveBeenCalledTimes(1);
+        expect(receive.mock.results[0].value).toEqual({
+          stateWrites: [[expect.objectContaining({
+            sceneName: 'Confirmed scene',
+            sceneModified: false,
+            entityAudio: { speaker: expect.objectContaining({ assetId: 'incoming-audio', bus: 'music' }) },
+          })]],
+          audioReset: 1,
+        });
+      } finally {
+        window.removeEventListener(SCENE_LOADED_EVENT, receive);
+      }
+    });
+
+    it.each([
+      ['load_scene', 'reject'], ['new_scene', 'reject'],
+      ['load_scene', 'throw'], ['new_scene', 'throw'], ['load_scene', 'accept'],
+    ] as const)('preserves delayed recovery audio after competing %s %s', async (command, failure) => {
+      if (failure === 'accept') vi.useFakeTimers();
+      const store = createSceneTestStore().store;
+      let current = sceneFixture('Previous');
+      let queued: typeof current | null = null;
+      let rejectNext = false;
+      setSceneDispatcher((name, payload) => {
+        if (name === 'validate_scene') return { success: true };
+        if (rejectNext && name === command && failure !== 'accept') {
+          rejectNext = false;
+          if (failure === 'throw') throw new Error('Transport refused');
+          return { success: false, error: 'Refused' };
+        }
+        if (name === 'export_scene') {
+          const { requestId } = payload as { requestId: string };
+          queueMicrotask(() => handleTransformEvent('SCENE_EXPORTED', {
+            json: JSON.stringify(current), name: current.metadata?.name, requestId,
+          }, mockSetGet.set, mockSetGet.get));
+        }
+        if (name === 'load_scene') queued = JSON.parse((payload as { json: string }).json);
+        return { success: true };
+      });
+      try {
+        saveProjectScenes(projectFixture('Previous'));
+        const project = projectFixture('Recovered audio');
+        project.scenes[0].data!.entities.push({
+          entityId: 'speaker', entityType: 'cube', name: 'Speaker', visible: true, parentId: null,
+          transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+          audioData: { assetId: 'checkpoint-audio', bus: 'music', volume: 1, pitch: 1,
+            loopAudio: false, spatial: false, maxDistance: 50, refDistance: 1, rolloffFactor: 1, autoplay: false },
+        });
+        const checkpoint = createCheckpoint(project).checkpoint;
+        const recovery = store.getState().restoreCheckpoint(checkpoint.id);
+        for (let i = 0; i < 10 && queued === null; i++) await Promise.resolve();
+        expect(queued).not.toBeNull();
+        rejectNext = true;
+        const newer = structuredClone(project.scenes[0].data!);
+        newer.metadata = { ...newer.metadata, name: 'Newer scene' };
+        (newer.entities[0] as { audioData: { assetId: string } }).audioData.assetId = 'newer-audio';
+        const compete = () => command === 'load_scene'
+          ? store.getState().loadScene(JSON.stringify(failure === 'accept' ? newer : sceneFixture('Rejected')))
+          : store.getState().newScene();
+        if (failure === 'throw') expect(compete).toThrow('Transport refused');
+        else compete();
+        if (failure === 'accept') {
+          // Recovery times out before the newer accepted scene finishes loading.
+          await vi.advanceTimersByTimeAsync(10000);
+          await expect(recovery).resolves.toBe(false);
+        }
+        current = queued!;
+        handleTransformEvent('SCENE_LOADED', { name: current.metadata?.name }, mockSetGet.set, mockSetGet.get);
+        if (failure !== 'accept') await expect(recovery).resolves.toBe(true);
+        expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+          entityAudio: { speaker: expect.objectContaining({ assetId: failure === 'accept' ? 'newer-audio' : 'checkpoint-audio', bus: 'music' }) },
+        }));
+      } finally {
+        setSceneDispatcher(null);
+        clearStagedSceneAudio();
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(['missing checkpoint', 'capture rejected', 'load rejected'] as const)(
+      'preserves a pending scene audio map when recovery fails with %s', async (failure) => {
+        const store = createSceneTestStore().store;
+        const incoming = sceneFixture('Pending scene');
+        incoming.entities.push({
+          entityId: 'speaker', entityType: 'cube', name: 'Speaker', visible: true, parentId: null,
+          transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+          audioData: { assetId: 'pending-audio', bus: 'music', volume: 1, pitch: 1,
+            loopAudio: false, spatial: false, maxDistance: 50, refDistance: 1, rolloffFactor: 1, autoplay: false },
+        });
+        let loads = 0;
+        setSceneDispatcher((command, payload) => {
+          if (command === 'validate_scene') return { success: true };
+          if (command === 'load_scene') return { success: ++loads === 1 };
+          if (command === 'export_scene') {
+            if (failure === 'capture rejected') return { success: false };
+            const { requestId } = payload as { requestId: string };
+            queueMicrotask(() => handleTransformEvent('SCENE_EXPORTED', {
+              json: JSON.stringify(incoming), name: 'Pending scene', requestId,
+            }, mockSetGet.set, mockSetGet.get));
+          }
+          return { success: true };
+        });
+        try {
+          const checkpoint = createCheckpoint(projectFixture('Rejected recovery')).checkpoint;
+          expect(store.getState().loadScene(JSON.stringify(incoming))).toBe(true);
+          await expect(store.getState().restoreCheckpoint(
+            failure === 'missing checkpoint' ? 'missing-checkpoint' : checkpoint.id,
+          )).resolves.toBe(false);
+          handleTransformEvent('SCENE_LOADED', { name: 'Pending scene' }, mockSetGet.set, mockSetGet.get);
+          expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+            entityAudio: { speaker: expect.objectContaining({ assetId: 'pending-audio' }) },
+          }));
+        } finally {
+          setSceneDispatcher(null);
+          clearStagedSceneAudio();
+        }
+      },
+    );
 
     it('resets scene state via setState', () => {
       const payload = { name: 'LoadedScene' };
@@ -823,6 +1210,58 @@ describe('handleTransformEvent', () => {
         // Nothing staged — a new_scene, or a load whose JSON declared no audio.
         // The outgoing scene's ids are meaningless either way.
         entityAudio: {},
+        // completionMode gating (idea.FR-1.OP-04 / #9901): SCENE_LOADED is the
+        // scene-replacement boundary, so it must clear a leftover mode rather
+        // than let setFullGraph's preserve-across-rebuilds fallback carry the
+        // OUTGOING scene's mode into the incoming one. Nothing was staged, so
+        // the incoming scene is legacy `win` (#9998).
+        sceneGraph: { completionMode: undefined },
+        // The outgoing scene's mode edits are not undo steps in this one.
+        completionModeHistory: { past: [], future: [] },
+      });
+    });
+
+    // #9998: the incoming scene's own mode arrives through the same boundary
+    // that clears the outgoing one — staged by `dispatchSceneLoad`/`newScene`,
+    // taken here. Writing it any earlier would be wiped by this very handler.
+    it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
+      'adopts the %s mode the loading scene declared',
+      (mode) => {
+        vi.mocked(useEditorStore.getState).mockReturnValue({
+          ...actions,
+          sceneGraph: { nodes: {}, rootIds: [], completionMode: 'narrative' },
+        } as unknown as StoreState);
+        stageSceneCompletionMode(mode);
+
+        handleTransformEvent('SCENE_LOADED', { name: 'Reopened' }, mockSetGet.set, mockSetGet.get);
+
+        expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({
+          sceneGraph: { completionMode: mode },
+          completionModeHistory: { past: [], future: [] },
+        });
+      },
+    );
+
+    it('does not hand the same staged mode to a second load', () => {
+      stageSceneCompletionMode('sandbox');
+
+      handleTransformEvent('SCENE_LOADED', { name: 'First' }, mockSetGet.set, mockSetGet.get);
+      handleTransformEvent('SCENE_LOADED', { name: 'Second' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({ sceneGraph: { completionMode: 'sandbox' } });
+      expect(vi.mocked(useEditorStore.setState).mock.calls[1][0]).toMatchObject({ sceneGraph: { completionMode: undefined } });
+    });
+
+    it('clears a leftover completionMode so the incoming scene starts from the legacy default', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: {}, rootIds: [], completionMode: 'sandbox' },
+      } as unknown as StoreState);
+
+      handleTransformEvent('SCENE_LOADED', { name: 'NextScene' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({
+        sceneGraph: { completionMode: undefined },
       });
     });
 

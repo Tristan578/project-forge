@@ -78,12 +78,20 @@ jobs:
     steps:
       # checkout is required so setup-node can read .node-version from the workspace
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Instant Rollback, not `vercel promote`: with Rolling Releases enabled a
       # promote of the old build starts a staged rollout of it when nothing is
@@ -151,7 +159,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -176,7 +184,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -201,13 +209,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
       - run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
@@ -260,12 +277,27 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
 
       - run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      # vitest does not type-check. Without this step, mcp-server's tsconfig
+      # (strict + exactOptionalPropertyTypes, #7592) is enforced only by
+      # whoever remembers to run tsc by hand.
+      - run: npx tsc --noEmit
+        working-directory: mcp-server
 
       - run: npx vitest run
         working-directory: mcp-server
@@ -305,22 +337,16 @@ jobs:
         run: bash scripts/ci-tree-already-validated.sh
   # Keep main's WebGL2 engine cache warm for CI's engine-smoke gate (#9574).
   #
-  # The save inside build-wasm is not enough on its own: that job is gated on
-  # engine-changed, and measured across the last 12 CD runs it ran ONCE and
-  # skipped eleven times. So a cache seeded only there would be absent right
-  # after this lands and would stay absent until an engine change happened to
-  # merge -- every PR in between restoring nothing and rebuilding for no
-  # benefit. The feature would look installed and do nothing.
+  # build-wasm runs for engine changes, web changes, and manual dispatch.
+  # This complementary job keeps the WebGL2 cache warm on the remaining main
+  # pushes, including documentation-only merges. It restores the entry and
+  # compiles only when the cache was genuinely evicted or never populated.
+  # The two jobs never build the same cold key concurrently.
   #
-  # This job runs on every push to main and is a no-op on a hit: restore, and
-  # build only when the entry is genuinely missing. Cost is a checkout plus a
-  # cache probe (~15s) against the ~5 min it saves each PR that would otherwise
-  # rebuild. It also covers eviction -- GitHub drops caches untouched for 7 days,
-  # and while PR restores normally keep this one alive, an engine-quiet stretch
-  # would otherwise lose it with nothing to rewrite it.
+  # Cache probes cost about15s; a cold WebGL2 build costs about5minutes.
+  # GitHub evicts entries untouched for7days, so covering every main push
+  # avoids an unnecessary rebuild in the next PR engine-smoke gate.
   #
-  # Deliberately NOT in any deploy job's needs: this is a cache warmer. If it
-  # fails, PRs rebuild exactly as they do today and nothing else changes.
   publish-engine-cache:
     name: Publish Engine Cache
     runs-on: ubuntu-latest
@@ -341,7 +367,7 @@ jobs:
     # and build the engine CONCURRENTLY, paying for the expensive build twice on
     # exactly the pushes that are already the slowest.
     needs: [check-changes]
-    if: needs.check-changes.outputs.engine-changed != 'true' && github.event_name != 'workflow_dispatch'
+    if: needs.check-changes.outputs.engine-changed != 'true' && needs.check-changes.outputs.web-changed != 'true' && github.event_name != 'workflow_dispatch'
     permissions:
       contents: read
     steps:
@@ -372,9 +398,15 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install wasm-bindgen-cli
+      - name: Cache wasm-bindgen CLI
         if: steps.engine-cache.outputs.cache-hit != 'true'
-        run: cargo install wasm-bindgen-cli --version 0.2.127
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
+      - name: Install verified wasm-bindgen CLI
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-wasm-bindgen-cli.sh
 
       # Byte-identical to the build in build-wasm and in ci.yml's engine-smoke.
       # If these three ever diverge the key stops describing the artifact.
@@ -421,10 +453,12 @@ jobs:
           # Default web=true so the deploy pipeline is not silently skipped.
           if [ -z "$CHANGED" ]; then
             echo "::warning::git diff returned empty output -- defaulting web=true engine=false"
-            echo "engine=false" >> "$GITHUB_OUTPUT"
-            echo "web=true" >> "$GITHUB_OUTPUT"
-            echo "docs-changed=false" >> "$GITHUB_OUTPUT"
-            echo "design-changed=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "engine=false"
+              echo "web=true"
+              echo "docs-changed=false"
+              echo "design-changed=false"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -435,7 +469,9 @@ jobs:
           # the stale engine -- while scripts/engine-wasm-cache-key.sh, which
           # correctly includes the fork tree, produced a new key and rebuilt.
           # CI would then test a binary users never received.
-          if echo "$CHANGED" | grep -qE '^engine/|^[.]transform-gizmo-fork/'; then
+          # The all4 key includes this CD recipe. Recipe-only edits must build
+          # and deploy the web app so its engine prefix selects the new binaries.
+          if echo "$CHANGED" | grep -qE '^engine/|^[.]transform-gizmo-fork/|^[.]github/workflows/cd[.]yml$'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
             echo "Engine files changed -- WASM build required"
           else
@@ -443,7 +479,7 @@ jobs:
             echo "No engine changes -- skipping WASM build"
           fi
 
-          if echo "$CHANGED" | grep -qE '^web/|^package\.json|^\.github/'; then
+          if echo "$CHANGED" | grep -qE '^web/|^packages/|^engine/|^[.]transform-gizmo-fork/|^[.]github/workflows/cd[.]yml$|^scripts/|^(package(-lock)?\.json|turbo\.json|tsconfig\.json|[.]node-version|[.]nvmrc)$'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
             echo "Web files changed -- deploy required"
           else
@@ -451,14 +487,16 @@ jobs:
             echo "No web changes -- skipping deploy"
           fi
 
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && echo "docs-changed=true" >> "$GITHUB_OUTPUT" || echo "docs-changed=false" >> "$GITHUB_OUTPUT"
-          echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && echo "design-changed=true" >> "$GITHUB_OUTPUT" || echo "design-changed=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && echo "docs-changed=true" || echo "docs-changed=false"
+            echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && echo "design-changed=true" || echo "design-changed=false"
 
-          # Expose changed web file list for schema-change gating
-          WEB_FILES=$(echo "$CHANGED" | grep '^web/' || true)
-          echo "web-changed-files<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$WEB_FILES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+            # Expose changed web file list for schema-change gating
+            WEB_FILES=$(echo "$CHANGED" | grep '^web/' || true)
+            echo "web-changed-files<<EOF"
+            echo "$WEB_FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   check-deployment-drift:
     name: Detect Deployment Drift
@@ -501,32 +539,145 @@ jobs:
     name: WASM Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Every web deployment needs a current-run artifact for its same-origin
+    # fallback. An exact all4 cache hit, or a PR CI artifact whose key matches
+    # this tree exactly, skips compilation; anything else rebuilds visibly.
     needs: [check-changes]
-    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || needs.check-changes.outputs.web-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
+      # Read the merged PR, and list and download ANOTHER run's artifacts (the
+      # PR's CI run). download-artifact with run-id fails without actions: read.
+      pull-requests: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # TWO CONTENT-ADDRESSED WAYS TO SKIP THE BUILD (#9525), tried in order.
+      #
+      # 1. The all4 cache: this workflow's own four variants, saved under a key
+      #    over engine/ + .transform-gizmo-fork/ + the wasm-bindgen version +
+      #    this CD workflow recipe. It hits on a CD re-run, a dispatch, a
+      #    web-only merge, or a return to an engine tree already built on main.
+      #    It cannot hit on the first CD run after an ENGINE merge: that tree is
+      #    new to main, and a cache saved from a PR branch is invisible here.
+      #
+      # 2. The PR's own CI artifact, which covers exactly that first run. The
+      #    merged PR's CI run built the same four variants on its merge ref and
+      #    uploaded them, BEFORE wasm-opt, as `wasm-binaries-cd-reuse` together
+      #    with their ci-reuse key. The resolver finds that run from the "(#N)"
+      #    squash subject, once the PR's own record shows it merged AS this
+      #    commit, downloads the artifact from it, and adopts it only when the
+      #    recorded key equals the ci-reuse key recomputed here.
+      #
+      # Both are CONTENT-ADDRESSED, never SHA-addressed: the repo is squash-only,
+      # so main's SHA is new to every CI run, and the squashed tree matches what
+      # the PR built only if nothing that feeds the build landed on main in
+      # between. When something did, the keys differ and this job builds. Keys
+      # come from the SAME scripts/engine-wasm-cache-key.sh that ci.yml and
+      # publish-engine-cache use.
+      #
+      # This replaces a `download-artifact` step named "Try downloading WASM
+      # from CI (same SHA)" that passed no run-id and no github-token, so it
+      # could only ever see the CURRENT run's artifacts, of which build-wasm,
+      # the first job to build, has none. It failed on every run and
+      # `continue-on-error: true` reported that failure as success, so the reuse
+      # never happened (owner's diagnosis, #9525 comment thread). Nothing below
+      # carries continue-on-error: a restore or download that throws fails the
+      # job, and every ordinary "no reuse" answer is a ::notice:: naming why.
+      #
+      # `all4` gives a distinct key prefix so this four-path entry cannot collide
+      # with the single-path webgl2 entry engine-smoke restores: actions/cache
+      # segments a cache by (key, hash(paths)), so mixing path lists under one
+      # key makes the other caller's restore silently miss.
+      - name: Resolve the 4-variant engine cache key
+        id: engine-key-all4
+        run: |
+          key="$(bash scripts/engine-wasm-cache-key.sh all4)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Engine WASM (all 4 variants) cache key: $key"
+
+      - name: Restore all 4 WASM variants from content-addressed cache
+        id: engine-cache-all4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            engine/pkg-webgl2
+            engine/pkg-webgpu
+            engine/pkg-webgl2-runtime
+            engine/pkg-webgpu-runtime
+          key: ${{ steps.engine-key-all4.outputs.key }}
+
+      # Tier 2, only on an all4 miss. The resolver answers `run-id=` (with a
+      # ::notice:: naming why) for a direct push, a fork, a PR that did not
+      # merge as this commit, a lookup error, a PR whose WASM Build did not
+      # succeed, or an expired artifact.
+      - name: Find the PR CI run that built this engine tree
+        id: ci-artifact
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/resolve-ci-wasm-artifact.sh find
+
+      # Into runner.temp, never engine/: an artifact that fails the key check
+      # below must not leave a single byte where the build writes.
+      - name: Download the PR's pre-optimisation WASM
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true' && steps.ci-artifact.outputs.run-id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: wasm-binaries-cd-reuse
+          path: ${{ runner.temp }}/ci-wasm
+          run-id: ${{ steps.ci-artifact.outputs.run-id }}
+          github-token: ${{ github.token }}
+
+      # Adopts only on an EXACT ci-reuse key match and after all four packages
+      # validate; otherwise reused=false with a ::notice:: naming the reason.
+      - name: Adopt the PR's WASM only on an exact key match
+        id: ci-reuse
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true' && steps.ci-artifact.outputs.run-id != ''
+        run: bash scripts/resolve-ci-wasm-artifact.sh adopt "$RUNNER_TEMP/ci-wasm"
+
+      # ONE decision gates every build step below. Build only when neither tier
+      # produced the four variants. Every outcome is named in the log, and a
+      # rebuild is a ::notice::, so a reuse that silently stops working shows up
+      # as a notice on every engine merge rather than as a slower job.
+      - name: Decide whether to build all four variants
+        id: wasm-plan
+        env:
+          CACHE_HIT: ${{ steps.engine-cache-all4.outputs.cache-hit }}
+          CI_REUSED: ${{ steps.ci-reuse.outputs.reused }}
+          CI_RUN_ID: ${{ steps.ci-artifact.outputs.run-id }}
+          KEY: ${{ steps.engine-key-all4.outputs.key }}
+        run: |
+          if [ "$CACHE_HIT" = 'true' ]; then
+            echo "Engine WASM reuse HIT: all four variants restored from the all4 cache (${KEY}); no cargo build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          elif [ "$CI_REUSED" = 'true' ]; then
+            echo "::notice::engine WASM reused from PR CI run ${CI_RUN_ID}: its ci-reuse key matched this tree exactly; no cargo build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::engine WASM reuse MISS for key ${KEY} -- no all4 cache entry and no verified PR CI artifact; rebuilding all four variants"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The Rust toolchain and cargo target cache are only needed to BUILD. When
+      # either tier reused the four variants every build step below is skipped,
+      # so gate these on the same decision -- otherwise a reuse still pays ~30s
+      # installing a toolchain it never uses, eating into the very time the
+      # reuse buys (mirrors publish-engine-cache).
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.wasm-plan.outputs.build == 'true'
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: steps.wasm-plan.outputs.build == 'true'
         with:
           workspaces: engine -> target
 
-      - name: Try downloading WASM from CI (same SHA)
-        id: ci-wasm
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: wasm-binaries
-          path: engine/
-        continue-on-error: true
-
       - name: Install wasm-bindgen-cli
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.wasm-plan.outputs.build == 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.127
 
       # BUILD AND BINDGEN TOGETHER, ONE VARIANT AT A TIME (#9579).
@@ -544,50 +695,71 @@ jobs:
       # already interleaved, and its two CDN ETags differing while the editor
       # pair's matched is what identified this.
       #
-      # quality-gates.yml:339-349 has always done it this way. Keep all three
-      # workflows in the same shape.
+      # quality-gates.yml's build-wasm has always done it this way, and its six
+      # build/bindgen steps must stay BYTE-IDENTICAL to these: CD adopts the
+      # bytes that recipe produced on the PR (#9525), so any difference is a
+      # binary CD's own recipe would not have built.
+      # scripts/__tests__/resolve-ci-wasm-artifact.test.sh compares them.
       - name: Build WebGL2 + wasm-bindgen
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: |
           cargo build --target wasm32-unknown-unknown --release --features webgl2
           wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU + wasm-bindgen
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: |
           cargo build --target wasm32-unknown-unknown --release --features webgpu
           wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGL2 Runtime (stripped editor)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
 
       - name: Run wasm-bindgen (WebGL2 Runtime)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU Runtime (stripped editor)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
 
       - name: Run wasm-bindgen (WebGPU Runtime)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      # Assert the artifact set is COMPLETE here -- immediately after the last
+      # bindgen step and BEFORE anything persists it (#9525). Every actions/cache
+      # save and the artifact upload are downstream of this gate, so a
+      # present-but-truncated or partial set is caught before it is written under
+      # a content-addressed, immutable cache key. The earlier ordering saved
+      # pkg-webgl2 FIRST and verified afterwards: on a miss a corrupt binary
+      # reached the single-path webgl2 key, and engine-smoke on every PR whose
+      # engine tree hashes to that key then restored the corrupt binary and went
+      # red with no self-heal -- a cache/save cannot overwrite an existing key.
+      # This runs whether the four variants were just built, restored from the
+      # all4 cache or adopted from the PR's CI run, so a stale/partial reuse
+      # cannot dress itself up as a full set either. build-wasm always runs on a
+      # fresh runner with a fresh checkout, so nothing but this run's
+      # build/restore/adopt output can be present.
+      - name: Verify all 4 WASM variants are present and non-empty
+        run: node scripts/verify-engine-wasm.mjs engine
 
       # Publish the WebGL2 build so CI's engine-smoke gate can restore it
       # instead of spending ~321s rebuilding an identical binary on every
       # web-only PR (#9574).
       #
       # This has to be saved HERE rather than in ci.yml. A cache written from a
-      # PR branch is visible only to that PR, and ci.yml never runs on a push to
-      # main — so main's entry can only come from this workflow, which does. Once
-      # written, every branch can restore it.
+      # PR branch is visible only to that PR, and ci.yml's engine-smoke only
+      # restores -- it saves nothing, including in the push-to-main run ci.yml
+      # has had since #9596 -- so main's entry can only come from this workflow.
+      # Once written, every branch can restore it.
       #
       # The key is derived by the same script the restore side uses. If these two
       # ever computed it differently nothing would break loudly: every restore
@@ -595,8 +767,9 @@ jobs:
       # build. scripts/__tests__/engine-wasm-cache-key.test.sh asserts both
       # workflows call the shared script.
       #
-      # Unconditional on purpose: pkg-webgl2 exists whether it was built above or
-      # restored by the download step, and both are the same artifact.
+      # Unconditional on purpose: pkg-webgl2 exists whether it was built above,
+      # restored from the content-addressed all-4 cache or adopted from the PR's
+      # CI run, and all three are the same artifact.
       - name: Resolve the engine build key
         id: engine-key
         run: |
@@ -610,8 +783,26 @@ jobs:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
 
+      # Persist the whole four-variant set under the content-addressed all4 key
+      # so a later run on the same engine tree (a CD re-run, a workflow_dispatch,
+      # or an engine revert to a prior tree) reuses it instead of rebuilding.
+      # Only on an all4 miss: re-saving an existing key warns and no-ops, and on
+      # a hit the set came from this same cache. A set adopted from the PR's CI
+      # run is persisted too; its ci-reuse key extends this all4 key and the two
+      # recipes are pinned identical, so it is the set this key describes.
+      - name: Persist all 4 WASM variants for reuse
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            engine/pkg-webgl2
+            engine/pkg-webgpu
+            engine/pkg-webgl2-runtime
+            engine/pkg-webgpu-runtime
+          key: ${{ steps.engine-key-all4.outputs.key }}
+
       - name: Upload WASM artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-binaries
           path: |
@@ -649,7 +840,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -672,7 +863,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             playwright-${{ runner.os }}-
 
@@ -725,21 +916,25 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-        # Same selection as ci.yml test-e2e-ui, and it has to STAY the same --
-        # this job and that one are the two places the @ui suite runs, and they
-        # drifting apart is how the deploy path keeps a hole the PR gate has
-        # already closed.
-        #
+          # Same @ui selection as ci.yml test-e2e-ui, and it has to STAY the same
+          # — this job and that one are the two places the @ui suite runs, and
+          # them drifting apart is how the deploy path keeps a hole the PR gate
+          # has already closed. Both now activate web/e2e/lib/uiSuiteReporter.ts
+          # (via PW_UI_SUITE=1) over the shared playwright.ci.config.ts instead
+          # of the `--grep '@ui' --grep-invert '@engine-ui|@journey'` pair — one
+          # source of truth for the selection, and a run that FAILS on a zero or
+          # implausible count rather than silently shrinking (#9636 / #9586).
+          PW_UI_SUITE: '1'
         # @journey needs E2E_STRICT_STORES on top of the hooks build and has its
         # own gate. @engine-ui marks the specs that assert on #game-canvas,
         # which stays `invisible` until the Bevy/wgpu renderer starts -- this
         # config launches with --disable-gpu, so they run in the engine-smoke
         # gate instead.
-        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        run: npx playwright test --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report-${{ strategy.job-index }}
           path: web/playwright-report/
@@ -747,7 +942,7 @@ jobs:
 
       - name: Upload test results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-results-${{ strategy.job-index }}
           path: web/test-results/
@@ -763,7 +958,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -808,8 +1003,13 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - name: Cache cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
+      - name: Install verified cargo-audit
+        run: bash scripts/install-cargo-audit.sh
 
       - name: cargo audit (engine)
         working-directory: engine
@@ -847,7 +1047,7 @@ jobs:
           unzip -q awscliv2.zip
           sudo ./aws/install --update
 
-      # --- Path A: the engine changed, so upload what build-wasm produced -----
+      # --- Path A: build-wasm prepared a verified artifact for this deploy -----
       - name: Download WASM artifacts
         if: needs.build-wasm.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -882,7 +1082,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.ASSET_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ vars.R2_BUCKET || 'spawnforge-engine' }}
 
-      # --- Path B: the engine did NOT change -----------------------------------
+      # --- Path B: no engine or web deploy needed an artifact ------------------
       # The bytes already at latest/ ARE this commit's engine, so copy them
       # server-side onto the stamped prefix. No build, no download, and the
       # deploy keeps its immutable version pin.
@@ -913,9 +1113,9 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # check-changes is intentionally NOT in needs -- path detection only gates
-    # build-wasm (slow). Every push to main that passes quality gates must deploy.
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, check-validated]
+    # Workflow-only pushes still validate the pipeline, but must not spend a web
+    # deployment. Manual production promotions bypass this staging job below.
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, check-validated, check-changes]
     # Each validation job must have SUCCEEDED, or have been skipped *because the
     # tree was proven already validated* (#9524). The second half is the point:
     # tolerating 'skipped' on its own would let a bug in check-validated deploy a
@@ -930,6 +1130,7 @@ jobs:
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
+      needs.check-changes.outputs.web-changed == 'true' &&
       (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.test-web.result == 'success' || (needs.test-web.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
@@ -947,20 +1148,37 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # spawnforge-staging is a separate Vercel project, so its Production target
       # is the stable staging environment. A Preview target creates an ephemeral
       # URL and leaves spawnforge-staging.vercel.app pinned to an old deployment.
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
+      - name: Require staging deployment verification access
+        env:
+          STAGING_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
+        run: |
+          if [ -z "$STAGING_BYPASS" ]; then
+            echo "::error::Configure the spawnforge-staging project's Protection Bypass for Automation key as VERCEL_AUTOMATION_BYPASS_STAGING before deploying."
+            exit 1
+          fi
+
       - name: Link Vercel project (staging)
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
@@ -974,20 +1192,22 @@ jobs:
         with:
           name: wasm-binaries
           path: engine/
-        continue-on-error: true
 
       - name: Populate same-origin WASM fallback
-        if: steps.download-wasm-staging.outcome == 'success'
         run: |
-          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
-            src="engine/pkg-${variant}"
-            dest="web/public/engine-pkg-${variant}"
-            if [ -d "$src" ]; then
-              mkdir -p "$dest"
-              cp "$src"/* "$dest"/
-            fi
-          done
+          node scripts/populate-engine-fallback.mjs engine web/public
           bash scripts/generate-wasm-manifests.sh web/public
+
+      - name: Verify staging upload contains the engine
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ENGINE_VERSION: ${{ github.sha }}
+        run: |
+          vercel deploy --dry --prod --yes --format=json --token="$VERCEL_TOKEN" \
+            --build-env NEXT_PUBLIC_ENGINE_VERSION="$ENGINE_VERSION" > vercel-upload.json
+          bash scripts/assert-vercel-engine-manifest.sh vercel-upload.json
 
       - name: Deploy to staging (remote build)
         id: deploy
@@ -1002,36 +1222,19 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
 
-      # Staging is UNVERIFIABLE today: the deployment URL sits behind Vercel
-      # Authentication, the staging project has no automation bypass secret
-      # configured, and staging.spawnforge.ai answers 525 (#7581). The script
-      # fails closed on a protected answer (#9624), so rather than a red step
-      # that `continue-on-error` would hide forever — including the day the
-      # secret exists and staging is genuinely broken — the probe is an
-      # explicit, named skip while the secret is absent, and a REAL gate the
-      # moment `VERCEL_AUTOMATION_BYPASS_STAGING` (the staging project's
-      # Protection Bypass for Automation secret) is added. `if:` cannot read
-      # secrets, so a step turns its presence into an output first.
-      - name: Staging bypass secret present?
-        id: staging-bypass
-        env:
-          STAGING_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
-        run: |
-          if [ -n "$STAGING_BYPASS" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "present=false" >> "$GITHUB_OUTPUT"
-          echo "::notice::Staging health check SKIPPED: the repo secret VERCEL_AUTOMATION_BYPASS_STAGING is not set, and the staging deployment URL is SSO-protected, so the probe cannot observe it (#7581). Add the staging project's Protection Bypass for Automation secret under that name to turn this into a gate."
+      # Reach the application behind Deployment Protection and verify this build.
       - name: Post-deploy health check (staging)
         id: health-check-staging
-        if: ${{ steps.staging-bypass.outputs.present == 'true' }}
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
+          HEALTH_CHECK_EXPECT_COMMIT: ${{ github.sha }}
+          HEALTH_CHECK_EXPECT_ENVIRONMENT: staging
+          HEALTH_CHECK_REQUIRE_SERVICES: 'Payments (Stripe)'
           VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
+          VERCEL_AUTOMATION_BYPASS_ORIGIN: ${{ steps.deploy.outputs.url }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
   # ---- Stage 2: Deploy to Production ----
@@ -1049,7 +1252,7 @@ jobs:
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       (
-        (needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
+        (needs.check-changes.outputs.web-changed == 'true' && needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
         (github.event.inputs.promote_to_production == 'true' &&
          needs.lint.result == 'success' &&
          needs.typecheck.result == 'success' &&
@@ -1071,14 +1274,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # The rollback target. Read from the Vercel API, not `vercel ls`: the
       # previous grep for `READY` matched nothing (the CLI prints `● Ready`),
@@ -1247,7 +1458,8 @@ jobs:
           ( cd web && node --input-type=module -e "
             import { neon } from '@neondatabase/serverless';
             const sql = neon(process.env.DATABASE_URL);
-            await sql('CREATE EXTENSION IF NOT EXISTS vector');
+            // sql.query(), not sql(): @neondatabase/serverless 1.x accepts only tagged-template calls on the bare function (#10352).
+            await sql.query('CREATE EXTENSION IF NOT EXISTS vector');
             console.log('pgvector extension ensured on dry-run branch');
           " )
           # NO --force here. Without it drizzle-kit prints its own data-loss
@@ -1293,128 +1505,62 @@ jobs:
           DRYRUN_BRANCH_ID: ${{ steps.db-dryrun-branch.outputs.branch_id }}
         run: bash scripts/neon-branch.sh delete "$DRYRUN_BRANCH_ID"
 
-      - name: Enable pgvector extension
-        # MUST run BEFORE `drizzle-kit push`. drizzle-kit's schema-diff engine
-        # emits `graph_nodes.embedding vector(1536)` + an HNSW index but does NOT
-        # emit `CREATE EXTENSION` for the built-in `vector` type (see the comment
-        # in drizzle/0010_graph_retrieval_nodes_edges.sql). On a production DB that
-        # has never enabled pgvector, push would fail with `type "vector" does not
-        # exist` before the "Apply custom SQL migrations" step below (which also
-        # carries this statement) ever gets a chance to run — that step is ordered
-        # AFTER push, so it cannot self-heal the failure. Enabling the extension in
-        # its own step here guarantees the vector type exists first.
-        # CREATE EXTENSION IF NOT EXISTS is idempotent and Neon-supported.
-        # Gated identically to the push step: only needed when schema files change.
-        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
-        working-directory: web
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          node --input-type=module -e "
-            import { neon } from '@neondatabase/serverless';
-            const sql = neon(process.env.DATABASE_URL);
-            await sql('CREATE EXTENSION IF NOT EXISTS vector');
-            console.log('pgvector extension ensured');
-          "
+      # The "Enable pgvector extension" step that used to sit here is gone (#9979).
+      # It existed because `drizzle-kit push` emits `vector(1536)` columns but
+      # never `CREATE EXTENSION`, so push would fail with `type "vector" does not
+      # exist`. Migrations do not have that gap: drizzle/0010 carries
+      # `CREATE EXTENSION IF NOT EXISTS vector` as its first statement,
+      # deliberately ordered before graph_nodes. Verified by applying the whole
+      # chain to an emptied Neon branch on 2026-09-11 -- the extension was
+      # installed and both graph tables were created. Anything a database needs
+      # now comes from a migration, which is the entire point of this change.
 
-      - name: Apply schema migration to production
-        # `push` (not `generate` + `migrate`) is a deliberate, documented choice:
-        # docs/decisions/2026-08-29-drizzle-push-vs-migrate.md. The safety this
-        # step used to lack now comes from the surrounding steps, not from the
-        # command itself.
+      - name: Apply schema migrations to production
+        # REPLACES `drizzle-kit push --force` + a verify-push + a step that
+        # replayed every drizzle/0*.sql swallowing "already exists" (#9979).
         #
-        # --force is load-bearing, NOT a bypass. Without it a data-loss diff
-        # reaches drizzle-kit's interactive prompt, hanji's render() rejects
-        # because CI has no TTY, pgPush swallows the rejection in its catch
-        # block, and the migration is SILENTLY SKIPPED while the deploy proceeds
-        # against the old schema. The destructive gate above has already run and
-        # has already blocked anything that was not explicitly approved, so by
-        # the time we get here there is nothing left for a prompt to protect.
+        # The push-vs-migrate ADR listed three conditions for reopening that
+        # decision. Two are now met: production was re-baselined into
+        # `drizzle.__drizzle_migrations` on 2026-09-11 (13 rows), and the
+        # hand-authored SQL step was never separate from the journal — those
+        # files ARE drizzle/0*.sql, and a from-zero run applies all of them,
+        # `CREATE EXTENSION` and both `CREATE INDEX CONCURRENTLY` included. The
+        # third (snapshot history) is unmet and now guarded: `npm run db:generate`
+        # refuses until it is repaired.
         #
-        # DATABASE_URL is a repository secret pointing at the production DB.
-        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
+        # `npm run db:migrate` = the --guard-migrate preflight (which refuses a
+        # non-empty database with missing history rather than guessing) followed
+        # by scripts/apply-migrations.ts. That script uses drizzle-orm's migrator,
+        # NOT `drizzle-kit migrate`: the CLI exits 1 with no message and applies
+        # nothing (measured on a wiped Neon branch, 2026-09-11 — 0 tables, 0
+        # journal rows). That silent exit is the same failure the ADR recorded
+        # from a past deploy; the cause is the CLI, not the migrations.
+        #
+        # UNCONDITIONAL, deliberately. The old steps were gated on
+        # `contains(web-changed-files, 'db/schema')`, so a deploy whose changed
+        # files did not match that string applied nothing and said nothing. That
+        # is a silent-skip hazard of exactly the kind #9969 was made of. Migrate
+        # is a no-op when the journal is current, so running it always costs one
+        # query and removes the entire class.
         working-directory: web
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          NO_COLOR: '1'
-          FORCE_COLOR: '0'
-        run: |
-          # `|| true`: drizzle-kit exits 0 on failure anyway, so its status
-          # carries no information either way. The verify step below is what
-          # actually decides whether this worked.
-          npx drizzle-kit push --verbose --force > "${RUNNER_TEMP}/prod-push.log" 2>&1 || true
-          cat "${RUNNER_TEMP}/prod-push.log"
+        run: npm run db:migrate
 
-      - name: Verify the production schema converged
-        # Closes hazards 1 and 2 from scripts/db-migration-guard.sh: a push that
-        # threw part-way through its untransacted apply loop still exits 0 and
-        # still prints most of a success log. Re-running push is the only honest
-        # test -- a converged schema has nothing left to do.
-        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
-        working-directory: web
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          NO_COLOR: '1'
-          FORCE_COLOR: '0'
-        run: |
-          npx drizzle-kit push --verbose --force > "${RUNNER_TEMP}/verify-push.log" 2>&1 || true
-          cat "${RUNNER_TEMP}/verify-push.log"
-          bash "${GITHUB_WORKSPACE}"/scripts/db-migration-guard.sh verify "${RUNNER_TEMP}/verify-push.log" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Apply custom SQL migrations
-        # Drizzle can't model partial unique indexes (WHERE predicates) or
-        # CONCURRENTLY, so these SQL files are applied directly here. They are
-        # idempotent (CREATE ... IF NOT EXISTS / CONCURRENTLY skips an existing
-        # index), and any residual "already exists" is caught below.
+      - name: Verify the production schema matches the migration set
+        # The safety net for the step above, and the post-deploy half of #9980.
+        # `assertSchemaMatches` walks every table, column and index in schema.ts
+        # and compares the journal against drizzle/meta/_journal.json. During the
+        # #9969 repair it caught two missing columns and two missing indexes that
+        # a table-level diff could not see.
         #
-        # Neon's HTTP driver (`neon()`) sends each call as ONE query over the
-        # extended (prepared-statement) protocol, which permits only a SINGLE
-        # statement — passing a whole multi-statement file throws "cannot insert
-        # multiple commands into a prepared statement". Drizzle SQL files ARE
-        # multi-statement, delimited by the canonical `--> statement-breakpoint`
-        # marker, so split on it and apply each statement on its own. INVARIANT:
-        # every multi-statement migration file MUST delimit each statement with
-        # `--> statement-breakpoint` (drizzle-kit emits this automatically; a
-        # hand-authored migration must add it too). A file whose statements are
-        # NOT so delimited yields a single multi-command segment that neon()
-        # rejects with "cannot insert multiple commands into a prepared
-        # statement", failing this step (0009 regressed exactly this way until a
-        # marker was added between its two ALTER TABLEs). A single-statement file
-        # legitimately splits to a one-element array. We deliberately do NOT
-        # split on `;` instead — dollar-quoted bodies (e.g. 0006's `DO $$ ... $$;`
-        # blocks) contain semicolons that are not statement terminators, so only
-        # the `--> statement-breakpoint` marker is a safe boundary. We can't use
-        # sql.transaction([...]) here because CREATE INDEX CONCURRENTLY may not
-        # run inside a transaction, and we need per-statement idempotency.
-        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema') || contains(needs.check-changes.outputs.web-changed-files, 'drizzle/')
+        # Also unconditional, and it must stay that way: a drift check that only
+        # runs when someone touched a schema file cannot detect drift introduced
+        # by anything else.
         working-directory: web
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          node --input-type=module -e "
-            import { neon } from '@neondatabase/serverless';
-            import { readdirSync, readFileSync } from 'fs';
-            const sql = neon(process.env.DATABASE_URL);
-            const files = readdirSync('drizzle').filter(f => f.match(/^0\d+.*\.sql$/)).sort();
-            for (const f of files) {
-              console.log('Applying drizzle/' + f);
-              const content = readFileSync('drizzle/' + f, 'utf8');
-              const statements = content.split('--> statement-breakpoint').map(s => s.trim()).filter(Boolean);
-              let failed = 0;
-              for (const stmt of statements) {
-                try { await sql(stmt); }
-                catch(e) {
-                  const msg = e.message || '';
-                  const isIdempotent = msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('relation') && msg.includes('already');
-                  if (isIdempotent) { console.log('  Skipped (idempotent):', msg); }
-                  else { console.error('  FAILED:', msg); failed++; process.exitCode = 1; }
-                }
-              }
-              if (failed) { console.error('  FAILED (' + failed + ' of ' + statements.length + ' statement(s) failed)'); }
-              else { console.log('  OK (' + statements.length + ' statement(s))'); }
-            }
-          "
+        run: npm run db:drift
 
       - name: Download WASM artifacts for same-origin fallback
         id: download-wasm-production
@@ -1422,20 +1568,22 @@ jobs:
         with:
           name: wasm-binaries
           path: engine/
-        continue-on-error: true
 
       - name: Populate same-origin WASM fallback
-        if: steps.download-wasm-production.outcome == 'success'
         run: |
-          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
-            src="engine/pkg-${variant}"
-            dest="web/public/engine-pkg-${variant}"
-            if [ -d "$src" ]; then
-              mkdir -p "$dest"
-              cp "$src"/* "$dest"/
-            fi
-          done
+          node scripts/populate-engine-fallback.mjs engine web/public
           bash scripts/generate-wasm-manifests.sh web/public
+
+      - name: Verify production upload contains the engine
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ENGINE_VERSION: ${{ github.sha }}
+        run: |
+          vercel deploy --dry --prod --yes --format=json --token="$VERCEL_TOKEN" \
+            --build-env NEXT_PUBLIC_ENGINE_VERSION="$ENGINE_VERSION" > vercel-upload.json
+          bash scripts/assert-vercel-engine-manifest.sh vercel-upload.json
 
       - name: Deploy to production (remote build)
         id: deploy
@@ -1742,7 +1890,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -1753,8 +1901,16 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Run from repo root — Vercel rootDirectory=apps/docs handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/docs — that causes
@@ -1773,6 +1929,40 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel deploy --prod --archive=tgz --token="$VERCEL_TOKEN"
+
+      # Verify the deployed ARTIFACT renders /capability-matrix, not just that
+      # the route answers (#9720). The page imports its data statically because
+      # a runtime file read is invisible to output file tracing — the shape
+      # that 500'd /mcp for weeks with every local test green (#9718) — and no
+      # test short of the deployed function can observe tracing. The probe
+      # requires a rendered table with the marker row; the page's own "no
+      # rows" notice is a 200 and must fail. The public docs domain is
+      # unprotected and the docs project has no rolling release, so the
+      # production domain is the artifact this run just made.
+      - name: Post-deploy capability matrix check (docs)
+        env:
+          DEPLOY_URL: https://docs.spawnforge.ai
+          MATRIX_CHECK_STABILIZE_S: '10'
+          MATRIX_CHECK_RETRIES: '3'
+          MATRIX_CHECK_INTERVAL_S: '10'
+        run: bash scripts/post-deploy-capability-matrix-check.sh "$DEPLOY_URL"
+
+      # docs.spawnforge.ai/mcp 500'd in production for weeks with this job green
+      # (#9718): the manifest was never traced into the function, and nothing
+      # here looked at what had just been published. This probes the production
+      # alias (the deployment URL is SSO-protected and unobservable from here)
+      # and fails on a non-200 OR on a 200 with no commands rendered — the
+      # "0 commands" page is a 200, so status alone is the wrong property
+      # (lessons-learned #1). The commit assertion is what ties the probe to
+      # THIS deploy: the alias can still be serving the previous build (alias
+      # lag, or a deploy whose domain set missed docs.spawnforge.ai), and the
+      # page stamps VERCEL_GIT_COMMIT_SHA so the script can tell. Pinned by
+      # scripts/__tests__/post-deploy-docs-check.test.sh.
+      - name: Post-deploy check (docs MCP reference)
+        env:
+          DOCS_URL: https://docs.spawnforge.ai
+          DOCS_CHECK_EXPECT_COMMIT: ${{ github.sha }}
+        run: bash scripts/post-deploy-docs-check.sh "$DOCS_URL"
 
   # ---- Design Workbench Deploy ----
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
@@ -1801,7 +1991,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -1812,8 +2002,16 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Run from repo root — Vercel rootDirectory=apps/design handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/design — that causes

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useMemo } from 'react';
 import { MessageSquare, Trash2, Wrench, Sparkles, RotateCcw } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useUserStore } from '@/stores/userStore';
+import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { SuggestionChips } from './SuggestionChips';
@@ -12,7 +13,7 @@ import { ConversationList } from './ConversationList';
 // Static prompts are replaced by dynamic SuggestionChips
 
 /** Streaming status indicator with descriptive text based on current activity */
-function StreamingIndicator({ messages, loopIteration }: { messages: { role: string; toolCalls?: { name: string; status: string }[] }[]; loopIteration: number }) {
+function StreamingIndicator({ messages, loopIteration }: { messages: { role: string; toolCalls?: { name: string; status: string }[] | undefined }[]; loopIteration: number }) {
   // Find the active tool being executed
   const statusText = useMemo(() => {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
@@ -55,7 +56,8 @@ function StreamingIndicator({ messages, loopIteration }: { messages: { role: str
   );
 }
 
-export function ChatPanel() {
+/** `draftTarget`: see `ChatInput` — only the chat overlay's panel sets it. */
+export function ChatPanel({ draftTarget = false }: { draftTarget?: boolean } = {}) {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const error = useChatStore((s) => s.error);
@@ -124,7 +126,14 @@ export function ChatPanel() {
               <>
                 <Sparkles size={28} className="text-zinc-700" />
                 <p className="text-xs text-zinc-400">
-                  AI features require a paid plan.
+                  {/* `canUseAI` is false here when the account has no AI access —
+                      for a starter, no spendable tokens. That is NOT proof the
+                      trial was spent: accounts created before #7715 never
+                      received the signup grant (it runs only on Clerk
+                      `user.created`, with no backfill). So the copy states what
+                      signup grants and what the balance is now, never a usage
+                      history the client cannot verify (review round 3). */}
+                  New accounts get {TRIAL_GRANT_TOKENS} free trial AI tokens at signup. You have none left to spend — upgrade for ongoing AI access.
                 </p>
                 <a
                   href="/pricing"
@@ -168,7 +177,7 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <ChatInput />
+      <ChatInput draftTarget={draftTarget} />
     </div>
   );
 }

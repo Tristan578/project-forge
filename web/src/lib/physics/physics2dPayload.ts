@@ -25,6 +25,7 @@
  */
 
 import type { Joint2dData, Physics2dData } from '@/stores/slices/types';
+import type { LoosePartial } from '@/lib/types/looseOptional';
 
 /**
  * The fields the engine's `Physics2dPatch` carries, as an OBJECT so the
@@ -112,7 +113,7 @@ export interface SetPhysics2dPayload {
  * caller passing a `Record` keyed by untrusted input could forward an inherited
  * value it never set.
  */
-function pickPatchFields(patch: Partial<Physics2dData>): Partial<Physics2dData> {
+function pickPatchFields(patch: LoosePartial<Physics2dData>): Partial<Physics2dData> {
   const picked: Partial<Physics2dData> = {};
   for (const key of PHYSICS2D_PATCH_KEYS) {
     if (!Object.hasOwn(patch, key)) continue;
@@ -131,7 +132,7 @@ function pickPatchFields(patch: Partial<Physics2dData>): Partial<Physics2dData> 
  */
 export function buildUpdatePhysics2dPayload(
   entityId: string,
-  patch: Partial<Physics2dData>,
+  patch: LoosePartial<Physics2dData>,
 ): UpdatePhysics2dPayload {
   return { entityId, ...pickPatchFields(patch) };
 }

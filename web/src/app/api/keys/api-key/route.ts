@@ -10,6 +10,8 @@ import { apiKeys } from '@/lib/db/schema';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { API_KEY_SCOPES, findInvalidScopes, type ApiKeyScope } from '@/lib/config/scopes';
 import { RATE_LIMIT_ADMIN_WINDOW_MS } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const createApiKeySchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
@@ -17,7 +19,7 @@ const createApiKeySchema = z.object({
 });
 
 /** POST /api/keys/api-key — generate a new MCP API key */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -43,7 +45,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Generate key: forge_<32 random hex chars>
+  // Generate key: forge_ + 32 random BYTES rendered as 64 hex characters.
+  //
+  // The count matters and this comment used to get it wrong ("32 random hex
+  // chars"), which is exactly what produced `/\bforge_[0-9a-f]{32}\b/` in
+  // `redactSecrets.ts` — a pattern that could never match a real key, because
+  // `{32}` cannot backtrack and the 33rd hex character defeats the trailing
+  // `\b`. It was listed as coverage for the one credential class this codebase
+  // can name with certainty and provided none. The regex is corrected to {64};
+  // this line is corrected so the next reader does not re-derive the same
+  // wrong length.
   const rawKey = `forge_${randomBytes(32).toString('hex')}`;
   const prefix = rawKey.slice(0, 12); // "forge_xxxx" — enough for identification
   const keyHash = await bcrypt.hash(rawKey, 12);
@@ -74,12 +85,12 @@ export async function POST(req: NextRequest) {
   });
   } catch (err) {
     captureException(err, { route: '/api/keys/api-key', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to create API key' }, { status: 500 });
+    return redactedJson({ error: 'Failed to create API key' }, { status: 500 });
   }
 }
 
 /** GET /api/keys/api-key — list API keys (no secrets) */
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, { requireAuth: true });
   if (mid.error) return mid.error;
 
@@ -107,6 +118,11 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/keys/api-key', method: 'GET' });
-    return NextResponse.json({ error: 'Failed to list API keys' }, { status: 500 });
+    return redactedJson({ error: 'Failed to list API keys' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);
+export const GET = withEgressGuard(GET_impl);

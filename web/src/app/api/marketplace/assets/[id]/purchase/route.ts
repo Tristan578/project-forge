@@ -5,8 +5,9 @@ import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/
 import { eq, and, sql } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { validationError, conflict, forbidden, paymentRequired, internalError } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export async function POST(
+async function POST_impl(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
@@ -285,3 +286,7 @@ export async function POST(
     return internalError('Failed to purchase asset');
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

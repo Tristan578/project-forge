@@ -16,7 +16,7 @@
  *
  * @vitest-environment node
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import {
@@ -39,6 +39,13 @@ const VALID_LIVE = keyFor('clerk.spawnforge.ai', 'pk_live_');
 
 const DOCS_ROOT = resolve(__dirname, '..', '..');
 const read = (...parts: string[]) => readFileSync(join(DOCS_ROOT, ...parts), 'utf-8');
+
+beforeEach(() => {
+  // Passing undefined uses the helpers' environment defaults. Keep tests
+  // independent of Clerk credentials configured in the invoking shell.
+  vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', undefined);
+  vi.stubEnv('CLERK_SECRET_KEY', undefined);
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -182,6 +189,118 @@ describe('assertClerkPublishableKeyShape', () => {
   it('reads process.env when called with no argument', () => {
     vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', PASTED_ASSIGNMENT);
     expect(() => assertClerkPublishableKeyShape()).toThrow(/set but unusable/);
+  });
+
+  // #9721. A present CLERK_SECRET_KEY with an ABSENT publishable key is the
+  // half-configured state that shipped docs.spawnforge.ai with dead sign-in and
+  // an error on every request: proxy.ts only passes through when the secret key
+  // is UNSET, so a set secret + absent publishable runs clerkMiddleware, which
+  // throws "Missing publishableKey". Absent-BOTH stays legitimate (#9044); this
+  // catches only the mismatched pair, and it is a distinct failure mode from the
+  // malformed-key check above — both must stay covered.
+  describe('half-configured Clerk — secret set, publishable absent (#9721)', () => {
+    const SECRET = 'sk_live_realsecretvalue';
+
+    it.each([
+      ['an unset publishable key', undefined],
+      ['an empty publishable key', ''],
+      ['a whitespace-only publishable key', '   '],
+    ])('throws for %s when CLERK_SECRET_KEY is set', (_label, pub) => {
+      expect(() => assertClerkPublishableKeyShape(pub, SECRET)).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+    });
+
+    it('names both variables and references #9721 without echoing the secret', () => {
+      let message = '';
+      try {
+        assertClerkPublishableKeyShape(undefined, SECRET);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain('CLERK_SECRET_KEY');
+      expect(message).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+      expect(message).toContain('#9721');
+      // A publishable key is not a secret, but the secret key that triggered
+      // this most certainly is — it must never appear in build logs.
+      expect(message).not.toContain('realsecretvalue');
+    });
+
+    it('does not throw when both keys are configured', () => {
+      expect(() => assertClerkPublishableKeyShape(VALID_LIVE, SECRET)).not.toThrow();
+    });
+
+    it.each([
+      ['both keys absent — the supported no-Clerk state', undefined, undefined],
+      ['publishable absent, secret empty', undefined, ''],
+    ])('does not throw for %s', (_label, pub, secret) => {
+      expect(() => assertClerkPublishableKeyShape(pub, secret)).not.toThrow();
+    });
+
+    it.each([
+      ['spaces', '   '],
+      ['a tab', '\t'],
+      ['a newline', '\r\n'],
+    ])('rejects a secret containing only %s because proxy still enables Clerk', (_label, secret) => {
+      for (const pub of [undefined, '', '   ']) {
+        expect(() => assertClerkPublishableKeyShape(pub, secret)).toThrow(
+          /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+        );
+      }
+    });
+
+    it('leaves the valid-publishable, absent-secret case unchanged', () => {
+      expect(() => assertClerkPublishableKeyShape(VALID_LIVE, undefined)).not.toThrow();
+    });
+
+    it('still reports the malformed-key mode when the secret is also set', () => {
+      // The two failure modes are distinct: a PRESENT-but-broken publishable key
+      // fails as "set but unusable", not as the half-configured message.
+      expect(() => assertClerkPublishableKeyShape(PASTED_ASSIGNMENT, SECRET)).toThrow(
+        /set but unusable/
+      );
+    });
+
+    it('reads CLERK_SECRET_KEY from process.env when called with no arguments', () => {
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', '');
+      vi.stubEnv('CLERK_SECRET_KEY', SECRET);
+      expect(() => assertClerkPublishableKeyShape()).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+    });
+
+    it('rejects a whitespace secret supplied through environment defaults', () => {
+      vi.stubEnv('CLERK_SECRET_KEY', '   ');
+      expect(() => assertClerkPublishableKeyShape()).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+      expect(() => assertClerkPublishableKeyShape(undefined, undefined)).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+    });
+
+    it('uses both configured environment defaults when arguments are omitted or undefined', () => {
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', VALID_LIVE);
+      vi.stubEnv('CLERK_SECRET_KEY', SECRET);
+      expect(() => assertClerkPublishableKeyShape()).not.toThrow();
+      expect(() => assertClerkPublishableKeyShape(undefined, undefined)).not.toThrow();
+      expect(hasValidClerkKey()).toBe(true);
+    });
+
+    it('keeps the malformed-publishable diagnosis when environment defaults also contain a secret', () => {
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', PASTED_ASSIGNMENT);
+      vi.stubEnv('CLERK_SECRET_KEY', SECRET);
+      let message = '';
+      try {
+        assertClerkPublishableKeyShape();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable');
+      expect(message).toContain('remove both NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY');
+      expect(message).not.toContain('half-configured');
+      expect(message).not.toContain(SECRET);
+    });
   });
 
   it('is wired into the docs build, not just exported', () => {

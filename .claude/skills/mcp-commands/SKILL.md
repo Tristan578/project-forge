@@ -20,35 +20,35 @@ The MCP command set IS the AI's vocabulary. A richer vocabulary = a more capable
 
 ## Current State
 
-- **306+ MCP commands** across 37 categories
-- Manifests at: `mcp-server/manifest/commands.json` AND `web/src/data/commands.json` (MUST stay in sync)
-- Chat handlers at: `web/src/lib/chat/handlers/` (domain files) + `web/src/lib/chat/executor.legacy.ts` (unmigrated)
+- Command and category counts: `bash .claude/tools/validate-mcp.sh sync` prints them
+- Manifests: `mcp-server/manifest/commands.json` (source) plus copies at `web/src/data/commands.json` AND `apps/docs/data/commands.json` (all three must stay identical)
+- Chat handlers at: `web/src/lib/chat/handlers/` (domain files, registered in `web/src/lib/chat/executor.ts`)
 - MCP server at: `mcp-server/src/` with manifest validation tests
 
 ## Adding a New MCP Command
 
-### 1. Manifest Entry (both files)
+### 1. Manifest Entry (all three copies)
 
 ```json
 {
   "name": "my_new_command",
   "category": "domain_name",
   "description": "Clear, specific description of what this does. Include parameter effects.",
-  "parameters": [
-    {
-      "name": "entityId",
-      "type": "string",
-      "required": true,
-      "description": "Target entity identifier"
-    },
-    {
-      "name": "intensity",
-      "type": "number",
-      "required": false,
-      "default": 1.0,
-      "description": "Effect intensity from 0.0 (none) to 1.0 (full)"
+  "visibility": "public",
+  "parameters": {
+    "type": "object",
+    "required": ["entityId"],
+    "properties": {
+      "entityId": { "type": "string", "description": "Target entity identifier" },
+      "intensity": {
+        "type": "number",
+        "default": 1.0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "description": "Effect intensity from 0.0 (none) to 1.0 (full)"
+      }
     }
-  ]
+  }
 }
 ```
 
@@ -62,22 +62,23 @@ The MCP command set IS the AI's vocabulary. A richer vocabulary = a more capable
 
 ```typescript
 // web/src/lib/chat/handlers/<domain>Handlers.ts
-export const handlers: Record<string, ToolHandler> = {
-  my_new_command: async (args, { store, dispatchCommand }) => {
-    const parsed = parseArgs(args, {
-      entityId: { type: 'string', required: true },
-      intensity: { type: 'number', required: false, default: 1.0 },
-    });
-    if (!parsed.success) return parsed;
+// parseArgs(zodSchema, args), zEntityId and ToolHandler come from './types'
+export const myDomainHandlers: Record<string, ToolHandler> = {
+  my_new_command: async (args, { dispatchCommand }) => {
+    const p = parseArgs(
+      z.object({ entityId: zEntityId, intensity: z.number().default(1.0) }),
+      args,
+    );
+    if (p.error) return p.error;
 
     dispatchCommand('my_new_command', {
-      entityId: parsed.data.entityId,
-      intensity: parsed.data.intensity,
+      entityId: p.data.entityId,
+      intensity: p.data.intensity,
     });
 
     return {
       success: true,
-      message: `Applied effect to ${parsed.data.entityId} at intensity ${parsed.data.intensity}`,
+      message: `Applied effect to ${p.data.entityId} at intensity ${p.data.intensity}`,
     };
   },
 };
@@ -94,15 +95,9 @@ Add a human-readable label in `web/src/components/chat/ToolCallCard.tsx`:
 case 'my_new_command': return 'Applying Effect';
 ```
 
-## Command Categories (37 current)
+## Command Categories
 
-When adding commands, use existing categories where possible:
-`transform`, `material`, `lighting`, `physics`, `physics_2d`, `audio`, `animation`,
-`particles`, `scripting`, `scene`, `export`, `camera`, `environment`, `post_processing`,
-`shader`, `csg`, `terrain`, `procedural`, `prefab`, `game_component`, `game_camera`,
-`ui_widget`, `sprite`, `sprite_animation`, `tilemap`, `skeleton_2d`, `dialogue`,
-`lod`, `quality`, `joints`, `joints_2d`, `reverb_zone`, `audio_bus`, `adaptive_music`,
-`asset_generation`, `publishing`, `custom_shader`
+Use an existing category where possible; the authoritative list is `EXPECTED_CATEGORIES` in `mcp-server/src/manifest.test.ts`.
 
 ## AI Parity Audit Checklist
 

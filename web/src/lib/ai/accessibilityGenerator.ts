@@ -9,7 +9,8 @@
  * - Accessibility audit with scoring
  */
 
-import type { SceneGraph, SceneNode, MaterialData, LightData } from '@/stores/slices/types';
+import type { SceneGraph, MaterialData, LightData } from '@/stores/slices/types';
+import { inferEntityType } from '@/lib/chat/handlers/helpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -260,20 +261,6 @@ export function colorsDistinguishableForColorblind(
 
   // Colors with < 0.1 distance in normalized RGB are hard to distinguish
   return dist >= 0.1;
-}
-
-// ---------------------------------------------------------------------------
-// Entity type inference
-// ---------------------------------------------------------------------------
-
-function inferEntityType(node: SceneNode): string {
-  if (node.components.includes('TerrainEnabled')) return 'terrain';
-  if (node.components.includes('PointLight')) return 'point_light';
-  if (node.components.includes('DirectionalLight')) return 'directional_light';
-  if (node.components.includes('SpotLight')) return 'spot_light';
-  if (node.components.includes('Mesh3d')) return 'mesh';
-  if (node.components.includes('Sprite')) return 'sprite';
-  return 'entity';
 }
 
 // ---------------------------------------------------------------------------

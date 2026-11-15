@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockWithMonitor = vi.fn();
+const mockFlush = vi.fn((..._args: unknown[]) => Promise.resolve(true));
 vi.mock('@sentry/nextjs', () => ({
   withMonitor: (...args: unknown[]) => mockWithMonitor(...args),
+  flush: (...args: unknown[]) => mockFlush(...args),
 }));
 
 import {
@@ -13,6 +13,12 @@ import {
   withCronMonitor,
   type CronMonitor,
 } from '../cronMonitors';
+// Source of truth for what Vercel actually schedules (PF-1060 / #9097 migrated
+// this from `web/vercel.json`, read via `readFileSync`, to the typed
+// `web/vercel.ts` module below). Importing the module — rather than reading a
+// JSON file off disk — is what makes this parity check survive the config's
+// move to TypeScript with zero changes to its own logic.
+import { config as vercelConfig } from '../../../../vercel';
 
 describe('CRON_MONITORS registry', () => {
   it('has at least one monitor', () => {
@@ -39,38 +45,35 @@ describe('CRON_MONITORS registry', () => {
   });
 });
 
-describe('CRON_MONITORS ↔ vercel.json parity', () => {
-  // The registry is the runtime mirror of the source-of-truth `web/vercel.json`.
-  // Drift in either direction (a Vercel cron without a monitor, or a monitor
-  // for a non-existent cron) must fail CI rather than ship an unmonitored job.
-  type VercelCron = { path: string; schedule: string };
-  const vercelJson = JSON.parse(
-    readFileSync(join(__dirname, '../../../../vercel.json'), 'utf8'),
-  ) as { crons?: VercelCron[] };
-  const vercelCrons = vercelJson.crons ?? [];
+describe('CRON_MONITORS ↔ vercel.ts parity', () => {
+  // The registry is the runtime mirror of the source-of-truth `web/vercel.ts`
+  // (`config.crons` — formerly `web/vercel.json`, PF-1060 / #9097). Drift in
+  // either direction (a Vercel cron without a monitor, or a monitor for a
+  // non-existent cron) must fail CI rather than ship an unmonitored job.
+  const vercelCrons = vercelConfig.crons ?? [];
 
-  it('every vercel.json cron has a registry entry with a matching schedule', () => {
+  it('every vercel.ts cron has a registry entry with a matching schedule', () => {
     for (const cron of vercelCrons) {
       const monitor = getCronMonitor(cron.path);
       expect(
         monitor,
-        `vercel.json cron ${cron.path} has no Sentry monitor in CRON_MONITORS`,
+        `vercel.ts cron ${cron.path} has no Sentry monitor in CRON_MONITORS`,
       ).toBeDefined();
       expect(monitor?.schedule).toBe(cron.schedule);
     }
   });
 
-  it('every registry entry maps to a real vercel.json cron', () => {
+  it('every registry entry maps to a real vercel.ts cron', () => {
     const vercelPaths = new Set(vercelCrons.map((c) => c.path));
     for (const m of CRON_MONITORS) {
       expect(
         vercelPaths.has(m.path),
-        `CRON_MONITORS entry ${m.path} is not declared in vercel.json crons`,
+        `CRON_MONITORS entry ${m.path} is not declared in vercel.ts crons`,
       ).toBe(true);
     }
   });
 
-  it('registry count equals vercel.json cron count', () => {
+  it('registry count equals vercel.ts cron count', () => {
     expect(CRON_MONITORS.length).toBe(vercelCrons.length);
   });
 
@@ -83,7 +86,7 @@ describe('CRON_MONITORS ↔ vercel.json parity', () => {
   const MAX_RUNS_PER_HOUR = 4;
   const MIN_STEP_MINUTES = 60 / MAX_RUNS_PER_HOUR;
 
-  it(`every vercel.json cron fires at most ${MAX_RUNS_PER_HOUR}x/hour`, () => {
+  it(`every vercel.ts cron fires at most ${MAX_RUNS_PER_HOUR}x/hour`, () => {
     for (const cron of vercelCrons) {
       const minuteField = cron.schedule.trim().split(/\s+/)[0];
       const step = /^\*\/(\d+)$/.exec(minuteField);
@@ -182,5 +185,144 @@ describe('withCronMonitor', () => {
     );
 
     await expect(withCronMonitor(monitor, handler)).rejects.toThrow('infra down');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Serverless transport flush (#9981).
+//
+// Sentry's transport is async. On Vercel the function is frozen the instant the
+// response returns, so a check-in still sitting in the queue is discarded.
+// `withMonitor` records the terminal check-in correctly; it just never leaves
+// the process. Sentry then sees an in_progress with no terminal check-in and
+// reports "A timeout check-in was detected" -- 645 occurrences over 7 days
+// (SPAWNFORGE-AI-Z) while the health monitor read as quiet.
+//
+// These assert ORDERING, not call count. `expect(mockFlush).toHaveBeenCalled()`
+// passes even when the flush is fired and abandoned, which is precisely the bug
+// -- so it would be a test incapable of failing on the thing it names.
+// ---------------------------------------------------------------------------
+describe('withCronMonitor — serverless flush', () => {
+  const monitor: CronMonitor = {
+    path: '/api/cron/test',
+    schedule: '*/5 * * * *',
+    slug: 'test-monitor',
+  };
+
+  /** Drain the microtask queue so anything that CAN settle already has. */
+  const drainMicrotasks = async () => {
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  };
+
+  /**
+   * A flush that stays pending until the test releases it.
+   *
+   * Deliberately NOT a timer-delayed flush. A microtask-tick delay is too weak
+   * (the assertion machinery drains several microtasks itself, so an unawaited
+   * flush still wins that race and the test passes with the bug present —
+   * measured, not assumed), and a `setTimeout` version is banned by
+   * `no-restricted-syntax` for good reason. A deferred asserts the stronger and
+   * fully deterministic property: while the flush is pending, the returned
+   * promise MUST NOT settle.
+   */
+  const deferFlush = () => {
+    let release!: () => void;
+    mockFlush.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = () => resolve(true);
+        }),
+    );
+    return () => release();
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    mockFlush.mockImplementation(() => Promise.resolve(true));
+    mockWithMonitor.mockImplementation(
+      (_slug: string, cb: () => Promise<unknown>) => cb(),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('cannot resolve while the flush is still pending', async () => {
+    vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+    const release = deferFlush();
+
+    let settled = false;
+    const pending = withCronMonitor(monitor, async () => 'ok').then((v) => {
+      settled = true;
+      return v;
+    });
+
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+
+    release();
+    await expect(pending).resolves.toBe('ok');
+  });
+
+  it('cannot reject while the flush is still pending, and preserves the error', async () => {
+    vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+    const release = deferFlush();
+    const boom = new Error('infra down');
+
+    let rejectedWith: unknown;
+    const pending = withCronMonitor(monitor, () => Promise.reject(boom));
+    pending.catch((e: unknown) => {
+      rejectedWith = e;
+    });
+
+    await drainMicrotasks();
+    expect(rejectedWith).toBeUndefined();
+
+    release();
+    await expect(pending).rejects.toBe(boom);
+    expect(rejectedWith).toBe(boom);
+  });
+
+  it('never flushes when no DSN is configured (stays fully inert)', async () => {
+    vi.stubEnv('SENTRY_DSN', '');
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
+
+    await withCronMonitor(monitor, async () => 'ok');
+
+    expect(mockFlush).not.toHaveBeenCalled();
+  });
+
+  it('a failing flush does not mask the handler result', async () => {
+    vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+    mockFlush.mockImplementation(() =>
+      Promise.reject(new Error('flush timeout')),
+    );
+
+    await expect(withCronMonitor(monitor, async () => 'ok')).resolves.toBe('ok');
+  });
+
+  it('a failing flush does not mask the handler error', async () => {
+    vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+    const boom = new Error('infra down');
+    mockFlush.mockImplementation(() =>
+      Promise.reject(new Error('flush timeout')),
+    );
+
+    await expect(
+      withCronMonitor(monitor, () => Promise.reject(boom)),
+    ).rejects.toBe(boom);
+  });
+
+  it('warns rather than throwing when the transport reports an incomplete drain', async () => {
+    vi.stubEnv('SENTRY_DSN', 'https://key@sentry.io/123');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockFlush.mockImplementation(() => Promise.resolve(false));
+
+    await expect(withCronMonitor(monitor, async () => 'ok')).resolves.toBe('ok');
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    warn.mockRestore();
   });
 });

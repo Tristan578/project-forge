@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { jobOwnershipRefusal } from '@/lib/generate/jobOwnershipResponse';
 
-export async function GET(request: NextRequest) {
+async function GET_impl(request: NextRequest) {
   // 1. Authenticate + rate limit
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
@@ -13,6 +20,15 @@ export async function GET(request: NextRequest) {
     rateLimitConfig: { key: (id) => `user:generate-model-status:${id}`, max: 60, windowSeconds: 60 },
   });
   if (mid.error) return mid.error;
+
+  // Per-panel tier gate, POLL variant (#7715): the panel POST /api/generate/model declares
+  // ('generate-model'), checked BEFORE any provider key is resolved. A poll reads
+  // a job already paid for, so a starter that has HELD tokens is judged at the
+  // trial access tier whatever its live balance, and a never-granted starter
+  // as a plain starter. Not a jobId ownership check — see
+  // `src/lib/api/panelTierGate.ts`.
+  const tierDenied = panelTierGateResponseForPoll('generate-model', mid.authContext!.user);
+  if (tierDenied) return tierDenied;
 
   // 2. Parse query params
   const { searchParams } = new URL(request.url);
@@ -22,6 +38,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'jobId query parameter required' }, { status: 400 });
   }
 
+  // Ownership check (#10262): resolveApiKey below returns the PLATFORM key by
+  // default, so without this ANY signed-in caller admitted past the tier gate
+  // above could poll a job id they never created and read back another user's
+  // result. Checked BEFORE any provider key is resolved. See
+  // `src/lib/generate/jobOwnership.ts`.
+  // A confirmed miss answers a terminal 404; a lookup that FAILED answers a
+  // retryable 503 — both refuse, but only the first is a verdict on the job
+  // (`jobOwnershipRefusal`).
+  const ownership = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.model3d, jobId);
+  if (ownership !== 'owner') return jobOwnershipRefusal(ownership);
+
   // 3. Resolve API key (no token deduction for status checks)
   let apiKey: string;
 
@@ -30,12 +57,12 @@ export async function GET(request: NextRequest) {
       mid.userId!,
       DB_PROVIDER.model3d,
       0, // No cost for status checks
-      'status_check'
+      STATUS_CHECK_OPERATION
     );
     apiKey = resolved.key;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
     }
     throw err;
   }
@@ -77,12 +104,18 @@ export async function GET(request: NextRequest) {
       resultUrl: mappedStatus === 'completed' ? status.modelUrls?.glb : undefined,
       thumbnailUrl: status.thumbnailUrl,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Model generation produced no file' : 'Model generation failed')
+        ? withRetryGuidance(succeededButEmpty ? 'Model generation produced no file' : 'Model generation failed')
         : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/model/status', jobId });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // The provider's own text stays server-side: `lib/generate/*Client.ts`
+    // folds the upstream RESPONSE BODY into the thrown error, and on the
+    // platform path the credential in play is the platform's (#9736).
+    return redactedJson({ error: 'Could not read the 3D Model generation status. Please try again.' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

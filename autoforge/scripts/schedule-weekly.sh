@@ -78,12 +78,12 @@ log "Project root: $PROJECT_ROOT"
 # Check provider keys
 HAS_MESHY=$( [ -n "${MESHY_API_KEY:-}" ] && echo "true" || echo "false" )
 HAS_ELEVENLABS=$( [ -n "${ELEVENLABS_API_KEY:-}" ] && echo "true" || echo "false" )
-HAS_SUNO=$( [ -n "${SUNO_API_KEY:-}" ] && echo "true" || echo "false" )
-log "Providers: Meshy=$HAS_MESHY, ElevenLabs=$HAS_ELEVENLABS, Suno=$HAS_SUNO"
+# No Suno check: it has no public API and no music path runs here (#9522).
+log "Providers: Meshy=$HAS_MESHY, ElevenLabs=$HAS_ELEVENLABS"
 
-if [ "$HAS_MESHY" = "false" ] && [ "$HAS_ELEVENLABS" = "false" ] && [ "$HAS_SUNO" = "false" ]; then
+if [ "$HAS_MESHY" = "false" ] && [ "$HAS_ELEVENLABS" = "false" ]; then
     log "WARNING: No provider API keys set. Running vision-only validation."
-    log "  Set MESHY_API_KEY, ELEVENLABS_API_KEY, SUNO_API_KEY for full validation."
+    log "  Set MESHY_API_KEY, ELEVENLABS_API_KEY for full validation."
 fi
 
 cd "$PROJECT_ROOT"

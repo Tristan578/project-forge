@@ -11,6 +11,10 @@ export interface ScriptSlice {
   scriptLogs: ScriptLogEntry[];
   inputBindings: InputBinding[];
   inputPreset: InputPreset;
+  // Per-local-player preset provenance (physics.FR-1.OP-04). Keyed by slot, so
+  // player 1's applied preset survives the same way its bindings do; `inputPreset`
+  // stays the slot-0 mirror for callers that predate two-player support.
+  inputPresetByPlayer: Record<number, InputPreset>;
 
   setScript: (entityId: string, source: string, enabled: boolean, template?: string) => void;
   removeScript: (entityId: string) => void;
@@ -20,9 +24,18 @@ export interface ScriptSlice {
   addScriptLog: (entry: ScriptLogEntry) => void;
   clearScriptLogs: () => void;
   setInputBinding: (binding: InputBinding) => void;
-  removeInputBinding: (actionName: string) => void;
-  setInputPreset: (preset: 'fps' | 'platformer' | 'topdown' | 'racing') => void;
-  setInputBindings: (bindings: InputBinding[], preset: InputPreset) => void;
+  removeInputBinding: (actionName: string, player?: number) => void;
+  setInputPreset: (preset: 'fps' | 'platformer' | 'topdown' | 'racing', player?: number) => void;
+  setInputBindings: (
+    bindings: InputBinding[],
+    preset: InputPreset,
+    presetByPlayer?: Record<number, InputPreset>,
+  ) => void;
+}
+
+/** The local-player slot a binding belongs to (absent = player 0). */
+function slotOf(binding: Pick<InputBinding, 'player'>): number {
+  return binding.player ?? 0;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -47,6 +60,7 @@ export const createScriptSlice: StateCreator<
   scriptLogs: [],
   inputBindings: [],
   inputPreset: null,
+  inputPresetByPlayer: {},
 
   setScript: (entityId, source, enabled, template) => {
     set(state => ({ allScripts: { ...state.allScripts, [entityId]: { source, enabled, template } } }));
@@ -99,21 +113,48 @@ export const createScriptSlice: StateCreator<
   clearScriptLogs: () => set({ scriptLogs: [] }),
   setInputBinding: (binding) => {
     const state = get();
-    const existing = state.inputBindings.findIndex(b => b.actionName === binding.actionName);
+    const slot = slotOf(binding);
+    // A binding is identified by BOTH its action name and its player slot, so
+    // player 2's `attack` is a distinct row from player 1's and neither
+    // overwrites the other.
+    const existing = state.inputBindings.findIndex(
+      b => b.actionName === binding.actionName && slotOf(b) === slot,
+    );
     const updated = existing >= 0
       ? state.inputBindings.map((b, i) => i === existing ? binding : b)
       : [...state.inputBindings, binding];
     set({ inputBindings: updated });
-    if (dispatchCommand) dispatchCommand('set_input_binding', binding);
+    // Dispatch carries the slot through to the engine; omitted `player` defaults
+    // to 0 on the Rust side, so single-player callers are unaffected.
+    if (dispatchCommand) dispatchCommand('set_input_binding', { ...binding, player: slot });
   },
-  removeInputBinding: (actionName) => {
+  removeInputBinding: (actionName, player) => {
     const state = get();
-    set({ inputBindings: state.inputBindings.filter(b => b.actionName !== actionName) });
-    if (dispatchCommand) dispatchCommand('remove_input_binding', { actionName });
+    const slot = player ?? 0;
+    set({
+      inputBindings: state.inputBindings.filter(
+        b => !(b.actionName === actionName && slotOf(b) === slot),
+      ),
+    });
+    if (dispatchCommand) dispatchCommand('remove_input_binding', { actionName, player: slot });
   },
-  setInputPreset: (preset) => {
-    set({ inputPreset: preset });
-    if (dispatchCommand) dispatchCommand('set_input_preset', { preset });
+  setInputPreset: (preset, player) => {
+    const slot = player ?? 0;
+    // Every slot's applied preset lands in `inputPresetByPlayer` so the panel can
+    // show player 2's provenance, not just player 1's. `inputPreset` stays the
+    // slot-0 mirror for callers that predate two-player support.
+    set(state => ({
+      inputPresetByPlayer: { ...state.inputPresetByPlayer, [slot]: preset },
+      ...(slot === 0 ? { inputPreset: preset } : {}),
+    }));
+    if (dispatchCommand) dispatchCommand('set_input_preset', { preset, player: slot });
   },
-  setInputBindings: (bindings, preset) => set({ inputBindings: bindings, inputPreset: preset }),
+  setInputBindings: (bindings, preset, presetByPlayer) => set({
+    inputBindings: bindings,
+    inputPreset: preset,
+    // The engine reports each slot's preset alongside its bindings; carry the
+    // whole map through so non-primary slots are represented. When a caller
+    // supplies only a scalar (single-player), slot 0 alone is recorded.
+    inputPresetByPlayer: presetByPlayer ?? { 0: preset },
+  }),
 });

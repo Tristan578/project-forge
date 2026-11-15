@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { GitFork, Loader2 } from 'lucide-react';
+import { signInHrefReturningToPlay } from '@/lib/navigation/authRoutes';
 
 interface RemixButtonProps {
   userId: string;
@@ -27,6 +28,7 @@ export function RemixButton({ userId, slug, isAuthenticated }: RemixButtonProps)
       const data = await res.json();
 
       if (!res.ok) {
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
         setError(data.error || 'Failed to remix');
         setLoading(false);
         return;
@@ -45,7 +47,7 @@ export function RemixButton({ userId, slug, isAuthenticated }: RemixButtonProps)
   if (!isAuthenticated) {
     return (
       <a
-        href={`/sign-in?redirect_url=/play/${encodeURIComponent(userId)}/${encodeURIComponent(slug)}`}
+        href={signInHrefReturningToPlay(userId, slug)}
         className="flex items-center gap-1.5 rounded bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-700"
       >
         <GitFork size={14} />

@@ -18,8 +18,12 @@ import {
   takeStagedSceneAudio,
   clearStagedSceneAudio,
 } from '@/lib/audio/sceneAudioManifest';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
+import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+import { ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
-type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
+type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string; threw?: true } | void;
 
 function detachDispatcher() {
   setSceneDispatcher(null as unknown as Dispatcher);
@@ -44,6 +48,21 @@ describe('sceneSlice.loadTemplate', () => {
   });
 
   describe('applying a real template', () => {
+    it('invalidates recovery at dispatch after the asynchronous template read', async () => {
+      const fakeEngine = createFakeEngineDispatcher(harness.store);
+      let dispatchRevision = -1;
+      setSceneDispatcher((command, payload) => {
+        if (command === 'load_scene') dispatchRevision = harness.store.getState().sceneOperationRevision;
+        return fakeEngine(command, payload);
+      });
+      const loading = harness.store.getState().loadTemplate('2d-platformer');
+      // Recovery can start while the template module or data is being read.
+      const recoveryRevision = harness.store.getState().sceneOperationRevision;
+      const result = await loading;
+      expect(result.success).toBe(true);
+      expect(dispatchRevision).toBeGreaterThan(recoveryRevision);
+    });
+
     it('puts the templates entities in sceneGraph before it resolves', async () => {
       const dispatch = createFakeEngineDispatcher(harness.store);
       setSceneDispatcher(dispatch);
@@ -55,6 +74,22 @@ describe('sceneSlice.loadTemplate', () => {
       expect(nodeCount).toBeGreaterThan(0);
       expect(Object.keys(sceneGraph.nodes)).toContain('player');
       if (result.success) expect(result.entityCount).toBe(nodeCount);
+    });
+
+    // #10058: a template never carries its own music arrangement, but a
+    // freshly-loaded template used to leave whatever arrangement the
+    // PREVIOUS scene had sitting in the store — stale tracks/clips that then
+    // rode along into the template's next cloud save.
+    it('clears a stale music arrangement left by the previous scene', async () => {
+      const trackId = useMusicArrangementStore.getState().addTrack('Stale');
+      useMusicArrangementStore.getState().addClip({ trackId, sourceUrl: 'x', sourceDurationSeconds: 10 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(true);
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
     });
 
     it('sends load_scene with JSON the engine can read, not the raw template data', async () => {
@@ -70,7 +105,12 @@ describe('sceneSlice.loadTemplate', () => {
       expect(scene.entities[0].transform).toHaveProperty('position');
       expect(scene.entities[0]).toHaveProperty('name');
       expect(scene.entities[0].entityType).toBe('sprite');
-      expect(scene.inputBindings).toEqual({ actions: {}, preset: null });
+      // OMITTED, not emptied. `load_scene` assigns the file's map straight onto
+      // the `InputMap` resource, so `{ actions: {}, preset: null }` — what this
+      // used to assert — loaded every template into a scene where no key did
+      // anything. Omitting it leaves `InputMap::default()`, which binds a
+      // working keyboard (#9764).
+      expect('inputBindings' in scene).toBe(false);
     });
 
     it('attaches the templates scripts through the script slice', async () => {
@@ -108,12 +148,28 @@ describe('sceneSlice.loadTemplate', () => {
       });
     });
 
-    it('applies the templates input preset', async () => {
+    /**
+     * LOADING A TEMPLATE MUST NOT PICK A GENRE FOR THE CREATOR.
+     *
+     * This used to assert the opposite. Applying the template's `inputPreset`
+     * replaced the scene's action map with one genre's handful of bindings, and
+     * once presets became additive it got worse rather than better: `fps`
+     * defines `move_forward` and `move_right` as AXES under the same names the
+     * defaults use for digital actions, so merging it left `move_forward`
+     * answering true for W *or* S while digital `move_backward` answered for S
+     * alone. The shooter's `dz -= SPEED` and `dz += SPEED` then cancelled, and
+     * backward movement was dead (#9764).
+     *
+     * A template needs nothing a preset provides: `inputActionConformance`
+     * enforces that every action its scripts name is in the defaults, and a
+     * template wanting one of its own declares it in `sceneData.inputBindings`.
+     */
+    it('does not apply a genre preset', async () => {
       setSceneDispatcher(createFakeEngineDispatcher(harness.store));
 
       await harness.store.getState().loadTemplate('2d-platformer');
 
-      expect(harness.setInputPreset).toHaveBeenCalledWith('platformer');
+      expect(harness.setInputPreset).not.toHaveBeenCalled();
     });
 
     it('reports the entities it had to drop and attaches nothing to them', async () => {
@@ -142,6 +198,27 @@ describe('sceneSlice.loadTemplate', () => {
       await harness.store.getState().loadTemplate('2d-platformer');
 
       expect(takeStagedSceneAudio()).toEqual({});
+    });
+
+    it('does not let an earlier scene\'s unclaimed completion mode follow the template in (#9998)', async () => {
+      // Same take-once handoff as the audio: a template file declares no mode,
+      // so it opens as a legacy `win` game rather than inheriting a refused
+      // load's `sandbox` — which would let it Play with no goal.
+      stageSceneCompletionMode('sandbox');
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+
+      await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('puts a previous completion-mode staging back when the engine refuses the template (#9998)', async () => {
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher(vi.fn<Dispatcher>(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(takeStagedSceneCompletionMode()).toBe('narrative');
     });
 
     it('applies every shipped template', async () => {
@@ -188,6 +265,39 @@ describe('sceneSlice.loadTemplate', () => {
       expect(harness.setScript).not.toHaveBeenCalled();
       expect(harness.addGameComponent).not.toHaveBeenCalled();
       expect(harness.setInputPreset).not.toHaveBeenCalled();
+      // A clean refusal leaves the OUTGOING scene on screen and intact, so it
+      // locks nothing — the control for the thrown case below (#10202).
+      expect(harness.store.getState().sceneLoadError).toBeNull();
+    });
+
+    // #10079 / #10202: a THROWN `load_scene` can leave the outgoing scene
+    // despawned mid-apply, so saving must lock until reload — the lockout
+    // `loadScene` and `newScene` set on their throw paths. This action never
+    // set it. And the throw arrives two ways: a dispatcher that rethrows, or
+    // the one the editor registers (`useEngineEvents`), which catches it and
+    // answers `{ success: false, error, threw: true }`.
+    it.each([
+      ['rethrows', (): ReturnType<Dispatcher> => { throw new Error('JsValue("serialize failed")'); }],
+      ['answers threw: true', (): ReturnType<Dispatcher> => ({ success: false, error: 'JsValue("serialize failed")', threw: true })],
+    ])('locks saving with the ENGINE_LOAD_THREW reason and tells the user to reload when the dispatch throws (dispatcher %s)', async (_via, answer) => {
+      const dispatch = vi.fn<Dispatcher>((command) => (command === 'load_scene' ? answer() : undefined));
+      setSceneDispatcher(dispatch);
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result).toEqual({ success: false, error: expect.stringContaining('JsValue("serialize failed")') });
+      // The one reload sentence every surface imports (#10202 review, m6).
+      expect(result).toEqual({ success: false, error: expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE) });
+      expect(harness.store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('the engine failed while loading it'),
+        at: expect.any(Number),
+      });
+      // The lockout is what it is for: saving now refuses to export.
+      dispatch.mockClear();
+      harness.store.getState().saveScene();
+      expect(dispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
+      expect(harness.setScript).not.toHaveBeenCalled();
+      expect(harness.addGameComponent).not.toHaveBeenCalled();
     });
 
     it('refuses when the engine acknowledges the load but never applies it', async () => {
@@ -221,6 +331,44 @@ describe('sceneSlice.loadTemplate', () => {
       const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
 
       expect(result.success).toBe(false);
+    });
+  });
+
+  // scene.FR-1 N1 (Sentry): `loadTemplate` used to dispatch `load_scene`
+  // directly, bypassing the prefab-instance registry entirely — the OUTGOING
+  // scene's linked instances rode along into the template, and an autosave
+  // afterward folded them into the template's scene data as ghost references.
+  describe('prefab-instance registry (scene.FR-1 N1)', () => {
+    const STALE = [{ instanceId: 'pfi_stale', prefabId: 'stale_source', overrides: {} }];
+
+    it('clears the registry when a template loads successfully', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(true);
+      expect(loadPrefabInstances()).toEqual([]);
+    });
+
+    it('restores the previous registry when the engine rejects the load', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(vi.fn<Dispatcher>(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(false);
+      expect(loadPrefabInstances()).toEqual(STALE);
+    });
+
+    it('retains the accepted template registry when application is still unconfirmed', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(silentDispatcher());
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
+
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('may appear without its scripts or gameplay setup') });
+      expect(loadPrefabInstances()).toEqual([]);
     });
   });
 });

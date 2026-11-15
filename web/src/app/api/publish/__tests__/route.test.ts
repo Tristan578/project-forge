@@ -32,9 +32,11 @@ vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }),
 }));
 
+const atomicQuery = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/db/client', () => ({
   queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn(),
+  getNeonSql: () => atomicQuery,
 }));
 
 vi.mock('@/lib/moderation/contentFilter', () => ({
@@ -84,6 +86,7 @@ function makeProject(overrides: Partial<Record<string, unknown>> = {}) {
     id: 'proj-1',
     userId: 'user-1',
     title: 'My Game',
+    sceneData: { entities: [] },
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -114,8 +117,7 @@ function makePublication(overrides: Partial<Record<string, unknown>> = {}) {
  * 1. select existing published games (for tier limit check)
  * 2. select existing slug (returns empty — new publication)
  * 3. select project (returns the project)
- * 4. insert publication → returning [publication]
- * 5. insert tags (no return value needed)
+ * 4. atomic Neon statement commits the publication, snapshot, and tags
  */
 function makeNewPublicationDb(options: {
   existingCount?: number;
@@ -128,17 +130,7 @@ function makeNewPublicationDb(options: {
 
   const existingRows = Array.from({ length: existingCount }, (_, i) => ({ id: `pub-${i}` }));
 
-  const mockInsert = vi.fn().mockReturnValue({
-    values: vi.fn().mockReturnValue({
-      onConflictDoUpdate: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([pub]),
-      }),
-    }),
-  });
-
-  const mockInsertTags = vi.fn().mockReturnValue({
-    values: vi.fn().mockResolvedValue([]),
-  });
+  atomicQuery.mockResolvedValue([{ publication: pub }]);
 
   const selectMock = vi.fn()
     .mockReturnValueOnce({
@@ -161,10 +153,6 @@ function makeNewPublicationDb(options: {
 
   return {
     select: selectMock,
-    insert: vi.fn()
-      .mockReturnValueOnce(mockInsert()) // publication insert
-      .mockReturnValueOnce(mockInsertTags()), // tags insert (if tags exist)
-    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
 }
 
@@ -177,6 +165,7 @@ describe('POST /api/publish', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    atomicQuery.mockReset();
     vi.resetModules();
 
     // Default: authenticated as hobbyist
@@ -559,18 +548,18 @@ describe('POST /api/publish', () => {
   // -------------------------------------------------------------------------
   describe('republish (update existing slug)', () => {
     it('returns 200 when republishing an existing slug', async () => {
-      const existingPublication = { id: 'pub-existing', version: 2 };
+      // `slug` is always selected by the route: the hold query can now return
+      // rows for OTHER slugs of the same project, so only rows whose slug
+      // matches drive the republish branch. flaggedAt null = no hold.
+      const existingPublication = {
+        id: 'pub-existing',
+        slug: 'my-awesome-game',
+        version: 2,
+        flaggedAt: null,
+      };
       const updatedPub = makePublication({ id: 'pub-existing', version: 3 });
 
-      const mockUpdate = vi.fn().mockReturnValue({
-        set: () => ({ where: () => Promise.resolve() }),
-      });
-      const mockDelete = vi.fn().mockReturnValue({
-        where: () => Promise.resolve(),
-      });
-      const mockInsertTags = vi.fn().mockReturnValue({
-        values: () => Promise.resolve(),
-      });
+      atomicQuery.mockResolvedValue([{ publication: updatedPub }]);
 
       const selectMock = vi.fn()
         .mockReturnValueOnce({
@@ -592,19 +581,10 @@ describe('POST /api/publish', () => {
               limit: () => Promise.resolve([makeProject()]),
             }),
           }),
-        })
-        .mockReturnValueOnce({
-          // final select after update
-          from: () => ({
-            where: () => Promise.resolve([updatedPub]),
-          }),
         });
 
       vi.mocked(getDb).mockReturnValue({
         select: selectMock,
-        update: mockUpdate,
-        delete: mockDelete,
-        insert: mockInsertTags,
       } as never);
 
       const res = await POST(makeRequest(validBody()));
@@ -612,6 +592,107 @@ describe('POST /api/publish', () => {
 
       const body = await res.json();
       expect(body).toHaveProperty('publication');
+      expect(body.publication.version).toBe(3);
+      expect(atomicQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses to republish a game under a moderation hold (#8354)', async () => {
+      // A reported game is auto-hidden with flaggedAt set. Republishing sets
+      // status back to 'published' unconditionally, so without this gate the
+      // creator could undo any takedown in one call.
+      const heldPublication = {
+        id: 'pub-held',
+        slug: 'my-awesome-game',
+        version: 2,
+        flaggedAt: new Date('2026-05-01T00:00:00.000Z'),
+      };
+
+      const mockUpdate = vi.fn();
+      const selectMock = vi
+        .fn()
+        .mockReturnValueOnce({
+          // publish-limit count
+          from: () => ({ where: () => Promise.resolve([]) }),
+        })
+        .mockReturnValueOnce({
+          // existing slug found — and it is on hold
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([heldPublication]) }),
+          }),
+        });
+
+      vi.mocked(getDb).mockReturnValue({
+        select: selectMock,
+        update: mockUpdate,
+      } as never);
+
+      const res = await POST(makeRequest(validBody()));
+      const body = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(body.code).toBe('MODERATION_HOLD');
+      // Neither the atomic commit nor a legacy status update may run.
+      expect(atomicQuery).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a held row of the SAME PROJECT filed under a different slug (#8354)', async () => {
+      // The takedown bypass: the hold used to be looked up by slug alone, and
+      // `uq_published_games_slug` is on (user_id, slug) with nothing unique on
+      // project_id — so republishing the same project under a NEW slug created
+      // a fresh 'published' row with flaggedAt NULL and undid the takedown in
+      // one call. The row below is the held publication of this project under
+      // its OLD slug; it must 403, and must NOT be mistaken for the target
+      // publication and republished under the new slug.
+      //
+      // This covers the JS half only — `.where()` is a passthrough here, so the
+      // mock cannot prove the project-scoped `or(...)` predicate actually
+      // selects that row. The SQL half is proven against real Postgres in
+      // `src/app/api/publish/publish.db.test.ts`.
+      const heldUnderOtherSlug = {
+        id: 'pub-held',
+        slug: 'the-old-slug',
+        version: 2,
+        flaggedAt: new Date('2026-05-01T00:00:00.000Z'),
+      };
+
+      const mockUpdate = vi.fn();
+      const mockInsert = vi.fn();
+      const selectMock = vi
+        .fn()
+        .mockReturnValueOnce({
+          from: () => ({ where: () => Promise.resolve([]) }),
+        })
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([heldUnderOtherSlug]) }),
+          }),
+        });
+
+      vi.mocked(getDb).mockReturnValue({
+        select: selectMock,
+        update: mockUpdate,
+        insert: mockInsert,
+      } as never);
+
+      // A real uuid projectId — that is what arms the project-scoped half of
+      // the hold query.
+      const res = await POST(
+        makeRequest(
+          validBody({
+            projectId: '11111111-2222-4333-8444-555555555555',
+            slug: 'a-brand-new-slug',
+          })
+        )
+      );
+      const body = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(body.code).toBe('MODERATION_HOLD');
+      // Neither a republish of the held row nor a fresh publication.
+      expect(atomicQuery).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
     });
   });
 });

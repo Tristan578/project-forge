@@ -1,0 +1,23 @@
+{
+  "observationId": "obs:01J9COMPLETE0000000001",
+  "metric": "completeness",
+  "environment": "production",
+  "window": {
+    "label": "30d",
+    "start": "2026-08-15T00:00:00Z",
+    "end": "2026-09-14T00:00:00Z"
+  },
+  "evidence": {
+    "capabilityId": "cap:scene.spawn@1"
+  },
+  "source": "capability-contract",
+  "releaseSha": "a1b2c3d4",
+  "observedAt": "2026-09-13T23:00:00Z",
+  "ingestedAt": "2026-09-13T23:05:00Z",
+  "confidence": "verified",
+  "applicability": "applicable",
+  "formulaVersion": "completeness@1",
+  "numerator": 4,
+  "denominator": 5,
+  "sampleSize": 5
+}

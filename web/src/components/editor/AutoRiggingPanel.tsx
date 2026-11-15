@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useId } from 'react';
 import { Bone, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Wand2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import {
@@ -107,6 +107,10 @@ function ValidationStatus({ rig }: { rig: RigTemplate }) {
 // ---------------------------------------------------------------------------
 
 export function AutoRiggingPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryName = useEditorStore((s) => {
     if (!s.primaryId) return null;
@@ -289,11 +293,11 @@ export function AutoRiggingPanel() {
 
         {/* Rig type selector */}
         <div>
-          <label htmlFor="rig-type" className="mb-1 block text-xs text-zinc-400">
+          <label htmlFor={fieldId('rig-type')} className="mb-1 block text-xs text-zinc-400">
             Rig Type
           </label>
           <select
-            id="rig-type"
+            id={fieldId('rig-type')}
             className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             value={selectedType}
             onChange={handleTypeChange}

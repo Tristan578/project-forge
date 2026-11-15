@@ -10,8 +10,9 @@ import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentT
 import { EditorLayout } from '../EditorLayout';
 import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
+import { startAutoSave } from '@/lib/storage/autoSave';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 
@@ -38,7 +39,9 @@ vi.mock('@/stores/workspaceStore', () => ({
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(() => ({})),
+  // `getState` (not just the hook) because the periodic-autosave ticker reads
+  // the store imperatively from inside its callbacks.
+  useEditorStore: Object.assign(vi.fn(() => ({})), { getState: vi.fn(() => ({})) }),
   getCommandDispatcher: vi.fn(() => null),
   setCommandDispatcher: vi.fn(),
 }));
@@ -439,5 +442,54 @@ describe('EditorLayout', () => {
 
     // Focus should not have moved
     expect(document.activeElement).toBe(prevActive);
+  });
+
+  /**
+   * #10056. This ticker dispatches `export_scene` DIRECTLY instead of going
+   * through the store's `saveScene`, so it does not inherit that action's
+   * refusal and carries its own. Without it, the 30 s crash-recovery autosave
+   * would keep writing the engine's empty scene into localStorage, the
+   * IndexedDB cache and the sessionStorage panic backup after a rejected load —
+   * i.e. it would overwrite the very snapshot a user would recover from.
+   */
+  describe('periodic autosave after a rejected scene load', () => {
+    /** The trigger callback EditorLayout hands to `startAutoSave`. */
+    function autoSaveTrigger(): () => void {
+      const call = vi.mocked(startAutoSave).mock.calls[0];
+      expect(call).toBeDefined();
+      return call[1] as () => void;
+    }
+
+    afterEach(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(useEditorStore.getState).mockReturnValue({} as any);
+    });
+
+    it('does not ask the engine to export while a load stands rejected', () => {
+      setupStores();
+      render(<EditorLayout />);
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        sceneLoadError: { reason: 'This scene could not be opened: bad prefab data.', at: 1 },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+
+      autoSaveTrigger()();
+
+      // The guard returns BEFORE the dispatcher is even looked up.
+      expect(vi.mocked(getCommandDispatcher)).not.toHaveBeenCalled();
+    });
+
+    it('still asks the engine to export when no rejection stands', () => {
+      setupStores();
+      render(<EditorLayout />);
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        sceneLoadError: null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+
+      autoSaveTrigger()();
+
+      expect(vi.mocked(getCommandDispatcher)).toHaveBeenCalled();
+    });
   });
 });

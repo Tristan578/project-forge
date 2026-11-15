@@ -5,13 +5,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { MeshyClient } from '@/lib/generate/meshyClient';
+import { panelTierGateResponse, panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import type { User } from '@/lib/db/schema';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobNotFound';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
+});
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  verifyProviderJobOwner: vi.fn(),
+}));
+// Both gate variants refuse every starter and hobbyist on a creator panel, so
+// no response can tell them apart here. Spy on the module (real behaviour
+// passed through) so a test can pin WHICH variant the route calls (#7715).
+vi.mock('@/lib/api/panelTierGate', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/api/panelTierGate')>();
+  return {
+    ...mod,
+    panelTierGateResponse: vi.fn(mod.panelTierGateResponse),
+    panelTierGateResponseForPoll: vi.fn(mod.panelTierGateResponseForPoll),
+  };
 });
 vi.mock('@/lib/generate/meshyClient', () => ({
   MeshyClient: vi.fn(() => ({
@@ -34,6 +53,7 @@ describe('GET /api/generate/model/status', () => {
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
+    vi.mocked(verifyProviderJobOwner).mockResolvedValue('owner');
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -62,6 +82,77 @@ describe('GET /api/generate/model/status', () => {
     expect(res.status).toBe(402);
     const data = await res.json();
     expect(data.code).toBe('INSUFFICIENT_TOKENS');
+  });
+
+  // Ownership check (#10262): without this, any signed-in caller admitted past
+  // the tier gate could poll a job id they never created and read back another
+  // user's result via the platform key `resolveApiKey` returns by default.
+  describe('job ownership (#10262)', () => {
+    it('returns 404 without resolving a key when the caller does not own the job', async () => {
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('not_owner');
+
+      const res = await GET(makeRequest('someone-elses-job'));
+
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe(JOB_NOT_FOUND_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    // A lookup that failed (DB error, open circuit breaker) is NOT a verdict
+    // on the job: still fail-closed (no key resolved), but 503, which the
+    // poller keeps polling through, never the 404 it treats as terminal.
+    it('returns a retryable 503, not a terminal 404, and resolves no key when the ownership lookup FAILS', async () => {
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('unverifiable');
+
+      const res = await GET(makeRequest('someone-elses-job'));
+
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    it('checks ownership with the authenticated userId, the model3d provider, and the polled jobId', async () => {
+      const getTaskStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 10 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTaskStatus = getTaskStatus;
+        } as unknown as typeof MeshyClient
+      );
+
+      // Decoy ids beside the polled one: the provider must be sent the id the
+      // ownership check ran on, never another caller-chosen value (#10262).
+      await GET(new NextRequest(
+        'http://test/api/generate/model/status?jobId=job-123&predictionId=decoy_other&taskId=decoy_other&id=decoy_other',
+      ));
+
+      expect(verifyProviderJobOwner).toHaveBeenCalledTimes(1);
+      expect(verifyProviderJobOwner).toHaveBeenCalledWith('user_1', 'meshy', 'job-123');
+      expect(getTaskStatus).toHaveBeenCalledTimes(1);
+      expect(getTaskStatus).toHaveBeenCalledWith('job-123');
+    });
+
+    it('checks ownership BEFORE resolving the API key', async () => {
+      const callOrder: string[] = [];
+      vi.mocked(verifyProviderJobOwner).mockImplementation(async () => {
+        callOrder.push('verifyProviderJobOwner');
+        return 'owner';
+      });
+      vi.mocked(resolveApiKey).mockImplementation(async () => {
+        callOrder.push('resolveApiKey');
+        return { type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' };
+      });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTaskStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 10 });
+        } as unknown as typeof MeshyClient
+      );
+
+      await GET(makeRequest('job-123'));
+
+      expect(callOrder).toEqual(['verifyProviderJobOwner', 'resolveApiKey']);
+    });
   });
 
   it('returns completed status for SUCCEEDED task', async () => {
@@ -100,7 +191,7 @@ describe('GET /api/generate/model/status', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Model generation failed');
+    expect(data.error).toBe(withRetryGuidance('Model generation failed'));
   });
 
   it('maps SUCCEEDED-with-no-model-file to failed (so the poller refunds, not hangs)', async () => {
@@ -125,7 +216,7 @@ describe('GET /api/generate/model/status', () => {
     const data = await res.json();
     expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBe('Model generation produced no file');
+    expect(data.error).toBe(withRetryGuidance('Model generation produced no file'));
   });
 
   it('does not leak a resultUrl while still processing', async () => {
@@ -189,6 +280,92 @@ describe('GET /api/generate/model/status', () => {
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Meshy API timeout');
+    // The provider's own text must NOT come back: `MeshyClient` folds the
+    // upstream RESPONSE BODY into the thrown error, and on the platform path
+    // the credential in play is the platform's (#9736).
+    expect(data.error).not.toContain('Meshy API timeout');
+    expect(data.error).toBe('Could not read the 3D Model generation status. Please try again.');
+  });
+
+  // Per-panel tier gate (#7715). This route resolves the platform key itself
+  // rather than going through `createGenerationHandler`, so without its own
+  // `panelTierGateResponseForPoll('generate-model', …)` call a trial starter (effective
+  // hobbyist) could poll the creator-gated 3D model provider with the platform key.
+  describe('panel tier gate (generate-model, creator)', () => {
+    function authAs(user: Record<string, unknown>) {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true as const,
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', ...user } as unknown as User },
+      });
+    }
+
+    it('refuses a starter holding 50 spendable trial tokens with 403 TIER_REQUIRED and never resolves a key', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(data).toEqual({
+        error: 'TIER_REQUIRED',
+        message: 'This feature requires the Creator plan',
+        currentTier: 'starter',
+        requiredTier: 'creator',
+      });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    it('refuses a starter whose trial balance is spent: the poll rule ignores the balance but never reaches creator', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'TIER_REQUIRED', currentTier: 'starter', requiredTier: 'creator' });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    it('refuses a real hobbyist account the same way', async () => {
+      authAs({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe('TIER_REQUIRED');
+      expect(resolveApiKey).not.toHaveBeenCalled();
+    });
+
+    it('lets a creator account through to resolveApiKey', async () => {
+      authAs({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTaskStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 40 });
+        } as unknown as typeof MeshyClient
+      );
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+      // A zero-cost status poll: the pair the resolver requires before it
+      // skips its own tier and balance checks (#7715).
+      expect(vi.mocked(resolveApiKey).mock.calls[0].slice(2)).toEqual([0, STATUS_CHECK_OPERATION]);
+    });
+
+    it('runs the POLL variant of the panel gate, never the create variant', async () => {
+      // Every refusal above is the same 403 from either variant, so they
+      // cannot see a route that calls the create variant by mistake. This can.
+      authAs({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 1000, addonTokens: 0 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTaskStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 40 });
+        } as unknown as typeof MeshyClient
+      );
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(200);
+      expect(panelTierGateResponseForPoll).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(panelTierGateResponseForPoll).mock.calls[0][0]).toBe('generate-model');
+      expect(panelTierGateResponse).not.toHaveBeenCalled();
+    });
   });
 });

@@ -12,7 +12,7 @@ describe('registerBotIdProtection', () => {
     vi.clearAllMocks();
   });
 
-  it('registers exactly the generate wildcard and billing checkout routes, POST only', () => {
+  it('registers exactly the generate wildcard, billing checkout and game-report routes, POST only', () => {
     registerBotIdProtection();
 
     expect(mockInitBotId).toHaveBeenCalledTimes(1);
@@ -25,6 +25,7 @@ describe('registerBotIdProtection', () => {
       protect: [
         { path: '/api/generate/*', method: 'POST' },
         { path: '/api/billing/checkout', method: 'POST' },
+        { path: '/api/community/games/*/report', method: 'POST' },
       ],
     });
   });

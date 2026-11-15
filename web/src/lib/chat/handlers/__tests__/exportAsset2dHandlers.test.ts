@@ -9,7 +9,7 @@ import { assetHandlers } from '../assetHandlers';
 import { handlers2d } from '../handlers2d';
 import { MAX_IK_BONE_CHAIN_2D } from '@/lib/skeleton2d/skeletonPayload';
 import type { ToolCallContext, ExecutionResult } from '../types';
-import type { SkeletonData2d } from '@/stores/slices/types';
+import type { SkeletonData2d, Joint2dData, Camera2dData } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
 // Mock the export engine so tests don't perform real file I/O
@@ -437,17 +437,34 @@ describe('assetHandlers', () => {
   // load_texture
   // -------------------------------------------------------------------------
   describe('load_texture', () => {
+    // A raw body (no `data:` header) is typed by its first bytes before the
+    // store is touched (#10396); 'abc', which this block used to send, is
+    // neither PNG nor JPEG and is refused. 'iVBORw0KGgo=' is the PNG
+    // signature, so the missing-field tests can fail only for their field.
     it('calls store.loadTexture with all required args', async () => {
       const { result, store } = await invokeHandler(
         assetHandlers,
         'load_texture',
-        { dataBase64: 'abc', name: 'tex.png', entityId: 'ent-1', slot: 'base_color' },
+        { dataBase64: 'iVBORw0KGgo=', name: 'tex.png', entityId: 'ent-1', slot: 'base_color' },
         { loadTexture: vi.fn() },
       );
       expect(result.success).toBe(true);
-      expect(store.loadTexture).toHaveBeenCalledWith('abc', 'tex.png', 'ent-1', 'base_color');
+      expect(store.loadTexture).toHaveBeenCalledWith('iVBORw0KGgo=', 'tex.png', 'ent-1', 'base_color');
       expect(result.result).toMatchObject({ message: expect.stringContaining('tex.png') });
       expect(result.result).toMatchObject({ message: expect.stringContaining('base_color') });
+    });
+
+    it('forwards a raw body that starts with the JPEG SOI marker whole, as it does the PNG one', async () => {
+      // The sniff's other accepted signature. Forwarded as is - never
+      // rewrapped in a data URL - so the engine sniffs the same bytes.
+      const { result, store } = await invokeHandler(
+        assetHandlers,
+        'load_texture',
+        { dataBase64: '/9j/4AAQSkZJRg==', name: 'photo.jpg', entityId: 'ent-1', slot: 'base_color' },
+        { loadTexture: vi.fn() },
+      );
+      expect(result.success).toBe(true);
+      expect(store.loadTexture).toHaveBeenCalledWith('/9j/4AAQSkZJRg==', 'photo.jpg', 'ent-1', 'base_color');
     });
 
     it('returns error when dataBase64 is missing', async () => {
@@ -459,21 +476,21 @@ describe('assetHandlers', () => {
 
     it('returns error when name is missing', async () => {
       const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-        dataBase64: 'abc', entityId: 'ent-1', slot: 'base_color',
+        dataBase64: 'iVBORw0KGgo=', entityId: 'ent-1', slot: 'base_color',
       });
       expect(result.success).toBe(false);
     });
 
     it('returns error when entityId is missing', async () => {
       const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-        dataBase64: 'abc', name: 'tex.png', slot: 'base_color',
+        dataBase64: 'iVBORw0KGgo=', name: 'tex.png', slot: 'base_color',
       });
       expect(result.success).toBe(false);
     });
 
     it('returns error when slot is missing', async () => {
       const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-        dataBase64: 'abc', name: 'tex.png', entityId: 'ent-1',
+        dataBase64: 'iVBORw0KGgo=', name: 'tex.png', entityId: 'ent-1',
       });
       expect(result.success).toBe(false);
     });
@@ -1061,6 +1078,16 @@ describe('handlers2d project and camera commands', () => {
     it('succeeds with no args (all optional)', async () => {
       const { result } = await invoke2d('set_grid_2d', {});
       expect(result.success).toBe(true);
+    });
+
+    it('never forwards an explicit undefined key (setGrid2d spreads it over existing settings)', async () => {
+      const { result, store } = await invoke2d('set_grid_2d', { size: 16, enabled: undefined });
+      expect(result.success).toBe(true);
+      expect(store.setGrid2d).toHaveBeenCalledTimes(1);
+      const settings = vi.mocked(store.setGrid2d).mock.calls[0]?.[0];
+      // Own keys, not toEqual: toEqual treats `{ enabled: undefined }` as `{}`.
+      expect(Object.keys(settings ?? {})).toEqual(['size']);
+      expect(settings).toStrictEqual({ size: 16 });
     });
   });
 });
@@ -1813,6 +1840,20 @@ describe('handlers2d 2D physics commands', () => {
       }), true);
     });
 
+    it('keeps the existing value when an input key is explicitly undefined (#10306)', async () => {
+      // zod keeps an input key that is present with `undefined` as an own key,
+      // so a raw spread of the parsed args would erase `friction` here.
+      const existing = { bodyType: 'dynamic' as const, colliderShape: 'box' as const, size: [1, 1] as [number, number], radius: 0.5, vertices: [] as [number, number][], mass: 2, friction: 0.5, restitution: 0, gravityScale: 1, isSensor: false, lockRotation: false, continuousDetection: false, oneWayPlatform: false, surfaceVelocity: [0, 0] as [number, number] };
+      const { store } = await invoke2d(
+        'set_physics2d',
+        { entityId: 'ent-1', mass: 5, friction: undefined },
+        { physics2d: { 'ent-1': existing }, setPhysics2d: vi.fn() },
+      );
+      const data = vi.mocked(store.setPhysics2d).mock.calls[0]?.[1];
+      expect(data?.mass).toBe(5);
+      expect(data?.friction).toBe(0.5);
+    });
+
     it('returns error when entityId is missing', async () => {
       const { result } = await invoke2d('set_physics2d', { bodyType: 'static' });
       expect(result.success).toBe(false);
@@ -1979,6 +2020,97 @@ describe('handlers2d 2D physics commands', () => {
       const { result } = await invoke2d('raycast2d', {});
       expect(result.success).toBe(false);
       expect(result.error).not.toContain('Play mode');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // The engine reads that had no producer (#9351)
+  // -------------------------------------------------------------------------
+  // ANNOTATED, so `tsc` checks it against the shape the store actually holds.
+  // `invoke2d`'s `storeOverrides` is `Record<string, unknown>`, so an unannotated
+  // fixture compiles whatever its fields are called — and the first version of
+  // this one had `connectedEntityId`, `anchorSelf`, `anchorOther` and a `motor`,
+  // none of which exist on `Joint2dData`. Every assertion below still passed,
+  // because a handler that returns what you put in returns anything you put in.
+  // The type annotation is what makes these tests about a joint.
+  const baseJoint2d: Joint2dData = {
+    targetEntityId: 'ent-2',
+    jointType: 'revolute',
+    localAnchor1: [0, 0],
+    localAnchor2: [1, 0],
+  };
+
+  describe('get_joint_2d', () => {
+    it('returns the joint for an entity', async () => {
+      const { result } = await invoke2d(
+        'get_joint_2d',
+        { entityId: 'ent-1' },
+        { joints2d: { 'ent-1': baseJoint2d } },
+      );
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual(baseJoint2d);
+    });
+
+    it('reports a missing entity by name', async () => {
+      const { result } = await invoke2d('get_joint_2d', { entityId: 'ent-none' }, { joints2d: {} });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('ent-none');
+    });
+
+    // `zEntityId` is `z.string().min(1)`, so `'__proto__'` is a legal argument.
+    // A bare `joints2d['__proto__']` returns `Object.prototype` — truthy — so
+    // the missing-entity branch would never fire and the handler would answer
+    // with a joint that does not exist (PF-1167).
+    it('does not answer with Object.prototype for __proto__', async () => {
+      const { result } = await invoke2d('get_joint_2d', { entityId: '__proto__' }, { joints2d: {} });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('__proto__');
+    });
+
+    it('rejects a call with no entityId', async () => {
+      const { result } = await invoke2d('get_joint_2d', {}, { joints2d: {} });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('list_joints_2d', () => {
+    it('lists every joint with its entity id and a count', async () => {
+      const { result } = await invoke2d(
+        'list_joints_2d',
+        {},
+        { joints2d: { 'ent-1': baseJoint2d, 'ent-3': baseJoint2d } },
+      );
+      expect(result.success).toBe(true);
+      const payload = result.result as { joints: Array<{ entityId: string }>; count: number };
+      expect(payload.count).toBe(2);
+      expect(payload.joints.map((j) => j.entityId).sort()).toEqual(['ent-1', 'ent-3']);
+    });
+
+    it('reports an empty scene as zero joints, not as a failure', async () => {
+      const { result } = await invoke2d('list_joints_2d', {}, { joints2d: {} });
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual({ joints: [], count: 0 });
+    });
+  });
+
+  describe('get_camera_2d', () => {
+    // Annotated for the same reason as `baseJoint2d`: the first version had
+    // `position` and `rotation`, neither of which is on `Camera2dData`, and was
+    // missing both `pixelPerfect` and `bounds`.
+    const camera: Camera2dData = { zoom: 1, pixelPerfect: false, bounds: null };
+
+    it('returns the scene camera', async () => {
+      const { result } = await invoke2d('get_camera_2d', {}, { camera2dData: camera });
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual(camera);
+    });
+
+    // `null` means the scene HAS no 2D camera. Answering with an empty object
+    // would make "no camera" and "a camera with no settings" the same reply.
+    it('reports the absence of a camera rather than an empty one', async () => {
+      const { result } = await invoke2d('get_camera_2d', {}, { camera2dData: null });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/no 2D camera/i);
     });
   });
 });

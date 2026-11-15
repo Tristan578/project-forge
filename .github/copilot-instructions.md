@@ -4,7 +4,7 @@
 
 SpawnForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot monorepo:
 
-- **engine/** — Rust (Bevy 0.18) compiled to WebAssembly via wasm-bindgen. Pure game logic in `engine/src/core/`, JS interop bridge in `engine/src/bridge/`.
+- **engine/** — Rust (Bevy 0.19) compiled to WebAssembly via wasm-bindgen. Pure game logic in `engine/src/core/`, JS interop bridge in `engine/src/bridge/`.
 - **web/** — TypeScript/React (Next.js 16) editor frontend. State via Zustand store slices. Strict TypeScript, zero ESLint warnings.
 - **mcp-server/** — TypeScript MCP server exposing engine commands as AI-callable tools via WebSocket.
 
@@ -26,6 +26,61 @@ cd engine && cargo build --target wasm32-unknown-unknown --release --features we
 cd engine && cargo build --target wasm32-unknown-unknown --release --features webgpu
 ```
 
+## MCP Servers (local Copilot CLI)
+
+Copilot CLI loads the repository's `.mcp.json`, the same file Claude Code uses, so
+there is nothing to copy. It reads it only after you confirm folder trust on the
+first launch in this checkout. Prompt mode (`copilot -p`) cannot show that
+prompt: it loads the servers if the folder is already trusted and skips them if
+it is not. `GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP=true` is a prompt-mode-only
+override that loads them in an untrusted folder anyway. `.mcp.json` runs
+commands, so set it per invocation and only in a checkout you trust, never
+globally. (Sources: github/docs `content/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers.md`
+and the environment-variable table in `content/copilot/reference/copilot-cli-reference/cli-command-reference.md`, at 0b8c768.)
+
+Servers such as `neon`, `sentry`, `stripe` and `upstash` need the credentials
+named in their `env` block. Those values are written as `${VAR}` references,
+and Copilot CLI expands `${VAR}` in a server's `env` from the environment of the
+`copilot` process (`cli-command-reference.md`: `env` "Supports `$VAR`, `${VAR}`,
+and `${VAR:-default}` expansion"; copilot-cli changelog 0.0.340: a value that is
+not a `${VAR}` reference is passed literally). Neither source says Copilot reads
+`.env.local`, so export the variables in the shell you launch `copilot` from.
+Never put a literal key in an MCP config file; a user-level entry in
+`~/.copilot/mcp-config.json` takes the same `${VAR}` form.
+
+## Hooks (Copilot CLI and cloud agent)
+
+Copilot CLI runs hooks from `.github/hooks/*.json` AND from the `hooks` block of
+`.claude/settings.json`, and when one event is wired in both it runs both
+(github/docs `content/copilot/reference/hooks-reference.md`, "Hooks locations",
+at 0b8c768). The Copilot cloud agent reads only `.github/hooks/*.json`. The
+rule is per script, not per event:
+
+- **Same script, same event, in both files:** Copilot CLI uses the
+  `.claude/settings.json` entry (the one Claude Code also runs), and the
+  `.github/hooks` handler for that script must be cloud-agent-only.
+- **Any other `.github/hooks` handler** runs on both surfaces, even on an event
+  `.claude/settings.json` also wires for other scripts. `session-setup.json`
+  (`npm ci` on `sessionStart`) and `validation.json` (`copilot-arch-check.sh` on
+  `postToolUse`) are this kind.
+
+Cloud-agent-only means a single `bash` field that starts with
+`[ -n "${COPILOT_AGENT_PROMPT+x}" ] || exit 0;` followed by the command (a
+space, a newline or nothing after the `;`). The cloud agent sets
+`COPILOT_AGENT_PROMPT` for hook scripts ("Cloud agent execution environment" in
+the same reference); Copilot CLI's references do not list it as set, so the
+handler exits 0 there and each script runs once per event on each surface. If
+you export `COPILOT_AGENT_PROMPT` in a local shell, the CLI double run returns. The
+trade-off: a script wired only in `.claude/settings.json` never runs on the
+cloud agent, and a guarded handler never runs under Copilot CLI.
+`scripts/check-copilot-hooks.sh` (CI: Agentic Config Sync) fails a PR that wires
+a script to the same event in both files without that guard, and one that
+guards a handler whose script `.claude/settings.json` does not run on that
+event (Copilot CLI would then never run it). It cannot see
+`.claude/settings.local.json`, `.github/copilot/settings.json` or
+`.github/copilot/settings.local.json` (Copilot CLI reads hooks from those too),
+or your `~/.copilot` hooks.
+
 ## Architecture Rules
 
 - **Bridge isolation**: Only `engine/src/bridge/` may import `web_sys`/`js_sys`/`wasm_bindgen`. `core/` is pure Rust.
@@ -44,7 +99,7 @@ cd engine && cargo build --target wasm32-unknown-unknown --release --features we
 
 ### TypeScript (web/, mcp-server/)
 - Strict mode. Never use `any`. Avoid `as` casts.
-- All chat handler arguments MUST be validated before use (manual validation via `parseArgs()` pattern — Zod is not used for runtime validation).
+- All chat handler arguments MUST be validated before use, and the convention is Zod: `z.object(...)` with `.parse()`/`.safeParse()`, or the shared `parseArgs(schema, args)` helper in `web/src/lib/chat/handlers/types.ts`, which is itself `schema.safeParse(args)`. Both paths are Zod. Not every handler does this yet: some older ones read `args` with casts or `typeof` checks (for example most of `compoundHandlers.ts`, `set_audio` in `audioEntityHandlers.ts`, `get_entity_details` and `pixelArtHandlers.ts`). New handlers must use a Zod schema, and a handler you touch should gain one. Never trust `args` directly.
 - Use named exports. Prefer `const` over `let`. Never use `var`.
 - Tailwind CSS for all styling. No inline styles or CSS modules.
 
@@ -66,18 +121,19 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
-- Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
+- Start: `node .claude/hooks/taskboard-launch.mjs start`  *(the launcher resolves the shared database path and passes it to the binary itself — never start the binary by hand or pass your own `--db`)*
+- First run on a new machine (no taskboard database yet): `node .claude/hooks/taskboard-launch.mjs init` once, instead of Start  *(the only command that creates the shared database; it refuses when a populated database already exists or a server is already running)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.4.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 83 · branches 75 · functions 78 · lines 85
+**Coverage thresholds (CI-enforced):** statements 86 · branches 79 · functions 82 · lines 88
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync details.
@@ -87,6 +143,32 @@ See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync deta
 - `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
 - The JSON map file is a cache. SQLite columns are authoritative.
 - Tickets from other local projects are NEVER synced (they have `sync_repo = NULL`).
+
+## Plan Mode (Copilot CLI)
+
+This repository is spec-first. `.claude/CLAUDE.md` says "Spec-First: Never implement
+without an approved spec in `specs/`". In Copilot CLI, enter plan mode before you
+implement a subtask. Have Copilot write the implementation plan, check it against the
+ticket's acceptance criteria, and only then leave plan mode. The plan is not a spec. If
+the work needs a spec, it still goes in `specs/`.
+
+Ways to enter it, checked against `copilot --help` and `copilot help commands` for
+Copilot CLI 1.0.88:
+
+- `/plan` creates an implementation plan before coding.
+- `copilot --plan` (or `--mode plan`) starts a session in plan mode.
+- To start every new interactive session in plan mode, set the `defaultMode` setting to
+  `plan` with `/settings` at user scope. Do not use `/settings --repo`. That writes
+  `.github/copilot/settings.json` inside the repository, and a personal preference
+  must not be committed there.
+
+Do not combine `--plan` with `--mode autopilot` here. That combination approves the
+plan automatically and implements it, which skips the review step this section exists
+for.
+
+To trust this checkout so Copilot CLI stops asking on every start, follow
+`docs/guides/copilot-cli-trusted-folders.md`. The trust list is local state and is never
+committed.
 
 ## Security
 
@@ -180,7 +262,7 @@ bash .claude/tools/validate-all.sh              # Everything
 
 For full architecture rules, ECS patterns, and library APIs, see:
 - `.claude/CLAUDE.md` — Full project constitution
-- `.claude/rules/bevy-api.md` — Bevy 0.18 API patterns
+- `.claude/rules/bevy-api.md` — Bevy 0.19 API patterns
 - `.claude/rules/entity-snapshot.md` — ECS snapshot patterns
 - `.claude/rules/web-quality.md` — ESLint & React patterns
 - `.claude/rules/library-apis.md` — Third-party library APIs

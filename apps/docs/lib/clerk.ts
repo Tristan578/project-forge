@@ -1,31 +1,16 @@
 /**
- * Clerk publishable-key gating for the docs app.
+ * Clerk configuration checks shared by the docs build and render guards.
  *
- * TWO DISTINCT STATES, DELIBERATELY TREATED DIFFERENTLY (#9044):
+ * Local development and CI may omit both Clerk keys. In that state the app
+ * skips ClerkProvider and shows the authentication-unavailable message.
+ * A truthy secret with no publishable key fails the build (#9721), as does a
+ * malformed publishable key (#9044). A usable publishable key retains the
+ * existing behavior when no secret is configured.
  *
- *  - MISSING. No key configured at all. Legitimate — local checkouts and CI run
- *    without Clerk credentials, and the app degrades to "auth is not set up
- *    here". Soft-skips the provider; never throws.
- *  - MALFORMED. A key IS configured but cannot possibly work. That is always a
- *    configuration mistake, never a legitimate state, so it fails the BUILD
- *    (see `next.config.ts`) rather than shipping.
- *
- * The distinction exists because collapsing the two — treating anything
- * non-conforming as "Clerk is not set up here" — is how docs.spawnforge.ai
- * shipped with authentication completely dead and no signal anywhere. The
- * Vercel env var held the literal string
- * `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...`: the whole `NAME=value`
- * assignment pasted in as the value. Clerk derives its script host by
- * base64-decoding the key, so that value decoded to an EMPTY host and clerk-js
- * was requested from `https:///npm/...`, which cannot resolve. Every sign-in on
- * the docs site was broken, silently, for as long as that value was set.
- *
- * The guard is also load-bearing for local development: @clerk/nextjs 7.8.0
- * added a `throwMissingPublishableKeyError()` to the keyless branch that used
- * to render fine without keys (#9378 / #9384).
- *
- * `NEXT_PUBLIC_*` is inlined at build time, so these read the same value on the
- * server and in the browser bundle.
+ * The key-shape check catches truncated values and pasted NAME=value
+ * assignments before Clerk derives an invalid script host from them.
+ * NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is inlined at build time; the secret-key
+ * check belongs to the server-side build configuration.
  */
 
 /** Prefixes Clerk accepts for a publishable key. */
@@ -151,36 +136,78 @@ export function clerkPublishableKeyHasSurroundingWhitespace(
 }
 
 /**
- * Fail the build when a publishable key is configured but unusable.
+ * Fail the build when Clerk is configured in a way that cannot work.
  *
  * Called from `next.config.ts`, so the error surfaces during `next build`: the
- * deploy goes red and the bad value never reaches production. Deliberately NOT
- * a runtime throw — docs pages are overwhelmingly public content, and taking
- * the whole site down over a broken auth key would be a worse outcome than the
- * bug this guards against.
+ * deploy goes red and the bad configuration never reaches production.
+ * Deliberately NOT a runtime throw — docs pages are overwhelmingly public
+ * content, and taking the whole site down over a broken auth key would be a
+ * worse outcome than the bug this guards against.
+ *
+ * Two distinct build-failing states, both covered by tests:
+ *
+ *  - MALFORMED publishable key. A key IS set but cannot work (paste error,
+ *    secret key, undecodable payload). Diagnosed by `clerkPublishableKeyProblem`
+ *    (#9044).
+ *  - HALF-CONFIGURED Clerk. `CLERK_SECRET_KEY` is set but the publishable key is
+ *    absent (#9721). `proxy.ts` passes requests straight through only when the
+ *    secret key is UNSET, so a set secret with no publishable key runs
+ *    `clerkMiddleware`, which throws "Missing publishableKey" on every request
+ *    while sign-in is silently dead. This is exactly the state that shipped to
+ *    docs.spawnforge.ai after #9044's malformed key was removed rather than
+ *    corrected — the malformed-key guard had nothing left to catch.
+ *
+ * ABSENT-BOTH stays a supported state: local checkouts and CI build without any
+ * Clerk credentials.
+ *
+ * @param raw Publishable key, defaulting to NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.
+ * @param secretKey Server secret, defaulting to CLERK_SECRET_KEY.
+ * @returns Nothing when the configuration passes these build checks.
+ * @throws When the publishable key is malformed or a secret has no publishable key.
  */
 export function assertClerkPublishableKeyShape(
   raw: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
 ): void {
   const problem = clerkPublishableKeyProblem(raw);
-  if (problem === null) {
-    // Usable but untidy: surrounding whitespace works (Clerk trims) so it must
-    // not fail the build, but it is worth saying once rather than silently
-    // normalising and letting the value rot (#9558).
-    if (clerkPublishableKeyHasSurroundingWhitespace(raw)) {
-      console.warn(
-        'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY has leading or trailing whitespace. ' +
-          'It works — Clerk trims — but the stored value should be the key alone.',
-      );
-    }
-    return;
+  if (problem !== null) {
+    throw new Error(
+      `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable: ${problem}. ` +
+        'Authentication would be silently dead on the deployed docs site (#9044). ' +
+        'Fix the value in the Vercel project settings (or in .env.local for a ' +
+        'local build). To build with authentication disabled, remove both ' +
+        'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY; leaving only ' +
+        'the secret key configured is not supported.',
+    );
   }
-  throw new Error(
-    `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable: ${problem}. ` +
-      'Authentication would be silently dead on the deployed docs site (#9044). ' +
-      'Fix the value in the Vercel project settings (or in .env.local for a ' +
-      'local build), or remove it entirely to build the docs with ' +
-      'authentication disabled — an ABSENT key is a supported state, an ' +
-      'unusable one is not.',
-  );
+
+  // problem === null means the publishable key is USABLE or ABSENT. An absent
+  // publishable key alongside a PRESENT secret key is the half-configured state
+  // (#9721): distinct from the malformed case above, and just as certainly a
+  // mistake. The secret value is never interpolated into the message — it is a
+  // real secret, unlike the publishable key.
+  const publishableAbsent = (raw ?? '').trim() === '';
+  // Match proxy.ts: even whitespace makes a raw secret value truthy and enters
+  // Clerk middleware. Trimming here would let that broken configuration build.
+  const secretPresent = Boolean(secretKey);
+  if (publishableAbsent && secretPresent) {
+    throw new Error(
+      'CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent. ' +
+        'A half-configured Clerk instance leaves sign-in silently dead and makes ' +
+        'the docs middleware throw "Missing publishableKey" on every request ' +
+        '(#9721). Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (production and preview) ' +
+        'to the matching Clerk instance key, or remove CLERK_SECRET_KEY to build ' +
+        'the docs with authentication disabled — configure BOTH keys or NEITHER.',
+    );
+  }
+
+  // Usable but untidy: surrounding whitespace works (Clerk trims) so it must
+  // not fail the build, but it is worth saying once rather than silently
+  // normalising and letting the value rot (#9558).
+  if (clerkPublishableKeyHasSurroundingWhitespace(raw)) {
+    console.warn(
+      'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY has leading or trailing whitespace. ' +
+        'It works — Clerk trims — but the stored value should be the key alone.',
+    );
+  }
 }

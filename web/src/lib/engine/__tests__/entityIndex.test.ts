@@ -87,7 +87,10 @@ describe('buildEntityIndex', () => {
     expect(idx.byType.get('directional_light')?.size).toBe(1);
     expect(idx.byType.get('spot_light')?.size).toBe(1);
     expect(idx.byType.get('terrain')?.size).toBe(1);
-    expect(idx.byType.get('entity')?.size).toBe(1);
+    // PF-1162: the componentless node (e7) falls through to the shared
+    // 'unknown' fallback, not the old private 'entity' bucket.
+    expect(idx.byType.get('unknown')?.size).toBe(1);
+    expect(idx.byType.get('entity')).toBeUndefined();
   });
 
   it('indexes entities by component', () => {
@@ -121,7 +124,8 @@ describe('buildEntityIndex', () => {
     const node = makeNode({ entityId: 'e1', name: 'Empty', components: [] });
     const idx = buildEntityIndex(makeGraph([node]));
 
-    expect(idx.byId.get('e1')?.entityType).toBe('entity');
+    // PF-1162: shared helper fallback is 'unknown', not the old 'entity'.
+    expect(idx.byId.get('e1')?.entityType).toBe('unknown');
     expect(idx.byComponent.size).toBe(0);
   });
 
@@ -134,11 +138,15 @@ describe('buildEntityIndex', () => {
     expect(idx.byType.get('mesh')).toBeUndefined();
   });
 
-  it('sprite type is inferred correctly', () => {
+  it('classifies a Sprite-only node as unknown, not sprite (PF-1162)', () => {
+    // The engine wire contract (scene_graph.rs detect_components) emits neither
+    // 'Sprite' nor 'SpriteData', so the shared helper has no sprite branch and
+    // such a node falls through to the 'unknown' fallback.
     const node = makeNode({ entityId: 'e1', components: ['Sprite', 'Transform'] });
     const idx = buildEntityIndex(makeGraph([node]));
-    expect(idx.byId.get('e1')?.entityType).toBe('sprite');
-    expect(idx.byType.get('sprite')?.has('e1')).toBe(true);
+    expect(idx.byId.get('e1')?.entityType).toBe('unknown');
+    expect(idx.byType.get('unknown')?.has('e1')).toBe(true);
+    expect(idx.byType.get('sprite')).toBeUndefined();
   });
 });
 

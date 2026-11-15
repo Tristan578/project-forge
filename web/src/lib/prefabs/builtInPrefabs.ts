@@ -1,7 +1,19 @@
 import type { Prefab, PrefabSnapshot } from './prefabStore';
+import { createAssetVersion } from './assetVersion';
+
+const BUILT_IN_DATE = '2024-01-01T00:00:00Z';
 
 function makeBuiltIn(id: string, name: string, category: string, description: string, snapshot: PrefabSnapshot): Prefab {
-  return { id, name, category, description, snapshot, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' };
+  return {
+    id,
+    name,
+    category,
+    description,
+    snapshot,
+    createdAt: BUILT_IN_DATE,
+    updatedAt: BUILT_IN_DATE,
+    assetVersion: createAssetVersion(snapshot, undefined, BUILT_IN_DATE),
+  };
 }
 
 export const BUILT_IN_PREFABS: Prefab[] = [

@@ -2,14 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
-import { publishedGames, projects, gameTags } from '@/lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { publishedGames, projects } from '@/lib/db/schema';
+import { eq, ne, and, or, isNotNull, inArray } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { checkTrademark } from '@/lib/moderation/trademarkFilter';
 import { PUBLISH_LIMITS } from '@/lib/projects/limits';
 import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
+import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
+import {
+  writePublishedGameBundle, deletePublishedGameBundle, isPublishedSceneData,
+} from '@/lib/storage/publishedGameStorage';
+import { commitPublication } from '@/lib/publishing/commitPublication';
 
 const publishSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -22,7 +29,12 @@ const publishSchema = z.object({
   tags: z.unknown().optional(),
 });
 
-export async function POST(request: NextRequest) {
+// projects.id and published_games.project_id are uuid columns, but publishSchema
+// accepts any 1-100 char string for projectId (legacy callers). Used to decide
+// whether a projectId is safe to compare against a uuid column.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function POST_impl(request: NextRequest) {
   try {
   const requestId = extractRequestId(request.headers);
   const reqLog = logger.child({ requestId, endpoint: 'POST /api/publish' });
@@ -122,21 +134,105 @@ export async function POST(request: NextRequest) {
 
   // Check tier publish limits. An unrecognized tier falls back to the free
   // tier's allowance — never to a more generous one.
+  //
+  // WHICH ROWS OCCUPY A SLOT
+  // 'flagged' counts. A moderation hold is not a slot the creator gave up: the
+  // game goes back to 'published' the moment an admin approves it or the
+  // creator wins an appeal. Counting only 'published' freed the slot while the
+  // game was hidden, so a starter-tier creator (limit 1) whose game was
+  // auto-hidden could publish a replacement and then be restored to TWO
+  // published games, permanently over the limit with no path back under it.
+  // 'unpublished' does not count — that one IS the creator's own choice — and
+  // 'processing' never has, which this keeps unchanged.
+  //
+  // The row that owns THIS slug is excluded, because the limit gates how many
+  // games exist and not how many times one is updated. Counting the target of a
+  // republish against its own republish made the starter tier's single
+  // publication un-updatable: every re-POST of the only slug the account owns
+  // saw 1 >= 1 and 403'd with a limit error. A row of someone else's with this
+  // slug cannot be matched — the user scope below is on the same `and`.
   const maxPublished = PUBLISH_LIMITS[user.tier as keyof typeof PUBLISH_LIMITS] ?? PUBLISH_LIMITS.starter;
   const existingPublished = await queryWithResilience(() => getDb().select({ id: publishedGames.id })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published'))));
+    .where(and(
+      eq(publishedGames.userId, user.id),
+      inArray(publishedGames.status, ['published', 'flagged']),
+      ne(publishedGames.slug, slug),
+    )));
 
   if (existingPublished.length >= maxPublished) {
     reqLogAuth.warn('Publish limit reached', { tier: user.tier, maxPublished });
     return NextResponse.json({ error: `Publish limit reached (${maxPublished} for ${user.tier} tier)` }, { status: 403 });
   }
 
-  // Check slug availability (for this user)
-  const existingSlug = await queryWithResilience(() => getDb().select({ id: publishedGames.id, version: publishedGames.version })
+  // Slug availability for this user AND the moderation hold, in one query.
+  //
+  // THE HOLD IS KEYED ON THE PROJECT, NOT THE SLUG. `uq_published_games_slug`
+  // is on (user_id, slug) and nothing is unique on project_id, so a slug-scoped
+  // check let the creator of a taken-down game republish the SAME project under
+  // a new slug — one API call, a fresh row with status 'published' and
+  // flagged_at NULL, and the takedown was undone. The `or` below therefore
+  // matches either the row that owns this slug or ANY held row of this
+  // creator's for this project.
+  //
+  // The project arm is only added when projectId is a uuid: published_games
+  // .project_id is a uuid column, and comparing it against a free-form string
+  // (the schema accepts any 1-100 char string) raises `invalid input syntax for
+  // type uuid`. A non-uuid can never be the project_id of an existing row, so
+  // skipping the arm cannot let a held row through.
+  const projectIdIsUuid = UUID_RE.test(projectId);
+  const existingRows = await queryWithResilience(() => getDb().select({
+      id: publishedGames.id,
+      slug: publishedGames.slug,
+      version: publishedGames.version,
+      cdnBundleKey: publishedGames.cdnBundleKey,
+      flaggedAt: publishedGames.flaggedAt,
+    })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
-    .limit(1));
+    .where(and(
+      eq(publishedGames.userId, user.id),
+      projectIdIsUuid
+        ? or(
+            eq(publishedGames.slug, slug),
+            and(
+              eq(publishedGames.projectId, projectId),
+              isNotNull(publishedGames.flaggedAt),
+            ),
+          )
+        : eq(publishedGames.slug, slug),
+    ))
+    // The slug half can match at most one row (unique index). The project half
+    // is bounded by how many times this creator has published this project;
+    // 50 is a ceiling for a pathological case, and every held row 403s anyway,
+    // so a truncated page can only fail closed.
+    .limit(50));
+
+  // A game under a moderation hold cannot be republished by its creator
+  // (#8354). Without this the auto-hide is trivially bypassable: republish
+  // sets status back to 'published' unconditionally, and DELETE /api/publish/[id]
+  // (creator unpublish) only moves the row to 'unpublished', so a reported game
+  // could be restored in two calls. flaggedAt — not status — is the gate,
+  // because it is the one field that survives that round trip; an admin approve
+  // and a won appeal both clear it, which is what re-enables republishing.
+  const heldRow = existingRows.find((row) => row.flaggedAt !== null);
+
+  // Only rows that actually own this slug drive the republish-vs-create branch
+  // below; a held row for a DIFFERENT slug of the same project must 403, never
+  // be mistaken for the target publication.
+  const existingSlug = existingRows.filter((row) => row.slug === slug);
+
+  if (heldRow) {
+    reqLogAuth.warn('Republish blocked by moderation hold', { gameId: heldRow.id });
+    return NextResponse.json(
+      {
+        error:
+          'This game is under moderation review and cannot be republished. ' +
+          'You can appeal the decision at /api/moderation/appeal.',
+        code: 'MODERATION_HOLD',
+      },
+      { status: 403 },
+    );
+  }
 
   // Get project data (verify ownership)
   const [project] = await queryWithResilience(() => getDb().select().from(projects)
@@ -146,6 +242,27 @@ export async function POST(request: NextRequest) {
 
   const gameUrl = `/play/${clerkId}/${slug}`;
 
+  if (!isPublishedSceneData(project.sceneData)) {
+    return NextResponse.json({ error: 'Project has invalid scene data' }, { status: 422 });
+  }
+  const previous = existingSlug[0];
+  const expectedVersion = previous?.version ?? 0;
+  let bundle: { key: string } | null = null;
+  if (isPublishToR2Enabled()) {
+    try {
+      bundle = await writePublishedGameBundle(clerkId, slug, project.sceneData, {
+        schemaVersion: 1,
+        version: expectedVersion + 1,
+        publishedAt: new Date().toISOString(),
+        slug,
+        userId: clerkId,
+      });
+    } catch (err) {
+      captureException(err, { route: '/api/publish', stage: 'r2-bundle-write', slug });
+      reqLogAuth.warn('Private snapshot upload failed; retaining Postgres snapshot', { slug });
+    }
+  }
+
   // Validate tags — lenient filter: non-array becomes [], non-string entries dropped
   const validTags: string[] = Array.isArray(body.tags)
     ? (body.tags as unknown[])
@@ -154,88 +271,49 @@ export async function POST(request: NextRequest) {
         .slice(0, 5)
     : [];
 
-  if (existingSlug.length > 0) {
-    // Update existing publication (republish)
-    const gameDbId = existingSlug[0].id;
-    const newVersion = existingSlug[0].version + 1;
-    await queryWithResilience(() => getDb().update(publishedGames)
-      .set({
-        title: title,
-        description: description ?? null,
-        status: 'published',
-        version: newVersion,
-        cdnUrl: gameUrl,
-        thumbnail,
-        updatedAt: new Date(),
-      })
-      .where(eq(publishedGames.id, gameDbId)));
-
-    // Replace tags
-    await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, gameDbId)));
-    if (validTags.length > 0) {
-      await queryWithResilience(() => getDb().insert(gameTags).values(
-        validTags.map((tag) => ({ gameId: gameDbId, tag }))
-      ));
-    }
-
-    reqLogAuth.info('Game republished', {
-      projectId: projectId,
-      slug: slug,
-      version: newVersion,
+  let publication;
+  try {
+    publication = await commitPublication({
+      userId: user.id, projectId, slug, title, description, thumbnail, gameUrl,
+      expectedVersion, bundleKey: bundle?.key ?? null, sceneData: project.sceneData,
+      tags: [...new Set(validTags)],
     });
-
-    const [updated] = await queryWithResilience(() => getDb().select().from(publishedGames).where(eq(publishedGames.id, gameDbId)));
-    return NextResponse.json({ publication: { ...updated, url: gameUrl } });
+  } catch (error) {
+    if (bundle) {
+      // A lost database response does not prove rollback. Confirm the candidate
+      // is unreferenced before deleting it; otherwise leave it for reconciliation.
+      try {
+        const references = await queryWithResilience(() => getDb()
+          .select({ id: publishedGames.id }).from(publishedGames)
+          .where(eq(publishedGames.cdnBundleKey, bundle!.key)).limit(1));
+        if (references.length === 0) await deletePublishedGameBundle(bundle.key, clerkId, slug);
+      } catch (verificationError) {
+        captureException(verificationError, {
+          route: '/api/publish', stage: 'r2-rollback-check', key: bundle.key,
+        });
+      }
+    }
+    throw error;
   }
 
-  // Create new publication — use onConflictDoUpdate to handle concurrent
-  // publishes with the same slug atomically (PF-212: TOCTOU fix).
-  // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
-  const [publication] = await queryWithResilience(() => getDb().insert(publishedGames)
-    .values({
-      userId: user.id,
-      projectId: projectId,
-      slug: slug,
-      title: title,
-      description: description ?? null,
-      status: 'published',
-      cdnUrl: gameUrl,
-      thumbnail,
-    })
-    .onConflictDoUpdate({
-      target: [publishedGames.userId, publishedGames.slug],
-      set: {
-        projectId: projectId,
-        title: title,
-        description: description ?? null,
-        status: 'published',
-        cdnUrl: gameUrl,
-        thumbnail,
-        version: sql`${publishedGames.version} + 1`,
-        updatedAt: new Date(),
-      },
-    })
-    .returning());
-
-  // Replace tags atomically — delete old tags first to prevent duplicates
-  // on concurrent publishes hitting the ON CONFLICT DO UPDATE path.
-  await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, publication.id)));
-  if (validTags.length > 0) {
-    await queryWithResilience(() => getDb().insert(gameTags).values(
-      validTags.map((tag) => ({ gameId: publication.id, tag }))
-    ));
+  if (!publication) {
+    await deletePublishedGameBundle(bundle?.key, clerkId, slug);
+    return NextResponse.json(
+      { error: 'The publication changed while saving. Reload and try again.' },
+      { status: 409 },
+    );
   }
 
-  reqLogAuth.info('Game published', {
-    projectId: projectId,
-    slug: slug,
-    version: 1,
-  });
-
+  // Only a committed winner can delete the previously referenced object.
+  await deletePublishedGameBundle(previous?.cdnBundleKey, clerkId, slug);
+  reqLogAuth.info('Game published', { projectId, slug, version: publication.version });
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });
   } catch (err) {
     captureException(err, { route: '/api/publish', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to publish game' }, { status: 500 });
+    return redactedJson({ error: 'Failed to publish game' }, { status: 500 });
   }
 }
 
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

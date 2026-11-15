@@ -26,7 +26,9 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "verifier script not found: $SCRIPT"; exit 1; }
 
@@ -84,28 +86,36 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      Defaults false so every fixture that does not touch apps/design or
 #      packages/ui keeps the design gate's success/skip as a legitimate
 #      path-filter skip; set true to exercise the design anti-tamper arm.
+#   $29 actionlint.result (default success) — the workflow linter (#8719).
+#      Mapped to needs-ci like actions-pin-check, so every fixture with
+#      needs-ci=true must keep this success; set skipped with $1=true to
+#      exercise its anti-tamper arm.
 #
 # `needs-mcp`, `needs-docs` and `needs-any-code` are hardcoded in the object below
 # rather than parameterised — they are constant for essentially every fixture, and
 # mk's positional list is already 26 long. Flip them with a jq post-filter (see the
 # docs-internal-gate and quality-gates cases) instead of adding a 27th arg.
-# `command-parity`, `build-nextjs` and `test-e2e-ui` are hardcoded to success for
-# the same reason and overridden with jq in the #9437 cases at the end.
+# `command-parity`, `build-nextjs`, `test-e2e-ui`, `test-e2e-api`, `test-e2e-auth` and
+# `test-e2e-engine-journeys` are hardcoded to success for the same reason and overridden
+# with jq in the #9437 cases at the end and in the 47a-47e engine-journeys cases.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}" alr="${29:-success}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
     --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" \
     --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" \
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
-    --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" '
+    --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" \
+    --arg bvt "$bvt" --arg pp "$pp" --arg alr "$alr" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true", "needs-observatory": "false" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
+      "observatory-tests":    { result: "success" },
       "build-nextjs":         { result: "success" },
       "docs-internal-gate":   { result: "success" },
+      "docs-e2e":             { result: "success" },
       "design-internal-gate": { result: $dig },
       "hook-tests":           { result: $ht },
       "hook-tests-windows":   { result: "success" },
@@ -118,11 +128,25 @@ mk() {
       "skills-lint":          { result: $sl },
       "openapi-route-sync":   { result: $ors },
       "actions-pin-check":    { result: $apc },
+      "actionlint":           { result: $alr },
       "test-e2e-ui":          { result: "success" },
+      "test-e2e-api":         { result: "success" },
+      "test-e2e-auth":        { result: "success" },
       "test-e2e-journey":     { result: $te2ej },
-      "test-e2e-engine-smoke": { result: $te2es }
+      "test-e2e-engine-smoke": { result: $te2es },
+      # The DB-backed journeys gate (#10161) shares both arms of the smoke
+      # gate; constant success here, flipped with jq in cases 47a-47e. (No
+      # apostrophe in this comment: it sits inside a single-quoted jq program.)
+      "test-e2e-engine-journeys": { result: "success" },
+      # Unconditional jobs. They have no ci-gate trigger, so every fixture
+      # carries them as success and the dedicated cases below flip them —
+      # otherwise `check_unconditional` would fire on every fixture and the
+      # whole suite would fail for a reason unrelated to what it is testing.
+      "board-verdict-tests":  { result: $bvt },
+      "portable-paths":       { result: $pp }
     }'
 }
+readonly -f mk
 
 # Run the verifier with a given NEEDS_JSON; echo "<exit>|<output>".
 run_verify() {
@@ -131,6 +155,7 @@ run_verify() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_verify
 
 echo "=== check-ci-success.sh tests ==="
 
@@ -459,6 +484,43 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "journey gate failure fails (exit 1)"; else fail "journey failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "test-e2e-journey"; then pass "the failing journey gate is named"; else fail "failing journey gate not named"; fi
 
+# --- 34b. TAMPER: test-e2e-api skipped while needs-web=true → exit 1 -----------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-api".result = "skipped"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "API gate skipped while needs-web=true fails (exit 1)"; else fail "tamper (API gate) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-api ("; then pass "the unwired API gate is named"; else fail "unwired API gate not named"; fi
+
+# --- 34c. API gate legit-skips (needs-web=false) → exit 0 ---------------------
+res="$(run_verify "$(mk true true success success | jq -c '."test-e2e-api".result = "skipped"')")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "API gate legit-skip (needs-web=false) passes (exit 0)"; else fail "API gate legit skip should exit 0, got $rc"; fi
+
+# --- 34d. TAMPER: test-e2e-auth skipped while needs-web=true → exit 1 ----------
+# The Clerk-keyed auth journey (#8632) is the ONLY per-PR run of sign-in against
+# a real Clerk instance; the @ui shard deliberately has no keys. A web-touching
+# PR sets needs-web=true, so an `if: false` skip must not certify green. Every
+# other gate runs+succeeds here, so the skipped auth job is the SOLE tamper.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-auth".result = "skipped"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "auth journey skipped while needs-web=true fails (exit 1)"; else fail "tamper (auth journey) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-auth ("; then pass "the unwired auth journey gate is named"; else fail "unwired auth journey gate not named"; fi
+
+# --- 34e. auth journey legit-skips (needs-web=false) → exit 0 -------------------
+res="$(run_verify "$(mk true true success success | jq -c '."test-e2e-auth".result = "skipped"')")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "auth journey legit-skip (needs-web=false) passes (exit 0)"; else fail "auth journey legit skip should exit 0, got $rc"; fi
+
+# --- 34f. auth journey dropped from ci-success needs: while triggered → exit 1 --
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c 'del(."test-e2e-auth")')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "auth journey absent from needs while needs-web=true fails (exit 1)"; else fail "absent auth journey should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-auth (trigger needs-web=true but result=absent)"; then pass "the absent auth journey reports result=absent"; else fail "auth journey result=absent missing"; fi
+
+# --- 34g. auth journey FAILED → exit 1 (hard-failure path) ----------------------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-auth".result = "failure"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ] && echo "$out" | grep -q "test-e2e-auth"; then pass "a failed auth journey fails the aggregate, by name"; else fail "failed auth journey should exit 1 naming the job, got $rc"; fi
+
 # --- 35. TAMPER: skills-lint skipped while needs-skills=true → exit 1 ----------
 # skills-lint is self-defending: a PR editing .claude/skills/** sets
 # needs-skills=true, so the lint job SHOULD run; an `if: false` skip is the same
@@ -538,6 +600,22 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "pin-check failure fails (exit 1)"; else fail "pin-check failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "actions-pin-check"; then pass "the failing pin-check gate is named"; else fail "failing pin-check gate not named"; fi
 
+# --- 43b. TAMPER: actionlint skipped while needs-ci=true → exit 1 --------------
+# The workflow linter (#8719) is gated on needs-ci like the pin-check, so a PR
+# editing any workflow file SHOULD run it; an `if: false` skip is the same
+# unwiring vector. Every other needs-ci gate is held success so the skipped
+# linter is the SOLE tamper. 29th mk arg: actionlint=skipped, with needs-ci=true.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success success false success false success success skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "actionlint skipped while needs-ci=true fails (exit 1)"; else fail "tamper (actionlint) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "actionlint tamper is flagged as a possible unwiring"; else fail "actionlint tamper message missing"; fi
+if echo "$out" | grep -q "actionlint ("; then pass "the unwired actionlint gate is named"; else fail "unwired actionlint gate not named"; fi
+
+# --- 43c. actionlint legit-skips (needs-ci=false) → exit 0 ---------------------
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped false skipped false skipped false success false false skipped false skipped skipped success false success false success success skipped)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "actionlint legit-skip (needs-ci=false) passes (exit 0)"; else fail "actionlint legit skip should exit 0, got $rc"; fi
+
 # --- 44. TAMPER: test-e2e-engine-smoke skipped while needs-web=true → exit 1 ----
 # The engine-smoke gate (#8602) is self-defending: it is the ONLY per-PR job that
 # boots the real WASM engine (load -> spawn -> play -> export under SwiftShader
@@ -579,6 +657,62 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "engine-smoke failure fails (exit 1)"; else fail "engine-smoke failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "test-e2e-engine-smoke"; then pass "the failing engine-smoke gate is named"; else fail "failing engine-smoke gate not named"; fi
+
+# --- 47a. TAMPER: test-e2e-engine-journeys skipped while needs-web=true → exit 1
+# The engine-journeys gate (#10161) is self-defending: it is the ONLY per-PR job
+# that serves the app against a database — one created for that run, migrated
+# with the real db:migrate and drift-checked with the real db:drift — so it is
+# the only place the account journeys of #9723 can run. It shares the smoke
+# gate's `if:` (`needs-web || needs-engine`). mk hardcodes it to success, so
+# these cases use the jq post-filter idiom of the #9437 cases. Every other
+# needs-web gate runs+succeeds here, so the skipped journeys job is the SOLE
+# tamper.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys skipped while needs-web=true fails (exit 1)"; else fail "tamper (engine-journeys via web arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "engine-journeys tamper is flagged as a possible unwiring"; else fail "engine-journeys tamper message missing"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys ("; then pass "the unwired engine-journeys gate is named (web arm)"; else fail "unwired engine-journeys gate not named (web arm)"; fi
+
+# --- 47b. TAMPER via the needs-engine arm in ISOLATION: engine-journeys skipped
+#         while ONLY needs-engine=true (needs-web=false) → exit 1.
+# An engine-only PR changes what the journeys serve (the WASM the smoke gate
+# hands over), so the needs-engine arm must be independently load-bearing, as
+# it is for the smoke gate. needs-web stays false (mk's default), so no other
+# gate can raise a competing tamper: the journeys job is the SOLE one.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-engine" = "true" | ."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys skipped while ONLY needs-engine=true fails (exit 1)"; else fail "tamper (engine-journeys via engine arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys ("; then pass "the unwired engine-journeys gate is named (engine arm)"; else fail "unwired engine-journeys gate not named (engine arm)"; fi
+
+# --- 47c. engine-journeys legit-skips (needs-web=false AND needs-engine=false) → 0
+# A PR touching neither web/ nor engine/ legitimately skips the journeys gate;
+# that must NOT trip the anti-tamper check (neither arm false-positives on an
+# unrelated PR).
+needs="$(mk true true success success success | jq -c '."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "engine-journeys legit-skip (web+engine false) passes (exit 0)"; else fail "engine-journeys legit skip should exit 0, got $rc"; fi
+if echo "$out" | grep -q "All required gates passed"; then pass "engine-journeys legit-skip prints the all-passed line"; else fail "engine-journeys legit-skip all-passed line missing"; fi
+
+# --- 47d. engine-journeys FAILED while triggered → exit 1 (hard-failure path) ---
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-engine-journeys".result = "failure"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys failure fails (exit 1)"; else fail "engine-journeys failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys"; then pass "the failing engine-journeys gate is named"; else fail "failing engine-journeys gate not named"; fi
+
+# --- 47e. engine-journeys ABSENT from needs while triggered → exit 1 ------------
+# The other one-line unwiring: dropping `- test-e2e-engine-journeys` from
+# ci-success's `needs:` list. Valid YAML, the job still runs, the aggregate
+# stops observing it. `.result // "absent"` reads that as absent != success →
+# tamper, but ONLY for jobs the map lists — which is what the entry buys.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-engine" = "true" | del(."test-e2e-engine-journeys")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys absent from needs while triggered fails (exit 1)"; else fail "absent engine-journeys should exit 1, got $rc"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent engine-journeys job reports result=absent"; else fail "engine-journeys result=absent missing"; fi
 
 # --- 48. TAMPER: design-internal-gate skipped while needs-design=true → exit 1 --
 # The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
@@ -877,6 +1011,44 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "a skipped ci-gate (no outputs) fails closed (exit 1)"; else fail "skipped ci-gate should exit 1, got $rc"; fi
 if echo "$out" | grep -q "missing from ci-gate outputs"; then pass "skipped ci-gate is reported as config drift"; else fail "skipped ci-gate drift message missing"; fi
 
+# --- 73-76. UNCONDITIONAL jobs: skipped or absent is tamper --------------------
+# `portable-paths` and `board-verdict-tests` have no `if:`, so there is no
+# trigger to map them to and `check_triggered` cannot model them: it asks "did a
+# trigger fire while the job skipped", and a job with no trigger has no such
+# question. That is not a reason to leave them outside the required aggregate —
+# each was left that way at some point on this branch, unable to block a merge
+# (#9746) — it is the reason they need the SIMPLER assertion. A job that always
+# runs must always have succeeded.
+#
+# Both directions are pinned per job, so deleting either `check_unconditional`
+# call fails a case that names that job rather than a single lumped one.
+for job in portable-paths board-verdict-tests; do
+  for state in skipped absent; do
+    if [ "$state" = "absent" ]; then
+      needs="$(mk true true success success success | jq -c --arg j "$job" 'del(.[$j])')"
+    else
+      needs="$(mk true true success success success | jq -c --arg j "$job" '.[$j].result = "skipped"')"
+    fi
+    res="$(run_verify "$needs")"
+    rc="${res%%|*}"; out="${res#*|}"
+    if [ "$rc" = "1" ]; then
+      pass "$state $job (unconditional) fails (exit 1)"
+    else
+      fail "$state $job should exit 1, got $rc — an unwired unconditional gate certifies green"
+    fi
+    if echo "$out" | grep -q "$job"; then
+      pass "the $state $job is named in the failure"
+    else
+      fail "$state $job not named: $out"
+    fi
+  done
+done
+
+# And the other direction: both succeeding is not itself a failure, or the two
+# cases above would pass for the wrong reason on every fixture in this file.
+res="$(run_verify "$(mk true true success success success)")"
+if [ "${res%%|*}" = "0" ]; then pass "both unconditional jobs succeeding still exits 0"; else fail "unconditional jobs at success should exit 0, got ${res%%|*}"; fi
+
 # --- Structural: the REAL workflow wiring (not hermetic fixtures) ---------------
 # The hermetic cases above prove this verifier's decision logic against synthetic
 # NEEDS_JSON; none of them can catch a PR that reworks the real wiring the logic
@@ -885,6 +1057,40 @@ if echo "$out" | grep -q "missing from ci-gate outputs"; then pass "skipped ci-g
 # pass every fixture while shipping a dead gate. Pin the load-bearing bytes of
 # ci.yml / quality-gates.yml here (same pattern as check-native-bindings.test.sh).
 echo ""
+# Observatory: each trigger must independently require a successful gate.
+for trigger in needs-observatory needs-ci needs-deps; do
+  for state in skipped absent failure cancelled; do
+    needs="$(mk false false success success | jq -c --arg trigger "$trigger" --arg state "$state" '
+      ."ci-gate".outputs[$trigger] = "true" |
+      if $state == "absent" then del(."observatory-tests")
+      else ."observatory-tests".result = $state end')"
+    res="$(run_verify "$needs")"
+    rc="${res%%|*}"; out="${res#*|}"
+    if [ "$rc" = "1" ] && grep -q 'observatory-tests' <<<"$out"; then
+      pass "Observatory $state fails when only $trigger fires"
+    else
+      fail "Observatory $state should fail via $trigger: $res"
+    fi
+  done
+  needs="$(mk false false success success | jq -c --arg trigger "$trigger" '."ci-gate".outputs[$trigger] = "true"')"
+  res="$(run_verify "$needs")"
+  if [ "${res%%|*}" = "0" ]; then
+    pass "Observatory success passes when only $trigger fires"
+  else
+    fail "successful Observatory gate rejected via $trigger: $res"
+  fi
+done
+needs="$(mk false false success success | jq -c '."observatory-tests".result = "skipped"')"
+res="$(run_verify "$needs")"
+if [ "${res%%|*}" = "0" ]; then pass "Observatory legitimate skip passes"; else fail "Observatory legitimate skip rejected: $res"; fi
+needs="$(mk false false success success | jq -c 'del(."ci-gate".outputs."needs-observatory")')"
+res="$(run_verify "$needs")"
+if [ "${res%%|*}" = "1" ] && grep -q 'needs-observatory.*missing' <<<"$res"; then
+  pass "missing Observatory trigger fails closed"
+else
+  fail "missing Observatory trigger was not reported: $res"
+fi
+
 echo "--- structural assertions against the real workflow files ---"
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
@@ -898,6 +1104,37 @@ QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 # install; npm run has no install path at all.
 UI_TEST_CMD='cd packages/ui && npm test'
 if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
+  obs_block="$(awk '
+    /^  observatory-tests:/ {f=1; next}
+    f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ {exit}
+    f {print}
+  ' "$CI_YML" | grep -v '^[[:space:]]*#')"
+  obs_runs="$(grep -E "^[[:space:]]*['\"]?run['\"]?:" <<<"$obs_block")"
+  obs_expected_runs="$(cat <<'RUNS'
+        run: npm ci
+        run: bash scripts/check-native-bindings.sh
+        run: npx tsc --noEmit -p tools/observatory/tsconfig.json
+        run: npx vitest run --config tools/observatory/vitest.config.ts
+RUNS
+)"
+  if [ "$obs_runs" = "$obs_expected_runs" ]; then
+    pass "Observatory runs installation, typecheck and unit tests as exact executable steps"
+  else
+    fail "Observatory executable commands changed or were removed: $obs_runs"
+  fi
+  obs_if="$(grep -E '^    if:' <<<"$obs_block")"
+  obs_expected_if="    if: \${{ needs.ci-gate.outputs.needs-observatory == 'true' || needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-deps == 'true' }}"
+  if [ "$obs_if" = "$obs_expected_if" ]; then
+    pass "Observatory job uses all three OR trigger arms"
+  else
+    fail "Observatory job condition drifted: $obs_if"
+  fi
+  if grep -qE "continue-on-error|^        ['\"]?if['\"]?:" <<<"$obs_block"; then
+    fail "Observatory steps must not mask failures or conditionally skip required work"
+  else
+    pass "Observatory steps cannot skip or mask their required checks"
+  fi
+
   dig_block="$(awk -v j="  design-internal-gate:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' "$CI_YML")"
   if [ -n "$dig_block" ]; then
     pass "ci.yml has a design-internal-gate job"
@@ -916,9 +1153,10 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   # satisfies the containment grep above — the only per-PR run of the UI suite
   # for a packages/ui-only PR is dead, and this pin reads green. On the
   # `pull_request` path GitHub runs the PR's OWN workflow file, so the mutation
-  # takes effect in the very run that should have caught it. actionlint flags
-  # duplicate keys, but it is not wired into this repo's CI — this count is the
-  # backstop (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
+  # takes effect in the very run that should have caught it. actionlint (the
+  # required `actionlint` job, #8719) flags duplicate keys, but it runs from
+  # this same PR-controlled file — this count is the independent backstop
+  # (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
   # keys are not counted.
   dig_test_step="$(awk '
     !f && /^      - name:/ && index($0, "Test @spawnforge/ui") {f=1; print; next}
@@ -1006,19 +1244,176 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     /^    ["'"'"']?needs["'"'"']?[[:space:]]*:[[:space:]]*$/ {n=1; next}
     n && /^      -[[:space:]]/ { sub(/^      -[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, ""); sub(/[[:space:]]+$/, ""); gsub(/["'"'"']/, ""); if ($0 != "") print; next }
     n && /^[[:space:]]*$/ { next }
+    # A FULL-LINE COMMENT IS NOT THE END OF THE LIST. Without this rule the cut
+    # stopped at the first comment line inside needs:, silently dropping every
+    # job below it — and a SHORTER list makes the completeness assertion below
+    # pass VACUOUSLY for exactly the jobs it stopped seeing (lessons-learned #9).
+    # The reverse direction is what caught it: the map named jobs "absent from
+    # needs:" that were plainly there, the moment a comment was added above the
+    # unconditional jobs. The vacuity floor would not have — 17 of 23 is >= 15.
+    n && /^[[:space:]]*#/ { next }
     n {exit}
   ' <<<"$ci_success_blk")"
   ci_success_needs_count="$(printf '%s\n' "$ci_success_needs" | grep -c . || true)"
   # Vacuity guard: an awk cut that reads nothing would make every assertion below
   # pass by iterating an empty list — the precise way a structural pin fails
-  # green. Require a plausible list that contains the two jobs we know are there.
-  if [ "$ci_success_needs_count" -lt 15 ]; then
+  # green.
+  #
+  # A DERIVED CROSS-CHECK, BESIDE THE CONSTANT FLOOR — not instead of it. An
+  # earlier version of this comment said the floor had been replaced; it has
+  # not, and both are load-bearing (found in review). The constant was `-lt 15`
+  # against a list of 23, so up to eight jobs could fall out of the cut with the
+  # guard still green —
+  # and the comment three lines up records exactly that happening ("17 of 23 is
+  # >= 15"). A constant floor set below the truth is a guard that tolerates the
+  # bug it is written to catch. Truncation always drops the TAIL, and the tail
+  # here is precisely the jobs this PR added, so the second check below (which
+  # looks for two jobs at the HEAD of the list) could never have caught it
+  # either.
+  #
+  # The cross-check catches a cut that reads FEWER jobs than the block holds; the
+  # constant floor below still catches the case they agree on because both read
+  # zero. Counted by a different route than the awk cut it audits — spans from the
+  # `needs:` key to the next job-level key and counts `- ` items in between, so
+  # a cut that stops early (at a comment, say) disagrees with it. Scoped to that
+  # span on purpose: counting `- ` over the WHOLE job block reads the STEPS too,
+  # which are `- ` items at the same indent, and this check reported 25 vs 23
+  # the first time I ran it for exactly that reason.
+  # awk, not sed: sed ranges are BRE, where `?` is a LITERAL question mark, so
+  # the optional-quote form silently matched nothing and this counted 0 — a
+  # cross-check that reads zero would have reported the cut as broken on every
+  # run. awk uses ERE.
+  ci_success_needs_blk="$(awk '
+    /^    ["'"'"']?needs["'"'"']?[[:space:]]*:[[:space:]]*$/ {n=1; next}
+    n && /^    [A-Za-z_"'"'"']/ {exit}
+    n {print}
+  ' <<<"$ci_success_blk")"
+  ci_success_needs_raw="$(grep -cE '^      -[[:space:]]' <<<"$ci_success_needs_blk" || true)"
+  if [ "$ci_success_needs_count" -ne "$ci_success_needs_raw" ]; then
+    fail "the needs: cut read $ci_success_needs_count job(s) but the block has $ci_success_needs_raw '- ' entries — the cut is dropping jobs, and every job it drops silently leaves the map-completeness assertion below"
+  elif [ "$ci_success_needs_count" -lt 15 ]; then
     fail "could not parse ci-success's needs: list from ci.yml (got $ci_success_needs_count entries, expected >= 15) — the map-completeness assertions below would pass vacuously"
   elif ! grep -qx 'ci-gate' <<<"$ci_success_needs" || ! grep -qx 'quality-gates' <<<"$ci_success_needs"; then
     fail "parsed ci-success needs: list is missing known jobs (ci-gate / quality-gates) — the cut is wrong, so the map-completeness assertions below are unreliable"
   else
     pass "parsed ci-success's needs: list from ci.yml ($ci_success_needs_count jobs)"
-    map_jobs="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eo '^check_triggered[[:space:]]+"[^"]+"' | sed -E 's/^check_triggered[[:space:]]+"([^"]+)"$/\1/')"
+    # EVERY check_unconditional JOB MUST ACTUALLY BE UNCONDITIONAL, and must not
+    # be able to conclude `success` with its work skipped. The form's entire
+    # premise — "this job has no trigger, so it must always have succeeded" —
+    # lived only in a prose comment, and both halves of it are one line away
+    # from false:
+    #
+    #   - `continue-on-error: true` on a step makes that step fail while the JOB
+    #     concludes `success`. check_unconditional reads success, ci-success goes
+    #     green, and the gate is report-only — the exact state these jobs were
+    #     promoted into the required aggregate to leave. Fails OPEN.
+    #   - a job-level `if:` makes the job skippable. check_unconditional then
+    #     fires on every PR that misses the trigger, reporting a job as unwired
+    #     when it was legitimately skipped. Fails CLOSED, repo-wide, with a
+    #     message naming no trigger because there is none.
+    #
+    # Derived from the script's own calls rather than a hardcoded pair, so a
+    # third unconditional job is covered the day it is added. The repo already
+    # pins both properties for design-internal-gate; this carries that across.
+    uncond_jobs="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eo '^check_unconditional[[:space:]]+"[^"]+"' | sed -E 's/^check_unconditional[[:space:]]+"([^"]+)"$/\1/')"
+    if [ -z "$uncond_jobs" ]; then
+      fail "no check_unconditional calls found in $SCRIPT — either the form was removed (and the jobs it protected are unguarded) or this cut broke; the per-job assertions below would pass vacuously"
+    else
+      pass "found $(printf '%s\n' "$uncond_jobs" | grep -c .) check_unconditional job(s) to verify against ci.yml"
+      while IFS= read -r ujob; do
+        [ -n "$ujob" ] || continue
+        ublock="$(awk -v j="^  ${ujob}:" '
+          $0 ~ j {f=1}
+          f && /^  [A-Za-z_"'"'"']/ && $0 !~ j {exit}
+          f {print}
+        ' "$CI_YML" | grep -v '^[[:space:]]*#')"
+        if [ -z "$ublock" ]; then
+          fail "check_unconditional names '$ujob' but no such job exists in ci.yml — the verifier would report result=absent on every run"
+          continue
+        fi
+        # ANY INDENT, not just the job's own four spaces. A STEP-level `if:`
+        # skips that step, a skipped step does not fail its job, the job
+        # concludes `success`, and check_unconditional reads success — the gate
+        # never ran and the aggregate is green. The four-space form closed half
+        # of this and was found by both reviewers on the re-run. Neither of
+        # these jobs has any legitimate conditional, so any `if:` in the block
+        # is the finding.
+        if grep -qE '^[[:space:]]+["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ublock"; then
+          fail "$ujob has an if: (job- or step-level) but is asserted by check_unconditional, whose premise is that its work always runs — a skipped step still concludes success, so the verifier certifies a gate that never executed"
+        else
+          pass "$ujob has no if: at any level (check_unconditional's premise holds)"
+        fi
+        if grep -q 'continue-on-error' <<<"$ublock"; then
+          fail "$ujob carries continue-on-error — a failing step still concludes success, so check_unconditional is satisfied and the gate becomes report-only"
+        else
+          pass "$ujob has no continue-on-error"
+        fi
+
+        # AND THE JOB MUST ACTUALLY RUN SOMETHING. `portable-paths` got a
+        # structural pin in its own suite; `board-verdict-tests` was promoted in
+        # the SAME commit and got none, so commenting out its two steps left a
+        # job that concludes `success` with the board-verdict suite and the
+        # lint of board-verdict.sh never running again (found in review).
+        # (That sentence must not begin a line with the word shellcheck: a
+        # comment starting with it is parsed as a DIRECTIVE, and a malformed
+        # one is an ERROR-severity finding, which CI treats as fatal.)
+        # Generic, and per STEP, so it covers whatever job is added next:
+        # at least one executable `run:`, and no step carrying a duplicate
+        # `run:` key — YAML keeps the LAST duplicate, so an appended
+        # `run: "true"` replaces the command while the original line stays
+        # byte-present and any containment grep stays green.
+        urun_total="$(grep -cE '^[[:space:]]*run:' <<<"$ublock" || true)"
+        if [ "$urun_total" -ge 1 ]; then
+          pass "$ujob runs $urun_total executable step command(s)"
+        else
+          fail "$ujob has no executable run: step — a job with nothing to run concludes success, and check_unconditional then certifies it green while the work it was promoted to guarantee never happens"
+        fi
+        udup="$(awk '
+          /^      - / { if (n) print runs; n = 1; runs = 0; next }
+          n && /^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:/ { runs++ }
+          END { if (n) print runs }
+        ' <<<"$ublock" | awk '$1 > 1 { c++ } END { print c + 0 }')"
+        if [ "$udup" -eq 0 ]; then
+          pass "$ujob has no step with a duplicate run: key"
+        else
+          fail "$ujob has $udup step(s) with more than one run: key — YAML keeps the last, so the effective command is not the one that is pinned"
+        fi
+
+        # AND THE PARTIAL-NEUTER CLASS MUST BE CLOSED FOR THIS JOB TOO. The
+        # checks above catch a job with NOTHING to run and a step with a
+        # duplicate key; removing ONE step of several passes all of them, and
+        # is closed only by the line-for-line step-block pins in
+        # check-npm-audit.test.sh. Those are hardcoded per job, so a THIRD
+        # unconditional job added later would silently have no such pin — the
+        # reviewer who found the board-verdict-tests gap flagged exactly that.
+        # Assert the pin exists, by name, for every job this script asserts.
+        # AN EXECUTABLE CALL, NOT THE LABEL SOMEWHERE IN THE FILE. This was
+        # `grep -q "ci.yml ${ujob} job steps:"`, which matches the label inside
+        # a COMMENTED-OUT assert_steps_block call — so the cheapest way to
+        # green a failing step-block pin (put a `#` in front of it) also
+        # satisfied the assertion written to guarantee that pin exists. Three
+        # reviewers found it independently; one measured the full chain,
+        # deleting a step from board-verdict-tests with both suites still
+        # reporting All tests passed. Lesson #18, at the site added to close a
+        # lesson #18 finding.
+        #
+        # Count executable call lines instead, and require exactly one: two
+        # calls for the same job would mean two expected-step literals that can
+        # disagree.
+        pin_calls="$(grep -cE "^assert_steps_block .*\"ci\.yml ${ujob} job steps:\"" "$REPO_ROOT/scripts/__tests__/check-npm-audit.test.sh" || true)"
+        if [ "$pin_calls" -eq 1 ]; then
+          pass "$ujob has exactly one line-for-line step-block pin (partial neuter is caught)"
+        else
+          fail "$ujob is asserted by check_unconditional but has $pin_calls executable assert_steps_block call(s) in check-npm-audit.test.sh, expected 1 — removing ONE of its steps leaves every other assertion green, so the job concludes success with its work partly gone. A commented-out call does not count."
+        fi
+      done <<<"$uncond_jobs"
+    fi
+
+    # EITHER FORM COUNTS, because either one closes the hole. A path-gated job
+    # is mapped to its triggers; an unconditional one is asserted to have
+    # succeeded. What must never happen is a job in `needs:` with neither —
+    # that is the silent `if: false` vector this whole assertion exists for.
+    map_jobs="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eo '^check_(triggered|unconditional)[[:space:]]+"[^"]+"' | sed -E 's/^check_(triggered|unconditional)[[:space:]]+"([^"]+)"$/\2/')"
     unmapped=""
     while IFS= read -r job; do
       [ -n "$job" ] || continue
@@ -1026,7 +1421,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
       grep -qx -- "$job" <<<"$map_jobs" || unmapped="$unmapped $job"
     done <<<"$ci_success_needs"
     if [ -n "$unmapped" ]; then
-      fail "job(s) in ci-success's needs: list have NO check_triggered entry in $SCRIPT —$unmapped. Each is a silent \`if: false\` vector: the job skips, ci-success's needs: still resolves, and the verifier fails only on failure/cancelled, so the unwiring certifies green. Add a check_triggered entry naming EVERY arm of the job's own if:."
+      fail "job(s) in ci-success's needs: list have NO check_triggered or check_unconditional entry in $SCRIPT —$unmapped. Each is a silent \`if: false\` vector: the job skips, ci-success's needs: still resolves, and the verifier fails only on failure/cancelled, so the unwiring certifies green. Add a check_triggered entry naming EVERY arm of the job's own if:, or check_unconditional if the job has none."
     else
       pass "every job in ci-success's needs: list is covered by the anti-tamper map (exempt: $CI_SUCCESS_MAP_EXEMPT)"
     fi
@@ -1065,12 +1460,27 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   else
     fail "verifier anti-tamper map lost its test-e2e-ui/needs-web entry — the only per-PR run of the Playwright UI shards stops being observed"
   fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-api"[[:space:]]+"needs-web"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-api <-> needs-web"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-api/needs-web entry — billing and token-guard API coverage stops being observed"
+  fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-auth"[[:space:]]+"needs-web"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-auth <-> needs-web"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-auth/needs-web entry — the only per-PR sign-in against a real Clerk instance stops being observed"
+  fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-engine-journeys"[[:space:]]+"needs-web"[[:space:]]+"needs-engine"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-engine-journeys <-> needs-web + needs-engine (both if: arms)"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-engine-journeys entry, or stopped naming BOTH arms of its if: (needs-web, needs-engine) — the only per-PR job that serves the app against a database could be skipped with every required gate green (#10161)"
+  fi
   # And pin the real `if:` each new entry is paired with, matching the
   # quality-gates caller pin below: a map entry paired with a trigger that no
   # longer gates the job is decorative. Whole expression, on the `if:` line only,
   # comments stripped — so `!= 'true'` inversion and trailing-comment survival
   # both fail (the three vectors documented at the quality-gates pin).
-  for pair in "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web"; do
+  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web" "test-e2e-auth:needs-web" "test-e2e-engine-journeys:needs-web:needs-engine"; do
     pj="${pair%%:*}"; ptrigs="${pair#*:}"
     pblk="$(awk -v j="  $pj:" '$0==j{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && $0!=j{exit}' "$CI_YML")"
     pif="$(grep -v '^[[:space:]]*#' <<<"$pblk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"
@@ -1139,6 +1549,22 @@ else
 fi
 
 echo ""
+
+# Docs production routes are gated on docs inputs and on edits to CI itself.
+for trigger in needs-docs needs-ci; do
+  baseline="$(mk false false success success)"
+  tampered="$(jq -c --arg trigger "$trigger" '."ci-gate".outputs[$trigger]="true" | ."docs-e2e".result="skipped"' <<< "$baseline")"
+  res="$(run_verify "$tampered")"
+  if [[ "$res" == 1\|* && "$res" == *docs-e2e* ]]; then
+    pass "docs-e2e skip rejected when $trigger fires"
+  else
+    fail "docs-e2e skip allowed when $trigger fires"
+  fi
+done
+legitimate="$(mk false false success success | jq -c '."docs-e2e".result="skipped"')"
+res="$(run_verify "$legitimate")"
+if [[ "$res" == 0\|* ]]; then pass "docs-e2e legitimate path skip allowed"; else fail "docs-e2e legitimate path skip rejected"; fi
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "All tests passed."
   exit 0

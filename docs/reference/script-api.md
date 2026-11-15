@@ -27,6 +27,7 @@ namespace set).
 | `forge.getTransform(entityId)` | `{position, rotation, scale} \| null` | Get entity transform |
 | `forge.setPosition(entityId, x, y, z)` | `void` | Set absolute position |
 | `forge.setRotation(entityId, x, y, z)` | `void` | Set absolute rotation (euler degrees) |
+| `forge.setScale(entityId, x, y, z)` | `void` | Set absolute scale |
 | `forge.translate(entityId, dx, dy, dz)` | `void` | Move relative to current position |
 | `forge.rotate(entityId, dx, dy, dz)` | `void` | Rotate relative to current rotation |
 | `forge.spawn(type, options?)` | `string` | Spawn entity, returns its ID. Options: `{name?, position?}` |
@@ -67,13 +68,35 @@ namespace set).
 | `forge.input.isTouchDevice()` | `boolean` | Does the current device support touch? |
 | `forge.input.vibrate(pattern)` | `void` | Trigger haptic feedback (vibration pattern in ms) |
 
+**`action` is a name your project defines, never a key code.** Pass `move_left`,
+not `ArrowLeft`. Every scene starts with the actions below, and you can rename,
+rebind, delete or add to any of them in the Input Bindings panel — or with the
+`set_input_binding` command. A game that wants `grapple`, `rewind` or
+`p2_attack` simply defines it.
+
+| Action | Kind | Default keys |
+|--------|------|--------------|
+| `move_left` / `move_right` | digital | A / D, Left / Right |
+| `move_up` / `move_down` | digital | W / S, Up / Down |
+| `move_forward` / `move_backward` | digital | W / S, Up / Down — the same keys, for a 3D reading |
+| `move_horizontal` | axis | A/Left = -1, D/Right = +1 |
+| `move_vertical` | axis | S/Down = -1, W/Up = +1 |
+| `jump` | digital | Space |
+| `interact` | digital | E |
+| `pause` | digital | Escape |
+| `action_primary` | digital | Mouse left, J |
+| `action_secondary` | digital | Mouse right, K |
+
+Use the digital names to ask about one direction. An axis reports `isPressed`
+whenever it is non-zero — that is, for **both** of its directions — so
+`isPressed('move_horizontal')` is true when either left or right is held.
+
 ## forge.physics
 
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `forge.physics.applyForce(entityId, fx, fy, fz)` | `void` | Apply continuous force |
 | `forge.physics.applyImpulse(entityId, fx, fy, fz)` | `void` | Apply instant impulse |
-| `forge.physics.setVelocity(entityId, vx, vy, vz)` | `void` | Set linear velocity directly |
 | `forge.physics.isGrounded(entityId)` | `boolean` | Whether the kinematic character controller last reported ground contact. Synchronous — 3D ground contact falls out of the character sweep the engine already ran, so unlike the 2D version it needs no raycast. `false` for an entity with no character controller |
 | `forge.physics.getContacts(entityId, radius?)` | `string[]` | IDs currently in contact (radius overrides collider size) |
 | `forge.physics.distanceTo(a, b)` | `number` | Distance between two entities |
@@ -87,11 +110,9 @@ namespace set).
 |----------|---------|-------------|
 | `forge.physics2d.applyForce(entityId, forceX, forceY)` | `void` | Apply continuous force (2D) |
 | `forge.physics2d.applyImpulse(entityId, impulseX, impulseY)` | `void` | Apply instant impulse (2D) |
-| `forge.physics2d.setVelocity(entityId, vx, vy)` | `void` | Set linear velocity (2D) |
 | `forge.physics2d.getVelocity(entityId)` | `{x, y} \| null` | Current velocity (2D) |
-| `forge.physics2d.setAngularVelocity(entityId, omega)` | `void` | Set angular velocity (rad/s) |
 | `forge.physics2d.getAngularVelocity(entityId)` | `number \| null` | Current angular velocity (rad/s) |
-| `forge.physics2d.raycast(ox, oy, dx, dy, maxDistance?)` | `Promise<hit \| null>` | First hit `{entityId, entityName, point, normal, distance}` |
+| `forge.physics2d.raycast(ox, oy, dx, dy, maxDistance?)` | `Promise<hit \| null>` | First hit `{entityId, point, normal, distance}` |
 | `forge.physics2d.isGrounded(entityId, distance?)` | `Promise<boolean>` | Downward-raycast ground check. **Returns a Promise** — `await` it. The 3D `forge.physics.isGrounded(entityId)` of the same name is synchronous; see the note below |
 | `forge.physics2d.setGravity(x, y)` | `void` | Set global gravity (default `[0, −9.81]`) |
 | `forge.physics2d.onCollisionEnter(cb)` | `() => void` | Collision-start callback; returns an unsubscribe fn |
@@ -119,6 +140,8 @@ namespace set).
 | `forge.tilemap.setTile(tilemapId, x, y, tileId, layer?)` | `void` | Paint one tile; `null` erases it instead |
 | `forge.tilemap.fillRect(tilemapId, x, y, w, h, tileId, layer?)` | `void` | Fill a `w`×`h` region in one command; `null` erases the region |
 | `forge.tilemap.clearTile(tilemapId, x, y, layer?)` | `void` | Erase a single tile |
+| `forge.tilemap.getCollisionShape(tilemapId, x, y, layer?)` | `CollisionShape \| null` | Editor test-play: read the last engine-confirmed authored shape; missing metadata means `none`, invalid or missing cells mean `null` |
+| `forge.tilemap.setCollisionShape(tilemapId, x, y, shape, layer?)` | `void` | Editor test-play: queue an authored shape edit; invalid inputs or an unavailable target throw |
 | `forge.tilemap.worldToTile(tilemapId, worldX, worldY)` | `[number, number]` | World → tile coordinates |
 | `forge.tilemap.tileToWorld(tilemapId, tileX, tileY)` | `[number, number]` | Tile → world coordinates |
 | `forge.tilemap.getMapSize(tilemapId)` | `[number, number]` | Map dimensions in tiles `[w, h]` |
@@ -162,6 +185,39 @@ well as its origin: `x + w - 1` and `y + h - 1` must each stay within the
 ceiling, because those derived cells are what the engine actually reads. The
 error names which axis ran off the end and the value it reached. A zero-width
 or zero-height region is a no-op.
+
+### Authored collision shapes
+
+`CollisionShape` is `none`, `full`, `halfTop`, `halfBottom`, `slopeLeft`, or
+`slopeRight`. Both shape methods default `layer` to `0`. The setter floors
+`x`, `y`, and `layer`, then checks the unsigned 32-bit bound described above
+and the mirrored map's actual cell range. The getter does not floor: fractional,
+non-finite, out-of-range, and unknown cells return `null`.
+
+These methods run only during **editor test-play** and are unavailable in
+standalone HTML/ZIP scripts. Authored metadata still persists in exported scene
+files. Reads reflect the next engine-supplied snapshot, rather than a local
+optimistic write. A request being queued does not confirm it was applied.
+
+**Stored shapes do not affect play physics yet.** Runtime collider generation is
+tracked in [#9814](https://github.com/Tristan578/project-forge/issues/9814).
+The legacy layer collision flag remains unchanged as metadata; it does not supply
+an implemented full-tile collision fallback.
+
+```typescript
+// Editor test-play: the tilemap and cell must already exist.
+function onStart() {
+  forge.tilemap.setCollisionShape("ground", 2, 0, "halfTop");
+}
+
+function onUpdate() {
+  // This becomes "halfTop" after an engine-confirmed snapshot arrives.
+  const shape = forge.tilemap.getCollisionShape("ground", 2, 0);
+  if (shape === "halfTop") {
+    // The authored metadata is now available; play physics is unchanged.
+  }
+}
+```
 
 ## forge.audio
 
@@ -258,7 +314,7 @@ or zero-height region is a no-op.
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `forge.camera.setMode(mode)` | `void` | `'thirdPersonFollow'｜'firstPerson'｜'sideScroller'｜'topDown'｜'fixed'｜'orbital'` |
-| `forge.camera.setTarget(entityId)` | `void` | Set follow target by entity ID |
+| `forge.camera.setTarget(entityId)` | `void` | Set the camera's target (the entity it tracks) by entity ID |
 | `forge.camera.shake(intensity, duration)` | `void` | Trigger camera shake |
 | `forge.camera.getMode()` | `string` | Current camera mode |
 | `forge.camera.setProperty(property, value)` | `void` | Set a camera property |
@@ -297,10 +353,8 @@ or zero-height region is a no-op.
 | `forge.skeleton.updateBone(entityId, boneName, updates)` | `void` | Update bone properties |
 | `forge.skeleton.getBones(entityId)` | `Array<bone> \| null` | All bones in the skeleton |
 | `forge.skeleton.playAnimation(entityId, anim, opts?)` | `void` | Play a skeletal animation (`opts: {loop?, speed?, crossfade?}`) |
-| `forge.skeleton.stopAnimation(entityId)` | `void` | Stop the current skeletal animation |
 | `forge.skeleton.setSkin(entityId, skinName)` | `void` | Set the active skin |
 | `forge.skeleton.getSkin(entityId)` | `string \| null` | Current active skin name |
-| `forge.skeleton.setIkTarget(entityId, constraint, x, y)` | `void` | Set an IK constraint target position |
 
 ## forge.skeleton2d
 
@@ -316,7 +370,7 @@ or zero-height region is a no-op.
 
 ## forge.ai
 
-All `forge.ai.*` methods are async and route to the AI generation provider.
+All `forge.ai.*` methods are async and route to the AI generation provider, except a method whose capability is declared unavailable in code (`UNAVAILABLE_CAPABILITIES`): it rejects immediately with a user-facing reason and never contacts a provider.
 
 | Function | Returns | Description |
 |----------|---------|-------------|
@@ -324,7 +378,7 @@ All `forge.ai.*` methods are async and route to the AI generation provider.
 | `forge.ai.generateModel(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate a 3D model from a prompt |
 | `forge.ai.generateSound(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate a sound effect from a prompt |
 | `forge.ai.generateVoice(text, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate voice audio from text |
-| `forge.ai.generateMusic(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate music from a prompt |
+| `forge.ai.generateMusic(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | **Not available yet** (#9522): rejects with "Music generation is not available yet…" before any request is sent |
 
 ## forge.asset
 

@@ -35,6 +35,7 @@
     "/api/bridges/discover": "bridge",
     "/api/capabilities": "meta",
     "/api/community/games/{id}/flag": "moderation",
+    "/api/community/games/{id}/report": "moderation",
     "/api/cron/health-monitor": "cron",
     "/api/feedback": "growth",
     "/api/game/decompose": "internal-ai",

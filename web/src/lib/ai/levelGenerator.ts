@@ -10,7 +10,7 @@
 export interface PlacedEntity {
   entityType: string;
   position: { x: number; y: number; z: number };
-  properties?: Record<string, unknown>;
+  properties?: Record<string, unknown> | undefined;
 }
 
 export type RoomType =

@@ -21,11 +21,11 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 | System | Changelog Source | Current Version |
 |--------|-----------------|-----------------|
 | Vercel Platform | https://vercel.com/changelog | N/A (platform) |
-| Sentry | https://github.com/getsentry/sentry-javascript/releases | @sentry/nextjs ^10.63.0 |
-| PostHog | https://github.com/PostHog/posthog-js/releases | posthog-js ^1.396.4 |
+| Sentry | https://github.com/getsentry/sentry-javascript/releases | @sentry/nextjs (read in Step 2) |
+| PostHog | https://github.com/PostHog/posthog-js/releases | posthog-js (read in Step 2) |
 | Anthropic (Claude API) | https://docs.anthropic.com/en/docs/about-claude/models | AI SDK provider |
 | Cloudflare | https://developers.cloudflare.com/changelog/ | R2 + Workers |
-| Upstash | https://github.com/upstash/redis-js/releases | @upstash/redis ^1.37.0 |
+| Upstash | https://github.com/upstash/redis-js/releases | @upstash/redis (read in Step 2) |
 | GitHub (Actions) | https://github.blog/changelog/ | CI/CD platform |
 | GitHub (CLI) | https://github.com/cli/cli/releases | gh CLI |
 | GitHub (API) | https://github.blog/changelog/ | REST + GraphQL |
@@ -34,33 +34,33 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 
 | Library | Changelog Source | Current Version |
 |---------|-----------------|-----------------|
-| Next.js | https://github.com/vercel/next.js/releases | ^16.2.10 |
-| Clerk | https://github.com/clerk/javascript/releases | @clerk/nextjs ^7.5.12 |
-| Stripe | https://github.com/stripe/stripe-node/releases | stripe ^22.6.0 |
-| AI SDK | https://github.com/vercel/ai/releases | ai ^7.0.11 |
-| Drizzle ORM | https://github.com/drizzle-team/drizzle-orm/releases | drizzle-orm 0.45.2 |
-| Neon Serverless | https://github.com/neondatabase/serverless/releases | @neondatabase/serverless ^1.0.2 |
-| Zod | https://github.com/colinhacks/zod/releases | zod ^4.3.6 |
-| Zustand | https://github.com/pmndrs/zustand/releases | zustand ^5.0.12 |
+| Next.js | https://github.com/vercel/next.js/releases | next 16.x (read in Step 2) |
+| Clerk | https://github.com/clerk/javascript/releases | @clerk/nextjs (read in Step 2) |
+| Stripe | https://github.com/stripe/stripe-node/releases | stripe (read in Step 2; ApiVersion pin in version-pins.md) |
+| AI SDK | https://github.com/vercel/ai/releases | ai (read in Step 2) |
+| Drizzle ORM | https://github.com/drizzle-team/drizzle-orm/releases | drizzle-orm (read in Step 2) |
+| Neon Serverless | https://github.com/neondatabase/serverless/releases | @neondatabase/serverless (read in Step 2) |
+| Zod | https://github.com/colinhacks/zod/releases | zod (read in Step 2) |
+| Zustand | https://github.com/pmndrs/zustand/releases | zustand (read in Step 2) |
 
 ### Tier 3 — Build & Testing
 
 | Library | Changelog Source | Current Version |
 |---------|-----------------|-----------------|
-| TypeScript | https://github.com/microsoft/TypeScript/releases | typescript ^6 |
-| Vitest | https://github.com/vitest-dev/vitest/releases | vitest ^4.1.9 |
-| Playwright | https://github.com/microsoft/playwright/releases | @playwright/test ^1.61.1 |
-| ESLint | https://github.com/eslint/eslint/releases | eslint ^9 |
-| Tailwind CSS | https://github.com/tailwindlabs/tailwindcss/releases | tailwindcss ^4 |
-| Turborepo | https://github.com/vercel/turborepo/releases | turbo ^2.5.4 |
+| TypeScript | https://github.com/microsoft/TypeScript/releases | typescript (read in Step 2) |
+| Vitest | https://github.com/vitest-dev/vitest/releases | vitest (read in Step 2) |
+| Playwright | https://github.com/microsoft/playwright/releases | @playwright/test (read in Step 2) |
+| ESLint | https://github.com/eslint/eslint/releases | eslint (read in Step 2) |
+| Tailwind CSS | https://github.com/tailwindlabs/tailwindcss/releases | tailwindcss (read in Step 2) |
+| Turborepo | https://github.com/vercel/turborepo/releases | turbo (root package.json) |
 
 ### Tier 4 — Rust / Engine
 
 | Library | Changelog Source | Current Version |
 |---------|-----------------|-----------------|
-| Bevy | https://github.com/bevyengine/bevy/releases | 0.18.1 |
+| Bevy | https://github.com/bevyengine/bevy/releases | 0.19.1 |
 | wasm-bindgen | https://github.com/rustwasm/wasm-bindgen/releases | =0.2.127 (pinned) |
-| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.34 |
+| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.35 |
 
 ## Procedure
 
@@ -77,10 +77,17 @@ Fetch the top releases for Tier 1 and Tier 2 systems. Only check Tier 3/4 when t
 
 Read the actual installed versions:
 
+Both commands `cd` to the repo root themselves rather than carrying a comment
+telling you to. The shell's working directory persists between steps, and this
+repo's own instructions are full of `cd web && …`, so "run from the repo root"
+is a precondition the next reader silently violates — and the failure then reads
+as a broken checkout rather than a wrong directory.
+
 ```bash
 # JavaScript dependencies
+cd "$(git rev-parse --show-toplevel)"
 node -e "
-const pkg = require('/Users/tristannolan/project-forge/web/package.json');
+const pkg = require('./web/package.json');
 const deps = {...pkg.dependencies, ...pkg.devDependencies};
 const tracked = ['next','@clerk/nextjs','stripe','@sentry/nextjs','posthog-js',
   '@upstash/redis','@neondatabase/serverless','drizzle-orm','ai','@ai-sdk/react',
@@ -88,8 +95,20 @@ const tracked = ['next','@clerk/nextjs','stripe','@sentry/nextjs','posthog-js',
 tracked.forEach(d => deps[d] && console.log(d + ': ' + deps[d]));
 "
 
-# Rust dependencies
-grep -E '^(bevy|bevy_rapier|wasm-bindgen)\s' /Users/tristannolan/project-forge/engine/Cargo.toml
+# Rust dependencies. Bevy and Rapier are declared as [dependencies.<name>]
+# TABLES, not top-level keys, so an anchored `^(bevy|bevy_rapier)` matched
+# neither — this step reported only wasm-bindgen while claiming to read "the
+# actual installed versions", and Bevy is the skill's own Tier 1 system.
+# Match both spellings and print the version line that follows a table header.
+cd "$(git rev-parse --show-toplevel)"
+awk '
+  /^(bevy|bevy_rapier[23]d|wasm-bindgen)[[:space:]]*=/ { print; next }
+  /^\[dependencies\.(bevy|bevy_rapier[23]d|wasm-bindgen)\]$/ {
+    name = $0; sub(/^\[dependencies\./, "", name); sub(/\]$/, "", name); pending = name; next
+  }
+  pending && /^version[[:space:]]*=/ { print pending " " $0; pending = ""; next }
+  /^\[/ { pending = "" }
+' engine/Cargo.toml
 ```
 
 ### Step 3: Generate Report
@@ -186,4 +205,4 @@ GitHub is a primary dependency (CI/CD, issue tracking, PR workflows, CLI). Check
 
 ## References
 
-- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.6.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency
+- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.6.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.19, upload-artifact v7 / download-artifact v8 (Node24 majors). Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency

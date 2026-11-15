@@ -1,5 +1,5 @@
 {
-  "_comment": "Template for a single MCP command manifest entry. Copy this object into the 'commands' array in mcp-server/manifest/commands.json AND web/src/data/commands.json.",
+  "_comment": "Template for a single MCP command manifest entry. Copy this object into the 'commands' array in mcp-server/manifest/commands.json, then copy that file to web/src/data/commands.json AND apps/docs/data/commands.json.",
   "_instructions": [
     "1. Replace 'my_domain_action' with your snake_case command name.",
     "2. Replace 'category_name' with an existing category from the valid list.",

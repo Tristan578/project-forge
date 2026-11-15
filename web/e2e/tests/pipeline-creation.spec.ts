@@ -290,9 +290,11 @@ test.describe('Pipeline Game Creation Flow @ui @dev', () => {
 //
 // Everything above injects orchestrator state directly; this block injects
 // NOTHING but the GDD the API would have returned. It clicks the toolbar entry,
-// picks a game type, types a prompt, approves the gates that are not
+// picks a game type, types a prompt, presses "Plan my game", confirms the plan
+// and its cost with "Build it" (#6831), approves the gates that are not
 // auto-approved, and presses Play — running the real `startQuickStart` ->
-// `buildPlan` -> `runPipeline` path with the real executors.
+// `buildPlan` -> `runPipelineFromPlan` -> `runPipeline` path with the real
+// executors.
 // ---------------------------------------------------------------------------
 
 /** The store surface this block reads. `__EDITOR_STORE` is declared `unknown`. */
@@ -327,15 +329,20 @@ const JOURNEY_RUN_TIMEOUT_MS = 120_000;
 const JOURNEY_PROGRESS_TIMEOUT_MS = 45_000;
 
 /**
- * Bound on gate waits. `gate_plan` is auto-approved for quick-start, so a
- * healthy run stops at exactly two (`gate_assets`, `gate_final`) plus the
- * terminal read — anything more is a regression, and the bound is what turns
- * it into a failure instead of a hang.
+ * Bound on gate waits. `gate_plan` is answered by the plan review's "Build it"
+ * (the slice auto-approves it for quick-start), so a healthy run stops at
+ * exactly two gates (`gate_assets`, `gate_final`) plus the terminal read —
+ * anything more is a regression, and the bound is what turns it into a
+ * failure instead of a hang.
  */
 const MAX_GATE_WAITS = 5;
 
 test.describe('Pipeline Game Creation Journey @journey', () => {
+  /** Every `action` posted to /api/game/pipeline, in order. Reset per test. */
+  let pipelineActions: string[] = [];
+
   test.beforeEach(async ({ page, editor }) => {
+    pipelineActions = [];
     // Routes must be registered BEFORE the first navigation.
     await page.route('**/api/game/decompose', (route) =>
       route.fulfill({
@@ -344,15 +351,18 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         body: JSON.stringify({ gdd: crystalRun3dGdd }),
       }),
     );
-    await page.route('**/api/game/pipeline', (route) =>
-      route.fulfill({
+    await page.route('**/api/game/pipeline', (route) => {
+      // Recorded so the test can prove nothing is reserved before "Build it".
+      const action = (route.request().postDataJSON() as { action?: string } | null)?.action;
+      pipelineActions.push(action ?? 'unknown');
+      return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        // `startDecomposition` throws unless this is a non-empty string. The
-        // same route answers the fire-and-forget release on teardown.
+        // `runPipelineFromPlan` fails the run unless this is a non-empty
+        // string. The same route answers the fire-and-forget release.
         body: JSON.stringify({ reservationId: 'e2e-reservation' }),
-      }),
-    );
+      });
+    });
     // The quick-start path must never reach the chat route. Fail fast if it does
     // rather than hanging on a provider call.
     await page.route('**/api/chat', (route) => route.fulfill({ status: 503, body: '' }));
@@ -372,7 +382,7 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
     //
     // This gate builds no WASM and Chromium runs with --disable-gpu, so
     // `init_engine` never completes and `getCommandDispatcher()` stays null —
-    // `runPipelineFromPlan` refuses with 'Engine not loaded' before a single
+    // `runPipelineFromPlan` refuses with `ENGINE_NOT_READY_MESSAGE` before a single
     // step runs. `__FORGE_SET_DISPATCH` (EditorLayout, behind the same
     // build-time `e2eHooksEnabled()` gate as `__EDITOR_STORE`) hands the
     // stand-in to the production `setCommandDispatcher`, so it goes through the
@@ -404,6 +414,12 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         components: string[];
         visible: boolean;
       }
+      type Vec3 = [number, number, number];
+      interface TransformSnapshot {
+        position: Vec3;
+        rotation: Vec3;
+        scale: Vec3;
+      }
 
       const recorded: Recorded[] = [];
       (window as unknown as { __E2E_COMMANDS: Recorded[] }).__E2E_COMMANDS = recorded;
@@ -432,6 +448,39 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         }
       };
 
+      // Confirmed-transform stand-in (#9899): `worldBuildExecutor` and
+      // `autoPolishExecutor` now poll `get_entity_details` until the observed
+      // `scale` matches what they just sent, exactly as `entitySetupExecutor`
+      // already does for spawn existence. A real engine reports the CURRENT
+      // transform once `apply_pending_transforms` lands it a frame later — so
+      // this stand-in tracks each entity's last-known transform and answers
+      // with it, rather than a fixed identity transform that could never
+      // satisfy a resize confirmation and would time out every world-build and
+      // auto-polish step regardless of whether the wiring under test works.
+      const transforms = new Map<string, TransformSnapshot>();
+      const pendingTransforms: Array<{ entityId: string; patch: Partial<TransformSnapshot> }> = [];
+      let transformScheduled = false;
+      const flushTransforms = () => {
+        transformScheduled = false;
+        let next = pendingTransforms.shift();
+        while (next) {
+          const current = transforms.get(next.entityId) ?? {
+            position: [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
+          };
+          transforms.set(next.entityId, { ...current, ...next.patch });
+          next = pendingTransforms.shift();
+        }
+      };
+      const asVec3 = (value: unknown): Vec3 | undefined => {
+        if (!Array.isArray(value) || value.length < 3) return undefined;
+        const [x, y, z] = value;
+        return typeof x === 'number' && typeof y === 'number' && typeof z === 'number'
+          ? [x, y, z]
+          : undefined;
+      };
+
       window.__FORGE_SET_DISPATCH!((command: string, payload: unknown) => {
         const p = (payload ?? {}) as Record<string, unknown>;
         // `Object.hasOwn`, not a bare read: `p['constructor']` resolves on the
@@ -441,7 +490,17 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         const nodes = store.getState().sceneGraph.nodes;
         recorded.push({
           command,
-          targetFlushed: target === null ? true : Object.hasOwn(nodes, target),
+          // `get_entity_details` is a READ-ONLY existence probe (#9899's
+          // confirmed-observation poll), not a mutation that requires its
+          // target to already exist — asking "does this exist yet" before it
+          // does is the whole point of the poll, not the PF-1213 ordering bug
+          // this tripwire exists to catch. Every mutating command (the class
+          // PF-1213 is actually about) still has to name an already-flushed
+          // target.
+          targetFlushed:
+            target === null || command === 'get_entity_details'
+              ? true
+              : Object.hasOwn(nodes, target),
         });
 
         if (command === 'spawn_entity') {
@@ -458,10 +517,61 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
             components: [],
             visible: true,
           });
+          // Seed a transform immediately (not deferred with the node add):
+          // existence confirmation only checks the scene graph, so this can
+          // never race it, and `update_transform` needs somewhere to merge
+          // onto even for an entity spawned in the same batch.
+          transforms.set(id, {
+            position: asVec3(p.position) ?? [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
+          });
           if (!scheduled) {
             scheduled = true;
             requestAnimationFrame(flush);
           }
+        }
+
+        // `update_transform` is deferred exactly like a spawn (#9899): the real
+        // engine lands it a frame later inside `apply_pending_transforms`, and
+        // `observeTransformEffect` exists specifically to catch a confirmation
+        // that reports "applied" before that frame passes. Only the fields the
+        // caller actually sent are merged — `worldBuildExecutor` sends scale
+        // alone, `autoPolishExecutor` sends scale alongside a separate
+        // `toggle_physics` command, and merging an absent field would stomp a
+        // previously-confirmed axis with a phantom [0,0,0].
+        if (command === 'update_transform' && target !== null) {
+          const patch: Partial<TransformSnapshot> = {};
+          const position = asVec3(p.position);
+          const rotation = asVec3(p.rotation);
+          const scale = asVec3(p.scale);
+          if (position) patch.position = position;
+          if (rotation) patch.rotation = rotation;
+          if (scale) patch.scale = scale;
+          pendingTransforms.push({ entityId: target, patch });
+          if (!transformScheduled) {
+            transformScheduled = true;
+            requestAnimationFrame(flushTransforms);
+          }
+        }
+
+        // Answer `get_entity_details` the way the real engine does (#9899):
+        // ONLY once the target is actually in the scene graph, never on the
+        // dispatch that spawned it (spawn is still queued for the next rAF
+        // flush above). `entitySetupExecutor`'s confirmed-observation poll
+        // (`observeEngineEffect`) calls this every 50ms until it gets an
+        // answer, so answering nothing before the flush and something after
+        // is the faithful shape — not a synchronous shortcut that would
+        // pass regardless of whether the ordering bug this gate exists to
+        // catch is actually fixed. The transform snapshot rides along so
+        // `worldBuildExecutor`/`autoPolishExecutor`'s scale confirmation has a
+        // real (deferred) value to compare against, not just an existence bit.
+        if (command === 'get_entity_details' && target !== null && Object.hasOwn(nodes, target)) {
+          const snapshot = transforms.get(target);
+          window.__FORGE_RECORD_ENTITY_OBSERVATION?.({
+            entityId: target,
+            ...(snapshot ?? {}),
+          });
         }
 
         return { success: true };
@@ -474,7 +584,29 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
     await page.getByTestId('quick-start-trigger').click();
     await page.getByRole('button', { name: 'Platformer' }).click();
     await page.locator('#quick-start-prompt').fill('collect every crystal to win');
-    await page.getByRole('button', { name: 'Build it' }).click();
+    await page.getByRole('button', { name: 'Plan my game' }).click();
+
+    // -----------------------------------------------------------------------
+    // Confirm the plan and its cost (#6831). "Plan my game" only designs: the
+    // run waits at 'awaiting_approval' with no pending gate, nothing reserved
+    // and no build step started, until the plan review's "Build it".
+    // -----------------------------------------------------------------------
+    const dialog = page.getByRole('dialog');
+    const build = dialog.getByRole('button', { name: 'Build it' });
+    await expect(build).toBeVisible({ timeout: JOURNEY_PROGRESS_TIMEOUT_MS });
+    await expect(dialog.getByText('Estimated token cost')).toBeVisible();
+    const beforeBuild = await page.evaluate(() => {
+      const state = (window.__EDITOR_STORE as { getState: () => JourneyState }).getState();
+      return {
+        status: state.orchestratorStatus,
+        pendingGate: state.pendingGate,
+        started: Object.values(state.stepStatuses).filter((st) => st !== 'pending').length,
+      };
+    });
+    expect(beforeBuild).toEqual({ status: 'awaiting_approval', pendingGate: null, started: 0 });
+    expect(pipelineActions).not.toContain('reserve');
+
+    await build.click();
 
     // -----------------------------------------------------------------------
     // Approve the gates quick-start does NOT auto-approve, through the real
@@ -529,9 +661,11 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
       );
     }
 
-    // Exactly two: `gate_plan` is auto-approved for quick-start (a user who
-    // typed a prompt has already approved the plan), the other two are not.
+    // Exactly two: `gate_plan` was answered by "Build it" above, the other two
+    // are not auto-approved.
     expect(approvedGateIds).toEqual(['gate_assets', 'gate_final']);
+    // The build reserved its tokens once, when it started.
+    expect(pipelineActions.filter((a) => a === 'reserve')).toEqual(['reserve']);
 
     // -----------------------------------------------------------------------
     // Assert on store state only. `engineMode === 'play'` needs a live engine

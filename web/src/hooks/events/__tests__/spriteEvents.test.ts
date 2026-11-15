@@ -44,7 +44,6 @@ describe('handleSpriteEvent', () => {
       'SPRITE_SHEET_UPDATED',
       'SPRITE_ANIMATOR_UPDATED',
       'ANIMATION_STATE_MACHINE_UPDATED',
-      'PROJECT_TYPE_CHANGED',
       'TILEMAP_REMOVED',
       'TILESET_LOADED',
     ];
@@ -106,6 +105,27 @@ describe('handleSpriteEvent', () => {
     it('ignores a payload with no entity id', () => {
       expect(dispatch('SPRITE_CHANGED', { sprite: wire })).toBe(true);
       expect(actions.applySpriteFromEngine).not.toHaveBeenCalled();
+    });
+  });
+
+  // Emitted by `apply_project_type_changes` (`engine/src/bridge/sprite.rs`)
+  // for every request it processes — the `set_project_type` command and the
+  // one `load_scene` queues from the scene file's `metadata.projectType`
+  // (#10227). Flat payload, no entityId: the project type is a resource.
+  describe('PROJECT_TYPE_CHANGED', () => {
+    it.each(['2d', '3d'] as const)('mirrors %s through the state-only action', (projectType) => {
+      expect(dispatch('PROJECT_TYPE_CHANGED', { projectType })).toBe(true);
+      expect(actions.applyProjectTypeFromEngine).toHaveBeenCalledWith(projectType);
+      // Never the dispatching sibling: the engine emits this BECAUSE it just
+      // applied the type, and an echo would queue the same request again.
+      expect(actions.setProjectType).not.toHaveBeenCalled();
+    });
+
+    it('drops a spelling outside the vocabulary rather than writing it into the store', () => {
+      for (const bad of ['2D', 'TwoD', '', 2, null, undefined]) {
+        expect(dispatch('PROJECT_TYPE_CHANGED', { projectType: bad })).toBe(true);
+      }
+      expect(actions.applyProjectTypeFromEngine).not.toHaveBeenCalled();
     });
   });
 

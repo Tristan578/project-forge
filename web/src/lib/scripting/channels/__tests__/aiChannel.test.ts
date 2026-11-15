@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createAiHandler } from '../aiChannel';
+import { createAiHandler, AI_METHODS } from '../aiChannel';
+import { ROUTE_CAPABILITY } from '@/lib/config/providers';
 
 // Fast polling: override POLL_INTERVAL_MS by controlling Promise resolution
 function makeFetchJson(responses: unknown[]) {
@@ -67,13 +68,73 @@ describe('createAiHandler', () => {
     expect(result).toEqual({ url: 'texture.png' });
   });
 
-  it('submits to correct routes for all five generation methods', async () => {
+  // #9522: music routes to ElevenLabs, a SYNCHRONOUS route that returns the
+  // audio bytes inline with no jobId — so generateMusic posts once and returns
+  // the payload directly, never polling a status endpoint. The old #9117 gate
+  // (refuse before submitting) no longer applies now that music is offered.
+  it('generateMusic posts once and returns the inline ElevenLabs result without polling (#9522)', async () => {
+    const inline = { audioBase64: 'AA==', durationSeconds: 30, provider: 'elevenlabs' };
+    const fetchJson = makeFetchJson([inline]);
+    const handler = createAiHandler({ fetchJson });
+
+    const resultPromise = handler('generateMusic', { prompt: 'chiptune loop' }, reportProgress, makeSignal());
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson.mock.calls[0][0]).toBe('/api/generate/music');
+    // No status poll: the single call is the POST, not a /status/ request.
+    expect(fetchJson.mock.calls[0][0]).not.toContain('status');
+    expect(result).toEqual(inline);
+    expect(reportProgress).toHaveBeenCalledWith(100, 'Done');
+  });
+
+  // The same synchronous contract for the sibling sfx ElevenLabs route: a
+  // response with no jobId is the asset itself, not a submission failure.
+  it('returns the inline result for a synchronous route (generateSound) without polling', async () => {
+    const inline = { audioBase64: 'BB==', durationSeconds: 3, provider: 'elevenlabs' };
+    const fetchJson = makeFetchJson([inline]);
+    const handler = createAiHandler({ fetchJson });
+
+    const resultPromise = handler('generateSound', { prompt: 'laser' }, reportProgress, makeSignal());
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson.mock.calls[0][0]).toBe('/api/generate/sfx');
+    expect(result).toEqual(inline);
+  });
+
+  it('propagates an error response from a synchronous route (generateMusic)', async () => {
+    const fetchJson = makeFetchJson([{ error: 'quota exceeded' }]);
+    const handler = createAiHandler({ fetchJson });
+    await expect(handler('generateMusic', {}, reportProgress, makeSignal())).rejects.toThrow('quota exceeded');
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+  });
+
+  // AI_METHODS is a second route table beside ROUTE_CAPABILITY. The latter is
+  // validated against the routes on disk (routeCapability.test.ts); this ties
+  // the two together so a forge.ai.* method can neither post to a route that
+  // does not exist nor declare a capability the route does not spend. It
+  // would have failed on `generateSound -> /api/generate/sound` (a route that
+  // never existed; the on-disk route is `sfx`) — a mocked transport pinned
+  // the wrong contract for as long as nothing cross-checked it (lesson 14).
+  it('posts every forge.ai.* method to a route ROUTE_CAPABILITY knows, with the same capability', () => {
+    const methods = Object.entries(AI_METHODS);
+    expect(methods.length).toBeGreaterThan(0);
+    for (const [method, entry] of methods) {
+      expect(ROUTE_CAPABILITY[entry.route], `${method} posts to ${entry.route}, which is not a generate route`).toBe(
+        entry.capability,
+      );
+    }
+  });
+
+  it('submits to correct routes for the four offered generation methods', async () => {
     const methods = [
       ['generateTexture', '/api/generate/texture'],
       ['generateModel', '/api/generate/model'],
-      ['generateSound', '/api/generate/sound'],
+      ['generateSound', '/api/generate/sfx'],
       ['generateVoice', '/api/generate/voice'],
-      ['generateMusic', '/api/generate/music'],
     ] as const;
 
     for (const [method, expectedRoute] of methods) {
@@ -129,7 +190,9 @@ describe('createAiHandler', () => {
     ]);
     const handler = createAiHandler({ fetchJson });
 
-    const error = await handler('generateSound', {}, reportProgress, makeSignal()).catch((e: Error) => e);
+    // generateModel is an async (polled) route — sfx/voice/music are now
+    // synchronous, so the poll machinery is exercised with a job-based method.
+    const error = await handler('generateModel', {}, reportProgress, makeSignal()).catch((e: Error) => e);
     await vi.runAllTimersAsync();
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe('Generation failed');
@@ -142,7 +205,7 @@ describe('createAiHandler', () => {
     ]);
     const handler = createAiHandler({ fetchJson });
 
-    const resultPromise = handler('generateMusic', {}, reportProgress, makeSignal());
+    const resultPromise = handler('generateTexture', {}, reportProgress, makeSignal());
     await vi.runAllTimersAsync();
     await resultPromise;
 
@@ -158,7 +221,8 @@ describe('createAiHandler', () => {
     ]);
     const handler = createAiHandler({ fetchJson });
 
-    const resultPromise = handler('generateVoice', {}, reportProgress, makeSignal());
+    // generateModel is an async (polled) route; sfx/voice/music are synchronous.
+    const resultPromise = handler('generateModel', {}, reportProgress, makeSignal());
     await vi.runAllTimersAsync();
     await resultPromise;
 

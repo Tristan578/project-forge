@@ -30,7 +30,10 @@ use crate::core::{
         SpriteData, SpriteEnabled, SpriteSheetData, TransitionCondition,
         z_from_sorting, z_from_sorting_with_config,
     },
-    tilemap::{tile_flat_index, TilemapData, TilemapEnabled, TilemapOrigin, Grid2dConfig},
+    tilemap::{
+        apply_tile_collision_shape_edit, tile_flat_index, Grid2dConfig, TilemapData, TilemapEnabled,
+        TilemapOrigin,
+    },
     tileset::{TilesetData, TilesetRegistry},
 };
 use super::events;
@@ -318,6 +321,24 @@ pub(super) fn emit_sprite_on_selection(
 
 /// System that processes pending project type changes.
 /// Updates the ProjectType resource and manages Camera2d lifecycle.
+///
+/// Requests come from the `set_project_type` command (always `Some`) and from
+/// `apply_scene_load`, which queues the scene file's `metadata.projectType` as
+/// it stands so a reopened or published 2D game gets its 2D camera back
+/// (#10227). `ProjectType::apply_request` decides: `Some` applies that type,
+/// `None` — a scene saved before the field existed — leaves the resource as it
+/// is, so a key-less scene inherits the session's dimension rather than
+/// flipping the editor to 3D. Every processed request — changed or not, `Some`
+/// or `None` — is reported to the web layer as `PROJECT_TYPE_CHANGED` carrying
+/// the RESOURCE's value, so `spriteSlice.projectType` follows the engine
+/// rather than only the AI handlers that used to be its sole writers: a store
+/// that drifted (say, a `set_project_type` refused before the engine attached)
+/// converges on the next load instead of staying wrong until an AI turn.
+///
+/// Ordered `.after(apply_scene_load)` and `.before(apply_scene_export)` in
+/// `bridge/mod.rs`, so the type a load carries is applied in the same frame
+/// and the export that `checkpointRecovery.matchesExpected` compares against
+/// the loaded scene already reflects it.
 pub(super) fn apply_project_type_changes(
     mut pending: ResMut<PendingCommands>,
     mut project_type: ResMut<ProjectType>,
@@ -326,60 +347,72 @@ pub(super) fn apply_project_type_changes(
     mut camera_3d_query: Query<&mut Camera, With<crate::core::camera::EditorCamera>>,
 ) {
     for request in pending.set_project_type_requests.drain(..) {
-        let new_type = match request.project_type.as_str() {
-            "2d" => ProjectType::TwoD,
-            "3d" => ProjectType::ThreeD,
-            _ => continue,
-        };
+        let (resolved, changed) = project_type.apply_request(request.project_type);
 
-        if *project_type == new_type {
-            continue;
+        if changed {
+            *project_type = resolved;
+            switch_cameras_for(resolved, &mut commands, &camera_2d_query, &mut camera_3d_query);
         }
 
-        *project_type = new_type;
+        // Inside the loop — once per request, including a `None` that changed
+        // nothing — and the RESOURCE rather than the request, so a key-less
+        // load reports the type the session actually has. After the camera
+        // work, so a 2D switch's CAMERA_2D_CHANGED has landed in the store by
+        // the time the inspector flips to its 2D sections.
+        events::emit_project_type_changed(*project_type);
+    }
+}
 
-        match new_type {
-            ProjectType::TwoD => {
-                // Disable the 3D camera (do NOT despawn — it has Undeletable marker)
-                if let Ok(mut cam) = camera_3d_query.single_mut() {
-                    cam.is_active = false;
-                }
-
-                // Spawn a 2D camera if none exists
-                if camera_2d_query.is_empty() {
-                    let camera_data = Camera2dData::default();
-                    let scale = 1.0 / camera_data.zoom;
-
-                    commands.spawn((
-                        Managed2dCamera,
-                        Camera2dEnabled,
-                        camera_data.clone(),
-                        Camera2d,
-                        Camera {
-                            order: 1,
-                            clear_color: ClearColorConfig::Default,
-                            ..default()
-                        },
-                        Projection::Orthographic(OrthographicProjection {
-                            scale,
-                            ..OrthographicProjection::default_2d()
-                        }),
-                        Transform::from_xyz(0.0, 0.0, 999.9),
-                    ));
-
-                    events::emit_camera_2d_changed(&camera_data);
-                }
+/// Camera lifecycle for a dimension switch: 2D disables the editor's 3D camera
+/// and spawns the managed orthographic one sprites render through; 3D does the
+/// reverse. Only called when the resource actually changed.
+fn switch_cameras_for(
+    new_type: ProjectType,
+    commands: &mut Commands,
+    camera_2d_query: &Query<Entity, With<Managed2dCamera>>,
+    camera_3d_query: &mut Query<&mut Camera, With<crate::core::camera::EditorCamera>>,
+) {
+    match new_type {
+        ProjectType::TwoD => {
+            // Disable the 3D camera (do NOT despawn — it has Undeletable marker)
+            if let Ok(mut cam) = camera_3d_query.single_mut() {
+                cam.is_active = false;
             }
-            ProjectType::ThreeD => {
-                // Re-enable the 3D camera
-                if let Ok(mut cam) = camera_3d_query.single_mut() {
-                    cam.is_active = true;
-                }
 
-                // Despawn the managed 2D camera when switching back to 3D
-                for entity in camera_2d_query.iter() {
-                    commands.entity(entity).despawn();
-                }
+            // Spawn a 2D camera if none exists
+            if camera_2d_query.is_empty() {
+                let camera_data = Camera2dData::default();
+                let scale = 1.0 / camera_data.zoom;
+
+                commands.spawn((
+                    Managed2dCamera,
+                    Camera2dEnabled,
+                    camera_data.clone(),
+                    Camera2d,
+                    Camera {
+                        order: 1,
+                        clear_color: ClearColorConfig::Default,
+                        ..default()
+                    },
+                    Projection::Orthographic(OrthographicProjection {
+                        scale,
+                        ..OrthographicProjection::default_2d()
+                    }),
+                    Transform::from_xyz(0.0, 0.0, 999.9),
+                ));
+
+                events::emit_camera_2d_changed(&camera_data);
+            }
+        }
+        ProjectType::ThreeD => {
+            // Re-enable the 3D camera
+            if let Ok(mut cam) = camera_3d_query.single_mut() {
+                cam.is_active = true;
+            }
+
+            // Despawn the managed 2D camera when switching back to 3D
+            for entity in camera_2d_query.iter() {
+                commands.entity(entity).despawn();
             }
         }
     }
@@ -1104,6 +1137,46 @@ pub(super) fn apply_fill_tiles_requests(
             // `placement.tile_index` is already `Option<u32>`: `None` erases,
             // so one `fill_tiles` covers a rectangular clear (PF-1181).
             tilemap_data.layers[request.layer].tiles[tile_index] = placement.tile_index;
+        }
+    }
+}
+
+/// System that applies pending `set_tile_collision_shape` requests: authors one
+/// cell's collision silhouette on a TilemapData layer.
+///
+/// Unlike `apply_paint_tile_requests`, this one records undo and re-reports to
+/// the browser, matching `apply_tilemap_data_updates`:
+///
+/// - It pushes `TilemapChange` so the edit is undoable through the same arm the
+///   full-replace path uses (no new undo arm, and — critically — no sibling
+///   `*Enabled` marker: the whole `TilemapData` is snapshotted, so undo restores
+///   the exact prior shapes without touching `TilemapEnabled`).
+/// - It emits `TILEMAP_CHANGED` so the Zustand mirror updates even when the edit
+///   originates from a script (`forge.tilemap.setCollisionShape`), where the
+///   store never optimistically applied it, and even when the tilemap entity is
+///   not the selected one — the selection-emit systems only cover the selection.
+///
+/// Invalid coordinates and unchanged effective shapes write nothing, preserve
+/// undo/redo history, and produce no update event.
+pub(super) fn apply_set_tile_collision_shape_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut TilemapData)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for request in pending.set_tile_collision_shape_requests.drain(..) {
+        let found = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id);
+        let Some((_, mut tilemap_data)) = found else { continue };
+
+        if apply_tile_collision_shape_edit(
+            &mut tilemap_data,
+            &request.entity_id,
+            request.layer,
+            request.x,
+            request.y,
+            request.shape,
+            &mut history,
+        ) {
+            events::emit_tilemap_changed(&request.entity_id, Some(&tilemap_data));
         }
     }
 }

@@ -19,7 +19,6 @@ export const FIGHTER_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'fighting', 'pvp', 'action'],
 
-  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,
@@ -44,7 +43,38 @@ export const FIGHTER_2D_TEMPLATE: GameTemplate = {
       color: [1, 1, 1],
       brightness: 750,
     },
-    inputBindings: {},
+    // A SECOND SET OF CONTROLS, WHICH THIS TEMPLATE DEFINES FOR ITSELF.
+    //
+    // Two players at one keyboard need two vocabularies, and no genre preset
+    // ever offered one — which is why this template's scripts used to read raw
+    // key codes that nothing was listening for. Declaring them here is the
+    // ordinary way now: `templateSceneFile` carries them into the scene, where
+    // they sit alongside the defaults. Player one keeps `move_left` /
+    // `move_right` / `action_primary`; player two gets names of its own.
+    //
+    // Nothing here is special-cased for fighting games. A project that wants
+    // `grapple`, `rewind` or a third player writes the same thing — in this
+    // file, or in the Input Bindings panel.
+    inputBindings: {
+      p2_left: {
+        name: 'p2_left',
+        actionType: { type: 'Digital' },
+        sources: [{ type: 'Key', value: 'ArrowLeft' }],
+        deadZone: 0.1,
+      },
+      p2_right: {
+        name: 'p2_right',
+        actionType: { type: 'Digital' },
+        sources: [{ type: 'Key', value: 'ArrowRight' }],
+        deadZone: 0.1,
+      },
+      p2_attack: {
+        name: 'p2_attack',
+        actionType: { type: 'Digital' },
+        sources: [{ type: 'Key', value: 'Enter' }],
+        deadZone: 0.1,
+      },
+    },
     postProcessing: {
       bloomEnabled: false,
       bloomIntensity: 0.0,
@@ -289,34 +319,33 @@ const ATTACK_RANGE = 2;
 const ATTACK_DAMAGE = 10;
 let attackCooldown = 0;
 
-forge.onUpdate((dt) => {
+function onUpdate(dt) {
   attackCooldown = Math.max(0, attackCooldown - dt);
 
   let dx = 0;
-  if (forge.input.isKeyDown('a')) dx = -SPEED * dt;
-  if (forge.input.isKeyDown('d')) dx = SPEED * dt;
+  if (forge.input.isPressed('move_left')) dx = -SPEED * dt;
+  if (forge.input.isPressed('move_right')) dx = SPEED * dt;
 
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newX = Math.max(-7, Math.min(7, pos.x + dx));
-  forge.transform.setPosition(newX, pos.y, pos.z);
+  const newX = Math.max(-7, Math.min(7, state.position[0] + dx));
+  forge.setPosition(entityId, newX, state.position[1], state.position[2]);
 
-  if (forge.input.isKeyPressed('Space') && attackCooldown <= 0) {
+  if (forge.input.justPressed('action_primary') && attackCooldown <= 0) {
     attackCooldown = 0.5;
 
     const p2List = forge.scene.findByName('Player2');
     if (p2List.length === 0) return;
 
-    const p2Pos = forge.transform.getPosition(p2List[0]);
-    if (!p2Pos) return;
+    const p2State = forge.getTransform(p2List[0]);
+    if (!p2State) return;
 
-    const dist = Math.abs(newX - p2Pos.x);
-    if (dist < ATTACK_RANGE) {
+    if (Math.abs(newX - p2State.position[0]) < ATTACK_RANGE) {
       forge.state.set('p1_hit_p2', ATTACK_DAMAGE);
     }
   }
-});`,
+}`,
       enabled: true,
     },
     player2: {
@@ -326,34 +355,36 @@ const ATTACK_RANGE = 2;
 const ATTACK_DAMAGE = 10;
 let attackCooldown = 0;
 
-forge.onUpdate((dt) => {
+// p2_left, p2_right and p2_attack are declared by this template in
+// sceneData.inputBindings. They are not built in and not a genre feature -
+// any project can define actions of its own the same way.
+function onUpdate(dt) {
   attackCooldown = Math.max(0, attackCooldown - dt);
 
   let dx = 0;
-  if (forge.input.isKeyDown('ArrowLeft')) dx = -SPEED * dt;
-  if (forge.input.isKeyDown('ArrowRight')) dx = SPEED * dt;
+  if (forge.input.isPressed('p2_left')) dx = -SPEED * dt;
+  if (forge.input.isPressed('p2_right')) dx = SPEED * dt;
 
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newX = Math.max(-7, Math.min(7, pos.x + dx));
-  forge.transform.setPosition(newX, pos.y, pos.z);
+  const newX = Math.max(-7, Math.min(7, state.position[0] + dx));
+  forge.setPosition(entityId, newX, state.position[1], state.position[2]);
 
-  if (forge.input.isKeyPressed('Enter') && attackCooldown <= 0) {
+  if (forge.input.justPressed('p2_attack') && attackCooldown <= 0) {
     attackCooldown = 0.5;
 
     const p1List = forge.scene.findByName('Player1');
     if (p1List.length === 0) return;
 
-    const p1Pos = forge.transform.getPosition(p1List[0]);
-    if (!p1Pos) return;
+    const p1State = forge.getTransform(p1List[0]);
+    if (!p1State) return;
 
-    const dist = Math.abs(newX - p1Pos.x);
-    if (dist < ATTACK_RANGE) {
+    if (Math.abs(newX - p1State.position[0]) < ATTACK_RANGE) {
       forge.state.set('p2_hit_p1', ATTACK_DAMAGE);
     }
   }
-});`,
+}`,
       enabled: true,
     },
     game_manager: {
@@ -362,18 +393,30 @@ let p1Hp = 100;
 let p2Hp = 100;
 let gameOver = false;
 
-forge.onStart(() => {
+function onStart() {
   forge.ui.showText('p1_hp', 'P1 HP: 100', 5, 5, { fontSize: 20, color: '#3b82f6' });
   forge.ui.showText('p2_hp', 'P2 HP: 100', 70, 5, { fontSize: 20, color: '#ef4444' });
-  forge.ui.showText('p1_hint', 'P1: A/D move, Space attack', 5, 92, {
+  forge.ui.showText('p1_hint', 'P1: A/D move, J or mouse to attack', 5, 92, {
     fontSize: 14, color: '#aaa'
   });
   forge.ui.showText('p2_hint', 'P2: Arrows move, Enter attack', 55, 92, {
     fontSize: 14, color: '#aaa'
   });
-});
+}
 
-forge.onUpdate(() => {
+let restartTimer = -1;
+
+function onUpdate(dt) {
+  // A countdown, not setTimeout: the sandbox shadows the timer globals, so a
+  // scheduled restart would never fire.
+  if (restartTimer > 0) {
+    restartTimer -= dt;
+    if (restartTimer <= 0) {
+      restartTimer = -1;
+      forge.scene.restart();
+    }
+  }
+
   if (gameOver) return;
 
   const p1Hit = forge.state.get('p1_hit_p2');
@@ -387,7 +430,7 @@ forge.onUpdate(() => {
       forge.ui.showText('winner', 'PLAYER 1 WINS!', 25, 45, {
         fontSize: 36, color: '#3b82f6'
       });
-      setTimeout(() => forge.scene.restart(), 3000);
+      restartTimer = 3;
     }
   }
 
@@ -402,10 +445,10 @@ forge.onUpdate(() => {
       forge.ui.showText('winner', 'PLAYER 2 WINS!', 25, 45, {
         fontSize: 36, color: '#ef4444'
       });
-      setTimeout(() => forge.scene.restart(), 3000);
+      restartTimer = 3;
     }
   }
-});`,
+}`,
       enabled: true,
     },
   },

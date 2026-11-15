@@ -1,0 +1,23 @@
+{
+  "observationId": "obs:01J9UPTIME0000000000001",
+  "metric": "uptime",
+  "environment": "production",
+  "window": {
+    "label": "24h",
+    "start": "2026-09-13T00:00:00Z",
+    "end": "2026-09-14T00:00:00Z"
+  },
+  "evidence": {
+    "dependencyId": "dep:upstash-redis@1"
+  },
+  "source": "synthetic-monitor",
+  "releaseSha": null,
+  "observedAt": "2026-09-13T23:55:00Z",
+  "ingestedAt": "2026-09-13T23:56:00Z",
+  "confidence": "verified",
+  "applicability": "applicable",
+  "formulaVersion": "uptime@1",
+  "numerator": 286,
+  "denominator": 288,
+  "sampleSize": 288
+}

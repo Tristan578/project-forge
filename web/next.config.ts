@@ -1,5 +1,6 @@
+import path from "node:path";
 import type { NextConfig } from "next";
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import withBundleAnalyzer from "@next/bundle-analyzer";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withBotId } from "botid/next/config";
@@ -15,6 +16,12 @@ import { assertClerkPublishableKeyShape } from "./src/lib/auth/clerkKey";
 // it. Checked here rather than at runtime so the deploy goes red instead of the
 // live site.
 assertClerkPublishableKeyShape();
+
+// The sandboxed script transport's build-time loader (#8700) and the one file it
+// rewrites — see the `turbopack` / `webpack` entries below.
+const SANDBOX_WORKER_LOADER = path.join(process.cwd(), "scripts", "sandbox-worker-loader.cjs");
+const SANDBOX_WORKER_PLACEHOLDER = "scriptWorkerSource.bundle.ts";
+const SANDBOX_WORKER_PLACEHOLDER_RE = /[\\/]src[\\/]lib[\\/]scripting[\\/]scriptWorkerSource\.bundle\.ts$/;
 
 const analyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -83,9 +90,9 @@ const nextConfig: NextConfig = {
     // Inline prefetch payloads into the page HTML to reduce waterfall requests
     // on navigation, improving LCP for App Router navigations (16.2+).
     prefetchInlining: true,
-    // Use the new scroll restoration handler that correctly restores scroll
-    // position across App Router navigations (16.2+).
-    appNewScrollHandler: true,
+    // `appNewScrollHandler` is gone: it defaulted to true from 16.3, and 16.4
+    // removed the option from ExperimentalConfig, so keeping it fails
+    // type-checking (TS2353) and `next build`.
     // Enable the 'use cache' directive for Server Components. Allows
     // cache-eligible components to declare cacheTag() and cacheLife() hints
     // so Next.js can skip re-rendering on subsequent requests.
@@ -96,6 +103,60 @@ const nextConfig: NextConfig = {
   // Top-level in Next.js 15+ (moved out of experimental).
   outputFileTracingIncludes: {
     '/changelog': ['../CHANGELOG.md'],
+    // The play share-card route reads font files through a dynamic URL helper.
+    // Include the exact assets explicitly, including metadata-ID variants, so
+    // a deployed function never relies on the tracer inferring that helper.
+    '/play/**/opengraph-image': [
+      './src/assets/fonts/NotoSans-Regular.ttf',
+      './src/assets/fonts/NotoSans-Bold.ttf',
+      './src/assets/fonts/SpawnForgeArabic-Regular.ttf',
+      './src/assets/fonts/NotoSansCJKjp-Regular.otf',
+    ],
+    '/play/**/opengraph-image/**': [
+      './src/assets/fonts/NotoSans-Regular.ttf',
+      './src/assets/fonts/NotoSans-Bold.ttf',
+      './src/assets/fonts/SpawnForgeArabic-Regular.ttf',
+      './src/assets/fonts/NotoSansCJKjp-Regular.otf',
+    ],
+
+  },
+  // No server function ever reads the browser engine bundles from disk: they are
+  // public assets served through the rewrites/headers below and the R2 CDN.
+  // Any route whose dependency graph reaches a dynamic filesystem call (the
+  // desktop bridge manager's existsSync/readFileSync probes, for one) makes
+  // Next's tracer conservatively attach all four WASM variants to that
+  // function, pushing it past Vercel's 250 MB uncompressed limit. #9707 excluded
+  // them for /api/bridges/aseprite/execute only; /api/bridges/aseprite/status
+  // shares the same bridge manager and failed the staging deploy the same way
+  // (#10069). The exclusion is therefore global — a per-route list regresses the
+  // moment a new route imports the bridge manager. These exclusions only affect
+  // function traces; the same files remain deployed as public assets.
+  outputFileTracingExcludes: {
+    '*': ['./public/engine-pkg-*/**'],
+  },
+  // Sandboxed-origin script transport (#8700, NEXT_PUBLIC_SCRIPT_ISOLATION=
+  // 'sandboxed-origin'). The loader replaces the placeholder with scriptWorker.ts
+  // bundled into ONE classic script, which the null-origin sandbox frame boots
+  // from a blob: URL — it cannot load the bundler's chunks from this origin.
+  // Registered for BOTH bundlers: webpack serves `next dev --webpack`, Turbopack
+  // serves `next build` (including CI's bare `npx next build`). Without the
+  // rule the placeholder ships as '' and loadSandboxWorkerSource() refuses it.
+  // See src/lib/scripting/sandboxOrigin.ts and scripts/sandbox-worker-loader.cjs.
+  turbopack: {
+    rules: {
+      [SANDBOX_WORKER_PLACEHOLDER]: {
+        loaders: [SANDBOX_WORKER_LOADER],
+        as: '*.js',
+      },
+    },
+  },
+  webpack: (config) => {
+    config.module.rules.push({
+      test: SANDBOX_WORKER_PLACEHOLDER_RE,
+      enforce: 'pre',
+      use: [{ loader: SANDBOX_WORKER_LOADER }],
+    });
+    return config;
   },
   images: {
     remotePatterns: [
@@ -225,8 +286,12 @@ export default withSentryConfig(withNextIntl(analyzer(withBotId(nextConfig))), {
   org: process.env.SENTRY_ORG || "tristan-nolan",
   project: process.env.SENTRY_PROJECT || "spawnforge-ai",
 
-  // Auth token for source map upload (set SENTRY_AUTH_TOKEN in env)
-  authToken: process.env.SENTRY_AUTH_TOKEN,
+  // Auth token for source map upload (set SENTRY_AUTH_TOKEN in env).
+  // @sentry/nextjs's SentryBuildOptions.authToken doesn't accept an explicit
+  // `undefined` under exactOptionalPropertyTypes; conditional spread omits
+  // the key when unset (the plugin's own upload step reads
+  // SENTRY_AUTH_TOKEN from the environment directly in that case anyway).
+  ...(process.env.SENTRY_AUTH_TOKEN ? { authToken: process.env.SENTRY_AUTH_TOKEN } : {}),
 
   // Tree-shake Sentry logger statements to reduce bundle size (webpack only;
   // Turbopack handles this via its own dead-code elimination).

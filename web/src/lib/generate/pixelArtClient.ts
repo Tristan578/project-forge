@@ -15,7 +15,7 @@ interface GenerateParams {
   style: PixelArtStyle;
   size: 512 | 1024;
   referenceImage?: string; // base64
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 interface OpenAIResult {

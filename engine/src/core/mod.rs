@@ -5,6 +5,12 @@
 
 pub mod animation;
 pub mod animation_clip;
+pub mod asset_import_guard;
+/// Decoder pins for the texture allowlist (#10397): every allowlisted format
+/// decodes on this build, through both `Image::from_buffer` dispatches the
+/// editor uses. Carries its own `#![cfg(test)]`; it needs `bevy::image`, which
+/// is why it is not inside the probe-runnable `asset_import_guard.rs`.
+mod asset_import_guard_decoder_tests;
 pub mod asset_manager;
 pub mod audio;
 pub mod blend_tree2d;
@@ -51,10 +57,12 @@ pub mod pending_commands {
 pub mod physics;
 pub mod physics_2d;
 pub mod physics_2d_sim;
+pub mod play_tick_delta;
 pub mod post_processing;
 pub mod procedural_mesh;
 pub mod project_type;
 pub mod quality;
+pub mod render_errors;
 pub mod reparent;
 pub mod reverb_zone;
 /// Native `App` schedule smoke test for B0002-class (Res+ResMut of the same
@@ -67,6 +75,7 @@ pub mod scene;
 pub mod scene_file;
 pub mod scene_graph;
 pub mod scripting;
+pub mod simulation_clock;
 pub mod selection;
 pub mod skeletal_animation2d;
 pub mod skeleton2d;
@@ -80,6 +89,7 @@ pub mod snap;
 /// with the file rather than with this declaration.
 mod snapshot_producer_parity_tests;
 pub mod sprite;
+pub mod system_timing;
 pub mod terrain;
 pub mod tilemap;
 pub mod tileset;

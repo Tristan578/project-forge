@@ -498,6 +498,38 @@ describe('buildEntitySummaries', () => {
     expect(summaries[0].hasAudio).toBe(true);
     expect(summaries[0].materialColor).toEqual([1, 0, 0, 1]);
   });
+
+  it('infers "terrain" for a TerrainEnabled node (PF-1162)', () => {
+    const ctx = makeSceneContext({
+      sceneGraph: {
+        nodes: {
+          // TerrainEnabled sits alongside Mesh3d; the shared helper must reach
+          // the terrain branch first.
+          e1: makeNode('e1', 'Ground', ['TerrainEnabled', 'Mesh3d']),
+        },
+        rootIds: ['e1'],
+      },
+    });
+    const summaries = buildEntitySummaries(ctx);
+    expect(summaries[0].entityType).toBe('terrain');
+  });
+
+  it('classifies a Sprite/SpriteData-only node as "unknown", not "sprite" (PF-1162)', () => {
+    // The engine wire contract emits neither 'Sprite' nor 'SpriteData', so the
+    // shared helper has no sprite branch — such a node falls back to 'unknown'.
+    const ctx = makeSceneContext({
+      sceneGraph: {
+        nodes: {
+          e1: makeNode('e1', 'Hero', ['Sprite']),
+          e2: makeNode('e2', 'Coin', ['SpriteData']),
+        },
+        rootIds: ['e1', 'e2'],
+      },
+    });
+    const summaries = buildEntitySummaries(ctx);
+    expect(summaries.find((s) => s.entityId === 'e1')?.entityType).toBe('unknown');
+    expect(summaries.find((s) => s.entityId === 'e2')?.entityType).toBe('unknown');
+  });
 });
 
 describe('createDefaultProfile', () => {

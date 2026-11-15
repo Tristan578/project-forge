@@ -5,7 +5,7 @@ description: "Manage SpawnForge taskboard tickets — create, view, move, and sy
 
 # Taskboard Management Protocol
 
-You manage project work via the **taskboard MCP server** (22 tools). The taskboard is the single source of truth for all project work.
+You manage project work via the **taskboard MCP server** (22 tools). GitHub issues are the backlog of record; the taskboard is a local working view synced with them, and when the two disagree the GitHub issue is correct.
 
 ## Taskboard Ownership Model
 
@@ -19,15 +19,14 @@ You manage project work via the **taskboard MCP server** (22 tools). The taskboa
 
 If the taskboard is not running when needed:
 ```bash
-taskboard start --port 3010 &    # NO --db flag — uses OS default path
-sleep 2
+node .claude/hooks/taskboard-launch.mjs start   # resolves + passes the shared DB path, waits for the API, verifies its identity
 # Verify board has data — 0 tickets means wrong DB path
 curl -s http://taskboard.localhost:1355/api/board | python3 -c "import json,sys; c=len(json.load(sys.stdin).get('tickets',[])); print(f'{c} tickets'); exit(0 if c > 0 else 1)"
 # If 0 tickets, sync from GitHub:
 python3 .claude/hooks/github_project_sync.py pull
 ```
 
-**CRITICAL:** NEVER pass `--db .claude/taskboard.db` — it creates an empty local copy. The OS default (`~/Library/Application Support/taskboard/`) is the source of truth.
+**CRITICAL:** Never start the binary by hand, and never pass your own `--db` — least of all `--db .claude/taskboard.db`, which creates an empty local copy. The launcher always resolves the ONE shared database path (`TASKBOARD_DB` if set, else the OS config directory via `taskboard_runtime.default_db()`) and passes it to the binary itself, so the HTTP server, the MCP server and `github_project_sync.py` all open the same file (#9995).
 
 **Web UI:** http://taskboard.localhost:1355 (fallback: http://localhost:3010)
 **Project:** Project Forge (prefix: PF, ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`)
@@ -98,13 +97,13 @@ As a [persona], I want [specific goal] so that [measurable benefit].
    - Team assigned (metadata)
    - Subtasks defined (at least 3 implementation steps)
 5. Fix any validation gaps BEFORE moving to `in_progress`
-6. **Sync ticket to GitHub** — run `/sync-push` so the ticket becomes a GitHub issue. You need the GitHub issue number (`#NNNN`) to link PRs with `Closes #NNNN`.
+6. **Sync ticket to GitHub** — run `python3 .claude/hooks/github_project_sync.py push` so the ticket becomes a GitHub issue. You need the GitHub issue number (`#NNNN`) to link PRs with `Closes #NNNN`.
 7. Move the ticket to `in_progress` using `move_ticket`
 
 ### Before Creating Any PR
 
 **MANDATORY** — every PR must link to a GitHub issue:
-1. Run `/sync-push` to ensure your ticket exists as a GitHub issue
+1. Run `python3 .claude/hooks/github_project_sync.py push` to ensure your ticket exists as a GitHub issue
 2. Find the GitHub issue number: `gh issue list --search "PF-XXX in:title" --limit 1`
 3. Include `Closes #NNNN` (GitHub issue number, NOT `PF-XXX`) in the PR body
 4. The CI work item check will **fail** if the PF-XXX ticket isn't found as a GitHub issue
@@ -177,7 +176,7 @@ Use MCP tool: batch_create_subtasks
 ## REST API (primary access method)
 
 The taskboard is accessed via REST API. Use the Portless URL when available, direct port as fallback.
-**Base URL:** `http://taskboard.localhost:1355/api` (fallback: `http://taskboard.localhost:1355/api`)
+**Base URL:** `http://taskboard.localhost:1355/api` (fallback: `http://localhost:3010/api`)
 
 ### CRITICAL: Field name is `status`, NOT `column`
 
@@ -218,9 +217,12 @@ curl -s -X POST "http://taskboard.localhost:1355/api/subtasks/<SUBTASK_ID>/toggl
 
 | Endpoint | Method | Body Fields | Notes |
 |----------|--------|-------------|-------|
+| `/api/tickets?project=...&status=...` | GET | (query) | List tickets with filters |
+| `/api/tickets/:id` | GET | (none) | Ticket details including subtasks |
 | `/api/tickets` | POST | `title`, `description`, `priority`, `projectId`, `teamId`, `labels` | `projectId` not `project` |
 | `/api/tickets/:id/move` | POST | `status` ("todo", "in_progress", "done") | **NOT `column`** |
 | `/api/tickets/:id` | PUT | `title`, `description`, `priority`, `labels`, `dueDate` | Partial update |
+| `/api/tickets/:id` | DELETE | (none) | Remove a ticket |
 | `/api/tickets/:id/subtasks` | POST | `title` | Single subtask |
 | `/api/subtasks/:id/toggle` | POST | (none) | Toggles complete/incomplete |
 | `/api/board` | GET | (none) | Returns `{ columns: [{ name, tickets }] }` |
@@ -249,13 +251,13 @@ Every PR must link to a GitHub issue (`Closes #NNNN`). Tickets only become GitHu
 
 ```bash
 # Incremental push (syncs todo + in_progress + recently-done)
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py push
 
 # Full push (all tickets including historical done)
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push-all
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py push-all
 
 # Check sync status
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py status
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py status
 ```
 
 Then find the GitHub issue number for your ticket:
@@ -270,7 +272,7 @@ Include `Closes #NNNN` (GitHub issue number, NOT `PF-XXX`) in every PR body. CI 
 
 ```bash
 # Pull changes from GitHub
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py pull
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py pull
 ```
 
 This runs automatically via SessionStart hook. Pull manually when:
@@ -281,7 +283,7 @@ This runs automatically via SessionStart hook. Pull manually when:
 
 - Config: `.claude/hooks/github-sync-config.json` (project IDs, field mappings)
 - Mapping: `.claude/hooks/github-project-map.json` (ticket ↔ GitHub item ID mapping)
-- DB path: auto-detected — never pass `--db .claude/taskboard.db` to `taskboard start`
+- DB path: resolved by `taskboard_runtime.default_db()` and passed to the binary by the launcher (`node .claude/hooks/taskboard-launch.mjs start`) — never pass your own `--db`, and never start the binary by hand
 
 ### Conflict resolution
 

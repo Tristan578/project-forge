@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Capture every after() callback so tests can assert the deferred-publish gate
@@ -11,6 +11,11 @@ vi.mock('next/server', async (importOriginal) => {
 });
 
 vi.mock('server-only', () => ({}));
+// Capture the business metric so a test can assert the `outcome` facet the
+// handler stamps (generationMetrics.ts emits through Sentry.metrics.*).
+vi.mock('@sentry/nextjs', () => ({
+  metrics: { count: vi.fn(), distribution: vi.fn() },
+}));
 
 // Mock all dependencies
 vi.mock('@/lib/auth/api-auth', () => ({
@@ -27,9 +32,14 @@ vi.mock('@/lib/keys/resolver', () => ({
     }
   },
 }));
-vi.mock('@/lib/tokens/pricing', () => ({
-  getTokenCost: vi.fn().mockReturnValue(10),
-}));
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  // Spread the actual module: `createGenerationHandler` now imports
+  // `@/lib/ai/tierAccess` for the panel tier gate (#7715), which re-exports
+  // `TIER_LABELS` from `tierPlans.ts`, which reads `TRIAL_GRANT_TOKENS` off
+  // this module at import time — a bare `{ getTokenCost }` mock throws.
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn().mockReturnValue(10) };
+});
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
   sentryLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -73,12 +83,28 @@ vi.mock('@/lib/qstash/client', () => ({
   isQstashConfigured: vi.fn(() => false),
   publishGenerationCallback: vi.fn(async () => {}),
 }));
+// Job-ownership binding (#10262) is covered in its own unit tests
+// (jobOwnership.test.ts) and in createGenerationHandler.qstash.test.ts;
+// isolate it here too so a mocked `getDb()` with no `insert` doesn't silently
+// fail inside `bindProviderJob` (harmlessly, but noisily) on every test below.
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn(async () => {}),
+}));
 // Provider kill switch (PF-971 / #8952): dormant by default (not killed) so
 // existing tests are unaffected. Tests exercising the switch itself set
 // mockProviderKilled.mockReturnValue(true).
 vi.mock('@/lib/flags/posthogFlags', () => ({
   isProviderKilled: vi.fn(() => false),
 }));
+// Real providers module except `getCapabilityUnavailability`, wrapped so the
+// unavailable-capability gate describe can declare a capability unavailable
+// on demand. #9522 emptied UNAVAILABLE_CAPABILITIES (music moved to
+// ElevenLabs), so the gate must be exercised via this seam, not the live table.
+vi.mock('@/lib/config/providers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/config/providers')>();
+  return { ...actual, getCapabilityUnavailability: vi.fn(actual.getCapabilityUnavailability) };
+});
+import { getCapabilityUnavailability } from '@/lib/config/providers';
 
 // Client-facing message for every 500 (#8597). Raw err.message can leak server
 // internals (env var names, DB DSNs, provider request IDs), so the client gets
@@ -125,6 +151,7 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 
 const testHandler = createGenerationHandler({
   route: '/api/generate/test',
+  panel: 'generate-sound',
   provider: 'elevenlabs',
   operation: 'test_generation',
   rateLimitKey: 'gen-test',
@@ -206,6 +233,7 @@ describe('createGenerationHandler', () => {
     mockProviderKilled.mockReturnValue(true);
     const cachedHandler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -301,6 +329,7 @@ describe('createGenerationHandler', () => {
   it('refunds tokens and returns 500 on provider failure', async () => {
     const failHandler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -331,6 +360,7 @@ describe('createGenerationHandler', () => {
   it('does not leak a raw error message to the client on a 500 (cached path) (#8597)', async () => {
     const cachedHandler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -370,6 +400,7 @@ describe('createGenerationHandler', () => {
     it('maps to 503 with the artifact-naming message and refunds (uncached path)', async () => {
       const handler = createGenerationHandler({
         route: '/api/generate/test',
+        panel: 'generate-sound',
         provider: 'elevenlabs',
         operation: 'test_generation',
         rateLimitKey: 'gen-test',
@@ -398,6 +429,7 @@ describe('createGenerationHandler', () => {
     it('maps to 503 on the cached path too, and still refunds', async () => {
       const handler = createGenerationHandler({
         route: '/api/generate/test',
+        panel: 'generate-sound',
         provider: 'elevenlabs',
         operation: 'test_generation',
         rateLimitKey: 'gen-test',
@@ -418,6 +450,7 @@ describe('createGenerationHandler', () => {
       mockResolve.mockResolvedValue({ type: 'byok', key: 'user-key', metered: false });
       const handler = createGenerationHandler({
         route: '/api/generate/test',
+        panel: 'generate-sound',
         provider: 'elevenlabs',
         operation: 'test_generation',
         rateLimitKey: 'gen-test',
@@ -435,6 +468,7 @@ describe('createGenerationHandler', () => {
       mockRefund.mockRejectedValueOnce(new Error('neon circuit breaker open'));
       const handler = createGenerationHandler({
         route: '/api/generate/test',
+        panel: 'generate-sound',
         provider: 'elevenlabs',
         operation: 'test_generation',
         rateLimitKey: 'gen-test',
@@ -453,6 +487,7 @@ describe('createGenerationHandler', () => {
     mockResolve.mockResolvedValue({ type: 'byok', key: 'user-key', metered: false });
     const failHandler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -469,6 +504,7 @@ describe('createGenerationHandler', () => {
     const executeSpy = vi.fn().mockResolvedValue({ ok: true });
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -504,6 +540,7 @@ describe('createGenerationHandler', () => {
     const executeSpy = vi.fn().mockResolvedValue({ ok: true });
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -523,6 +560,7 @@ describe('createGenerationHandler', () => {
   it('skips content safety when configured', async () => {
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -543,6 +581,7 @@ describe('createGenerationHandler', () => {
   const secondaryHandler = () =>
     createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -615,6 +654,7 @@ describe('createGenerationHandler', () => {
 
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -650,6 +690,7 @@ describe('createGenerationHandler', () => {
   it('returns 500 "Internal pricing error" and captures when tokenCost fn returns NaN (#8826 pin)', async () => {
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -668,6 +709,7 @@ describe('createGenerationHandler', () => {
   it('returns 500 "Internal pricing error" and captures when tokenCost fn returns a negative value (#8826 pin)', async () => {
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -686,6 +728,7 @@ describe('createGenerationHandler', () => {
   it('returns 500 "Internal pricing error" via resolve_billing_params branch when tokenCost fn throws (#8826 pin)', async () => {
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -707,6 +750,7 @@ describe('createGenerationHandler', () => {
   it('calls refundTokens and returns GENERIC_500 on cached-path execute failure (#8826 pin)', async () => {
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -733,6 +777,7 @@ describe('createGenerationHandler', () => {
 
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -752,6 +797,7 @@ describe('createGenerationHandler', () => {
 
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -806,6 +852,7 @@ describe('createGenerationHandler', () => {
     // gate `asyncJob && isQstashConfigured()` evaluates to false → after() is never called.
     const asyncHandler = createGenerationHandler<{ prompt: string }, { jobId: string; status: string }>({
       route: '/api/generate/model',
+      panel: 'generate-model',
       provider: 'elevenlabs',
       operation: 'model_generation',
       rateLimitKey: 'gen-model',
@@ -827,6 +874,7 @@ describe('createGenerationHandler', () => {
     // Omitting billingMetadata → resolveApiKey receives the full params object.
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -842,12 +890,15 @@ describe('createGenerationHandler', () => {
 
     // Content safety replaces prompt with the filtered value ('test prompt' → 'test prompt'
     // per the mock, same value). count is a number; the type guard skips it unchanged.
+    // The 6th arg is the resolved capability (#9523); '/api/generate/test' has no
+    // ROUTE_CAPABILITY entry, so it is undefined — the direct route is preserved.
     expect(mockResolve).toHaveBeenCalledWith(
       'user-1',
       'elevenlabs',
       10,
       'test_generation',
       { prompt: 'test prompt', count: 3 },
+      undefined,
     );
   });
 
@@ -856,6 +907,7 @@ describe('createGenerationHandler', () => {
     // A validate result carrying status: 418 must produce a 418 response.
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -875,6 +927,7 @@ describe('createGenerationHandler', () => {
     // silently skipped — no TypeError, no 422, no call to sanitizePrompt.
     const handler = createGenerationHandler({
       route: '/api/generate/test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
@@ -891,5 +944,276 @@ describe('createGenerationHandler', () => {
     // sanitizePrompt called once (primary prompt only); numeric count is bypassed.
     expect(mockSanitize).toHaveBeenCalledTimes(1);
     expect(mockSanitize).toHaveBeenCalledWith('test prompt');
+  });
+
+  // #9117: a capability declared unavailable in UNAVAILABLE_CAPABILITIES must be
+  // refused before the key resolves and before any token is deducted, with a
+  // message the caller can act on. #9522 emptied the live table (music moved to
+  // ElevenLabs), so this exercises the GATE MECHANISM via a mocked declaration
+  // rather than a real permanently-unavailable capability.
+  describe('unavailable capability gate (#9117)', () => {
+    beforeEach(() => {
+      vi.mocked(getCapabilityUnavailability).mockImplementation((cap) =>
+        cap === 'music'
+          ? {
+              reason:
+                'Music generation is not available yet. Upload your own track from the Asset panel, or generate a sound effect instead.',
+              issue: 9522,
+            }
+          : null,
+      );
+    });
+    afterEach(() => {
+      vi.mocked(getCapabilityUnavailability).mockRestore();
+    });
+
+    const musicHandler = createGenerationHandler({
+      route: '/api/generate/music',
+      panel: 'generate-music',
+      provider: 'elevenlabs',
+      capability: 'music',
+      operation: 'music_generation',
+      rateLimitKey: 'gen-music',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ jobId: 'never' }),
+    });
+
+    it('returns 503 SERVICE_UNAVAILABLE with the user-facing reason, the issue in details, and spends nothing', async () => {
+      const res = await musicHandler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.code).toBe('SERVICE_UNAVAILABLE');
+      expect(data.error).toMatch(/not available yet/i);
+      expect(data.error).not.toMatch(/#\d+|PLATFORM_/);
+      expect(data.details).toEqual({ capability: 'music', issue: 9522 });
+      // The gate runs right after auth: no rate-limit budget, no cache lookup,
+      // no key resolution, no deduction, nothing to refund.
+      expect(mockAggRateLimit).not.toHaveBeenCalled();
+      expect(mockRateLimit).not.toHaveBeenCalled();
+      expect(mockCachedGenerate).not.toHaveBeenCalled();
+      expect(mockResolve).not.toHaveBeenCalled();
+      expect(mockRefund).not.toHaveBeenCalled();
+      // Its own metrics bucket - never the `provider_unavailable` outage facet.
+      const { metrics } = await import('@sentry/nextjs');
+      expect(vi.mocked(metrics.count)).toHaveBeenCalledWith(
+        expect.any(String),
+        1,
+        expect.objectContaining({ attributes: expect.objectContaining({ outcome: 'capability_unavailable' }) }),
+      );
+    });
+
+    it('gates a route through ROUTE_CAPABILITY when the config omits `capability`', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/music',
+        panel: 'generate-music',
+        provider: 'elevenlabs',
+        operation: 'music_generation',
+        rateLimitKey: 'gen-music',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ jobId: 'never' }),
+      });
+      const res = await handler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(503);
+      expect((await res.json()).details).toEqual({ capability: 'music', issue: 9522 });
+      expect(mockResolve).not.toHaveBeenCalled();
+    });
+
+    it('still requires authentication ahead of the gate', async () => {
+      mockAuth.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+      });
+      const res = await musicHandler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(401);
+    });
+
+    it('leaves an available capability untouched', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/sfx',
+        panel: 'generate-sound',
+        provider: 'elevenlabs',
+        capability: 'sfx',
+        operation: 'sfx_generation',
+        rateLimitKey: 'gen-sfx',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'door creak' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // #9523: the handler is the SOLE caller of resolveApiKey for all 12 generate
+  // routes, so if it drops the capability argument, gateway routing is dead in
+  // production no matter what resolver.test.ts proves in isolation. These pin the
+  // wiring at the createGenerationHandler seam itself.
+  describe('capability forwarding to resolveApiKey (#9523)', () => {
+    it('forwards a declared gateway capability as the 6th arg (no-cache path)', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/image-test',
+        panel: 'generate-texture',
+        provider: 'openai',
+        capability: 'image',
+        operation: 'image_generation',
+        rateLimitKey: 'gen-image',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'a fox in a forest' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledWith(
+        'user-1',
+        'openai',
+        expect.any(Number),
+        'image_generation',
+        expect.anything(),
+        'image',
+      );
+    });
+
+    it('forwards the capability on the cached path too', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/image-test',
+        panel: 'generate-texture',
+        provider: 'openai',
+        capability: 'image',
+        operation: 'image_generation',
+        rateLimitKey: 'gen-image',
+        cacheKeyParams: (p) => ({ prompt: (p as { prompt: string }).prompt }),
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'a fox in a forest' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledWith(
+        'user-1',
+        'openai',
+        expect.any(Number),
+        'image_generation',
+        expect.anything(),
+        'image',
+      );
+    });
+
+    it('resolves the capability from ROUTE_CAPABILITY when the config omits it', async () => {
+      // `/api/generate/localize` maps to the gateway-routed `chat` capability.
+      const handler = createGenerationHandler({
+        route: '/api/generate/localize',
+        panel: 'ai-chat',
+        provider: 'anthropic',
+        operation: 'localize_generation',
+        rateLimitKey: 'gen-localize',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'translate this' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledWith(
+        'user-1',
+        'anthropic',
+        expect.any(Number),
+        'localize_generation',
+        expect.anything(),
+        'chat',
+      );
+    });
+  });
+
+  // Panel tier gate (#7715 review round 2). The resolver's starter-balance
+  // check was the only server-side tier enforcement a generation route had,
+  // so a real hobbyist account (balance aside) could call a creator-gated
+  // route directly — the pre-existing gap this closes — and `effectiveTier`'s
+  // trial mapping widened that further to a fresh $0 starter signup.
+  describe('panel tier gate (#7715 review round 2)', () => {
+    // panel: 'generate-model' is creator-gated in PANEL_TIER_REQUIREMENTS.
+    const modelHandler = createGenerationHandler({
+      route: '/api/generate/model-panel-test',
+      panel: 'generate-model',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-model-panel-test',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ ok: true }),
+    });
+
+    // panel: 'generate-skybox' is also creator-gated.
+    const skyboxHandler = createGenerationHandler({
+      route: '/api/generate/skybox-panel-test',
+      panel: 'generate-skybox',
+      provider: 'elevenlabs',
+      operation: 'test_generation',
+      rateLimitKey: 'gen-skybox-panel-test',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ ok: true }),
+    });
+
+    function mockUser(overrides: Record<string, unknown>) {
+      mockAuth.mockResolvedValue({
+        ok: true,
+        ctx: {
+          user: {
+            id: 'user-1',
+            tier: 'starter',
+            monthlyTokens: 0,
+            monthlyTokensUsed: 0,
+            addonTokens: 0,
+            ...overrides,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any,
+          clerkId: 'clerk-1',
+        },
+      });
+    }
+
+    it('(1) lets a starter account with 50 spendable tokens through a hobbyist-gated panel and reaches resolveApiKey', async () => {
+      mockUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+      // testHandler declares panel: 'generate-sound' (hobbyist).
+      const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).not.toBe(403);
+      expect(mockResolve).toHaveBeenCalled();
+    });
+
+    it("(2) refuses a starter account with 50 spendable tokens on a creator-gated panel ('generate-skybox') with 403 TIER_REQUIRED, never reaching resolveApiKey", async () => {
+      mockUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+      const res = await skyboxHandler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toBe('TIER_REQUIRED');
+      expect(body.requiredTier).toBe('creator');
+      expect(mockResolve).not.toHaveBeenCalled();
+      expect(mockAggRateLimit).not.toHaveBeenCalled();
+    });
+
+    it("(3) refuses a real hobbyist account on a creator-gated panel ('generate-model') with 403 — the pre-existing gap this closes", async () => {
+      mockUser({ tier: 'hobbyist', monthlyTokens: 500, monthlyTokensUsed: 0, addonTokens: 0 });
+      const res = await modelHandler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toBe('TIER_REQUIRED');
+      expect(mockResolve).not.toHaveBeenCalled();
+    });
+
+    it("(4) lets a creator account through the same creator-gated panel ('generate-model')", async () => {
+      mockUser({ tier: 'creator', monthlyTokens: 2000, monthlyTokensUsed: 0, addonTokens: 0 });
+      const res = await modelHandler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).not.toBe(403);
+      expect(mockResolve).toHaveBeenCalled();
+    });
+
+    // A create spends tokens, so the factory runs the BALANCE-AWARE variant:
+    // a starter whose trial grant is spent is a plain starter again. (Status
+    // polls use `panelTierGateResponseForPoll`, which admits this same account
+    // to read a job it already paid for — the difference is deliberate.)
+    it('(5) refuses a starter whose trial balance is spent on a hobbyist-gated panel with 403, never reaching resolveApiKey', async () => {
+      mockUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+      // testHandler declares panel: 'generate-sound' (hobbyist).
+      const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toBe('TIER_REQUIRED');
+      expect(body.requiredTier).toBe('hobbyist');
+      expect(mockResolve).not.toHaveBeenCalled();
+    });
   });
 });

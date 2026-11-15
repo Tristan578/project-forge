@@ -126,9 +126,14 @@ vi.mock('@/lib/keys/resolver', () => ({
   },
 }));
 
-vi.mock('@/lib/tokens/pricing', () => ({
-  getTokenCost: vi.fn().mockReturnValue(0),
-}));
+// Spread the actual module: the generate status routes now import the shared
+// panel tier gate (`@/lib/api/panelTierGate`, #7715), which reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time via
+// `@/lib/ai/tierAccess` -> `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn().mockReturnValue(0) };
+});
 
 vi.mock('@/lib/tokens/service', () => ({
   getTokenBalance: vi.fn().mockResolvedValue({ monthlyRemaining: 0, monthlyTotal: 0, addon: 0, total: 0 }),
@@ -194,8 +199,13 @@ vi.mock('bcryptjs', () => ({
 }));
 
 vi.mock('@/lib/generate/meshyClient', () => ({ MeshyClient: vi.fn() }));
-vi.mock('@/lib/generate/sunoClient', () => ({ SunoClient: vi.fn() }));
 vi.mock('@/lib/generate/spriteClient', () => ({ SpriteClient: vi.fn() }));
+// Job-ownership check (#10262): the status routes' contract shape is what
+// this suite measures, not the ownership decision — it has its own unit
+// tests (jobOwnership.test.ts) and route tests (each */status/route.test.ts).
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  verifyProviderJobOwner: vi.fn(async () => 'owner' as const),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -375,9 +385,11 @@ describe('GET /api/capabilities — response shape contract', () => {
     const body = await res.json() as Record<string, unknown>;
 
     const caps = body.capabilities as Array<Record<string, unknown>>;
-    // Every unavailable capability must include requiredProviders
+    // Every unavailable capability must include requiredProviders — except one
+    // declared unprovisionable (#9117), where no key can help and the hint
+    // names the tracking issue instead.
     for (const cap of caps) {
-      if (!cap.available) {
+      if (!cap.available && !cap.unprovisionable) {
         expect(Array.isArray(cap.requiredProviders)).toBe(true);
         expect((cap.requiredProviders as unknown[]).length).toBeGreaterThan(0);
       }
@@ -1030,25 +1042,22 @@ describe('OpenAPI contract — real route responses', () => {
     ]);
   });
 
-  it('GET /api/generate/music/status 200 (completed) matches GenerationStatus + durationSeconds', async () => {
+  // #9522: music routes to ElevenLabs `/v1/music` (audio inline), so the status
+  // route is a defensive terminal — it returns `failed` on any poll, with no
+  // async provider to stub. The response still conforms to GenerationStatus.
+  it('GET /api/generate/music/status 200 (terminal failed) matches GenerationStatus', async () => {
     await authenticateAs();
-    await resolvePlatformKey();
-    const { SunoClient } = await import('@/lib/generate/sunoClient');
-    stubClient(SunoClient, {
-      getStatus: vi.fn().mockResolvedValue({
-        status: 'completed',
-        progress: 100,
-        audioUrl: 'https://cdn.example.com/track.mp3',
-        durationSeconds: 30,
-      }),
-    });
 
     const { GET } = await import('@/app/api/generate/music/status/route');
     const res = await GET(makeGetRequest('http://localhost/api/generate/music/status?jobId=job_1'));
 
     expect(res.status).toBe(200);
-    expectContract('get', '/api/generate/music/status', 200, await res.json(), [
-      'missing $.error',
+    const body = await res.json();
+    expect(body.status).toBe('failed');
+    // A failed status carries `error` and omits `resultUrl`/`durationSeconds`.
+    expectContract('get', '/api/generate/music/status', 200, body, [
+      'missing $.durationSeconds',
+      'missing $.resultUrl',
     ]);
   });
 

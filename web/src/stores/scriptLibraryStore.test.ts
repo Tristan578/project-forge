@@ -133,4 +133,23 @@ describe('scriptLibraryStore', () => {
   it('importScript returns null for missing required fields', () => {
     expect(importScript(JSON.stringify({ name: 'NoSource' }))).toBeNull();
   });
+
+  it.each([
+    ['a blank string', ''],
+    ['a non-empty string', 'combat'],
+    ['a number', 0],
+    ['false', false],
+    ['an object', { a: 1 }],
+  ])('importScript stores an array of tags when the file carries %s (#9565)', (_label, tags) => {
+    const imported = importScript(JSON.stringify({ name: 'T', source: 'code', tags }));
+    expect(imported).not.toBeNull();
+    expect(imported!.tags).toEqual([]);
+    expect(() => searchScripts('x')).not.toThrow();
+  });
+
+  it('importScript keeps only the string entries of a tags array, and a string description (#9565)', () => {
+    const imported = importScript(JSON.stringify({ name: 'T', source: 'code', tags: ['a', 3, null, 'b'], description: 7 }));
+    expect(imported!.tags).toEqual(['a', 'b']);
+    expect(imported!.description).toBe('');
+  });
 });

@@ -19,7 +19,6 @@ export const PUZZLE_TEMPLATE: GameTemplate = {
   },
   tags: ['3d', 'puzzle', 'logic', 'physics'],
 
-  inputPreset: 'topdown',
 
   sceneData: {
     formatVersion: 3,

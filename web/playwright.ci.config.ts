@@ -6,10 +6,30 @@
  * Requires: npx next build run BEFORE playwright (CI workflow handles this).
  * Requires: SKIP_ENV_VALIDATION=true (no Clerk/Stripe keys in CI).
  */
+import { randomBytes } from 'node:crypto';
 import { defineConfig, devices } from '@playwright/test';
 import {
   E2E_NAVIGATION_TIMEOUT_MS,
 } from './src/lib/config/timeouts';
+
+/**
+ * A client address for THIS process, from the RFC 3849 documentation range.
+ *
+ * Public API routes are rate-limited per client IP, and `rateLimitPublicRoute`
+ * keys on the literal `unknown` when no forwarded-for header is present.
+ * `next start` on localhost sets none, so without this every browser page load
+ * — 4 workers x 3 shards, plus every other CI job sharing the one CI Upstash
+ * database — counted against a single `public:capabilities:unknown` bucket.
+ * That, not the size of the ceiling, is what 429'd the runner: run 33987394245
+ * failed the same way with the limit already at 120 (#9725 p7).
+ *
+ * Playwright loads this config in each worker process, and the value is minted
+ * at load, so workers do not share a bucket; being random, neither do
+ * concurrent jobs or reruns. API probes isolate themselves per request in
+ * `e2e/helpers/capabilities.ts`.
+ */
+const WORKER_CLIENT_ADDRESS =
+  '2001:db8:' + randomBytes(12).toString('hex').match(/.{4}/g)!.join(':');
 
 /** CI-specific: tighter than the default E2E_TEST_TIMEOUT_MS (60s) since UI-only tests don't need WASM load time */
 const CI_TEST_TIMEOUT_MS = 30_000;
@@ -21,14 +41,32 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: true,
   retries: 1,
+  // Playwright 1.62 — run retries sequentially at the END of the run, after the
+  // full parallel pass, instead of interleaving them under the same 4-worker
+  // load that may have caused the flake. A retry under no contention that still
+  // passes is a real flake; one that fails is a real bug. Costs worst-case
+  // wall-clock (retries no longer overlap the main pass) — an accepted trade for
+  // a retry signal that means something. See issue #9636.
+  retryStrategy: 'isolated',
   workers: 4,
   maxFailures: 10,
-  reporter: [['github'], ['blob'], ['html', { open: 'never' }]],
+  // uiSuiteReporter performs the @ui-suite selection the @ui CI job used to do
+  // with `--grep '@ui' --grep-invert '@engine-ui|@journey'`, and asserts a
+  // non-zero, plausible selected-test count (the #9586 mis-selection a
+  // grep-invert cannot report). A no-op unless PW_UI_SUITE=1, so the @api job
+  // that shares this config (--grep '@api', no env) is untouched. See #9636.
+  reporter: [
+    ['./e2e/lib/uiSuiteReporter.ts', { minSelected: 250 }],
+    ['github'],
+    ['blob'],
+    ['html', { open: 'never' }],
+  ],
   timeout: CI_TEST_TIMEOUT_MS,
   expect: { timeout: CI_EXPECT_TIMEOUT_MS },
 
   use: {
     baseURL: 'http://localhost:3000',
+    extraHTTPHeaders: { 'x-forwarded-for': WORKER_CLIENT_ADDRESS },
     actionTimeout: 10_000,
     navigationTimeout: E2E_NAVIGATION_TIMEOUT_MS,
     trace: 'on-first-retry',

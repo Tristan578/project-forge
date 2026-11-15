@@ -10,6 +10,8 @@ import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { toast } from 'sonner';
 import { trackJob } from '@/lib/chat/handlers/generationHandlers';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -34,16 +36,56 @@ vi.mock('lucide-react', () => ({
   Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
+// Capability gate (#9117): default to "available" so the submit tests below
+// exercise the real path; the unavailable cases flip it explicitly.
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
+}));
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+
+describe('GenerateMusicDialog capability gate (#9117)', () => {
+  beforeEach(() => {
+    vi.mocked(useUserStore).mockImplementation(((selector: (s: unknown) => unknown) =>
+      selector({ tokenBalance: { total: 1000, monthlyRemaining: 1000, addon: 0 } })) as never);
+    vi.mocked(useEditorStore).mockImplementation(((selector: (s: unknown) => unknown) =>
+      selector({ primaryName: '' })) as never);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false });
+  });
+
+  it('shows the unavailable notice and disables Generate when the capability is unavailable', () => {
+    vi.mocked(useGenerationGate).mockReturnValue({
+      blocked: true,
+      reason: 'Music generation is unavailable (#9522).',
+      loading: false,
+      unprovisionable: true,
+      byokConfigurable: false,
+    });
+    render(<GenerateMusicDialog isOpen={true} onClose={vi.fn()} />);
+    expect(useGenerationGate).toHaveBeenCalledWith('music-generation');
+    expect(screen.getByRole('status')).toHaveTextContent('Music generation is unavailable (#9522).');
+    fireEvent.change(screen.getByPlaceholderText(/chiptune/i), { target: { value: 'a valid prompt' } });
+    expect(screen.getByText('Generate').closest('button')).toBeDisabled();
+  });
+
+  it('renders no notice when the capability is available', () => {
+    render(<GenerateMusicDialog isOpen={true} onClose={vi.fn()} />);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
 describe('GenerateMusicDialog', () => {
   const mockOnClose = vi.fn();
   const importAudio = vi.fn();
   const setAudio = vi.fn();
 
-  function setupStore(balance = 1000, primaryName = '') {
+  function setupStore(balance: number | null = 1000, primaryName = '') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useUserStore).mockImplementation((selector: any) => {
       const state = {
-        tokenBalance: { total: balance, monthlyRemaining: balance, addon: 0 },
+        tokenBalance: balance === null ? null : { total: balance, monthlyRemaining: balance, addon: 0 },
       };
       return typeof selector === 'function' ? selector(state) : state;
     });
@@ -73,11 +115,6 @@ describe('GenerateMusicDialog', () => {
   it('renders Generate Music heading', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
     expect(screen.getByText('Generate Music')).toBeInTheDocument();
-  });
-
-  it('renders preview notice about Suno API', () => {
-    render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText(/Music generation is in preview/)).toBeInTheDocument();
   });
 
   it('renders prompt textarea', () => {
@@ -158,8 +195,8 @@ describe('GenerateMusicDialog', () => {
       vi.unstubAllGlobals();
     });
 
-    function generate(entityId?: string) {
-      setupStore(1000, 'AudioEntity');
+    function generate(entityId?: string, balance: number | null = 1000) {
+      setupStore(balance, 'AudioEntity');
       render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} entityId={entityId} />);
       fireEvent.change(screen.getByPlaceholderText('Upbeat chiptune adventure music'), {
         target: { value: 'tense dungeon theme' },
@@ -180,16 +217,64 @@ describe('GenerateMusicDialog', () => {
       expect(trackJob).not.toHaveBeenCalled();
     });
 
+    // #9854: generated output is handed to the shared arrangement as a clip,
+    // not left a play-only, standalone result.
+    it('adds the generated track to the music arrangement as a clip', async () => {
+      useMusicArrangementStore.setState({ arrangement: createEmptyArrangement() });
+      respondWith({ audioBase64: 'AAAA', durationSeconds: 42 });
+      generate('entity-1');
+
+      await waitFor(() => expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1));
+      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+      expect(clip).toMatchObject({ sourceUrl: 'music-tense dungeon theme', sourceDurationSeconds: 42 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+    });
+
+    it('falls back to the requested duration instead of a reported 0 (#10058)', async () => {
+      // A reported 0 is not a real duration for generated music — buildClip's
+      // clampTrimWindow treats sourceDurationSeconds:0 as "unknown" and floors
+      // trimEnd to 0.05s, leaving trimEnd > sourceDurationSeconds on the clip.
+      useMusicArrangementStore.setState({ arrangement: createEmptyArrangement() });
+      respondWith({ audioBase64: 'AAAA', durationSeconds: 0 });
+      generate('entity-1');
+
+      await waitFor(() => expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1));
+      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+      expect(clip.sourceDurationSeconds).toBe(30);
+    });
+
+    it.each([0, null])('lets a user with platform balance %s submit through the BYOK path', async (balance) => {
+      respondWith({ audioBase64: 'AAAA', provider: 'elevenlabs' });
+      generate('entity-1', balance);
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledTimes(1));
+      expect(fetch).toHaveBeenCalledWith('/api/generate/music', expect.objectContaining({ method: 'POST' }));
+      expect(screen.getByText('Platform token cost:')).toBeInTheDocument();
+      expect(screen.getByText(/billed by ElevenLabs/)).toBeInTheDocument();
+    });
+
+    it('reports the server balance refusal without importing audio', async () => {
+      respondWith({ error: 'Insufficient tokens. Need 80, have 0.', code: 'INSUFFICIENT_TOKENS' }, false);
+      generate('entity-1', 0);
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Insufficient tokens. Need 80, have 0.'));
+      expect(importAudio).not.toHaveBeenCalled();
+      expect(trackJob).not.toHaveBeenCalled();
+      expect(mockOnClose).not.toHaveBeenCalled();
+    });
+
     it('registers the async job so something eventually polls for the track', async () => {
-      respondWith({ jobId: 'suno-42', provider: 'suno', usageId: 'usage-9' });
+      // The route resolves inline now (#9522), but the dialog still handles the
+      // async jobId shape defensively — pinned here so that branch cannot rot.
+      respondWith({ jobId: 'job-42', provider: 'elevenlabs', usageId: 'usage-9' });
       generate('entity-1');
 
       await waitFor(() => expect(trackJob).toHaveBeenCalledTimes(1));
       expect(trackJob).toHaveBeenCalledWith(
         expect.objectContaining({
-          providerJobId: 'suno-42',
+          providerJobId: 'job-42',
           type: 'music',
-          provider: 'suno',
+          provider: 'elevenlabs',
           usageId: 'usage-9',
           autoPlace: true,
           targetEntityId: 'entity-1',

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, queryWithResilience } from '@/lib/db/client';
-import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments } from '@/lib/db/schema';
+import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments, gameForks } from '@/lib/db/schema';
 import { eq, sql, and } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(
+async function GET_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -23,6 +25,7 @@ export async function GET(
         title: publishedGames.title,
         description: publishedGames.description,
         slug: publishedGames.slug,
+        projectId: publishedGames.projectId,
         authorId: publishedGames.userId,
         authorName: users.displayName,
         playCount: publishedGames.playCount,
@@ -46,6 +49,7 @@ export async function GET(
         publishedGames.title,
         publishedGames.description,
         publishedGames.slug,
+        publishedGames.projectId,
         publishedGames.userId,
         publishedGames.playCount,
         publishedGames.cdnUrl,
@@ -95,6 +99,56 @@ export async function GET(
       count: Number(ratingBreakdown.find((r: { rating: number }) => r.rating === star)?.count ?? 0),
     }));
 
+    // Fork attribution (#7858). Two separate indexed lookups, NOT joins on the
+    // aggregate query above: game_forks has no relation to gameLikes /
+    // gameRatings, and joining it there would multiply those COUNT/AVG rows.
+    //
+    // How many times THIS game has been forked (idx_game_forks_original).
+    const [forkCountRow] = await queryWithResilience(() => getDb()
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(gameForks)
+      .where(eq(gameForks.originalGameId, id)));
+    const forkCount = Number(forkCountRow?.count ?? 0);
+
+    // Was THIS game's project itself created by a fork? Each fork creates a
+    // fresh project row, so forkedProjectId is effectively unique
+    // (idx_game_forks_forked_project). The original's status is fetched, not
+    // filtered in SQL, so the gate below can tell "never forked" from
+    // "forked, but the source is no longer public".
+    const [forkedFromRow] = await queryWithResilience(() => getDb()
+      .select({
+        originalGameId: gameForks.originalGameId,
+        originalTitle: publishedGames.title,
+        originalSlug: publishedGames.slug,
+        originalAuthorClerkId: users.clerkId,
+        originalAuthorName: users.displayName,
+        originalStatus: publishedGames.status,
+      })
+      .from(gameForks)
+      .innerJoin(publishedGames, eq(gameForks.originalGameId, publishedGames.id))
+      .leftJoin(users, eq(publishedGames.userId, users.id))
+      .where(eq(gameForks.forkedProjectId, game.projectId))
+      .limit(1));
+
+    // HARD visibility gate, same rule the main query enforces: unpublish is a
+    // soft delete (status = 'unpublished', row kept), so without this a fork
+    // would keep leaking the title, slug, Clerk id and author of a game its
+    // creator took down or moderation removed. `authorClerkId` is not a new
+    // exposure when the original IS public — it is the [userId] segment of
+    // that game's own /play URL.
+    const forkedFrom =
+      forkedFromRow && forkedFromRow.originalStatus === 'published'
+        ? {
+            gameId: forkedFromRow.originalGameId,
+            title: forkedFromRow.originalTitle,
+            slug: forkedFromRow.originalSlug,
+            authorClerkId: forkedFromRow.originalAuthorClerkId,
+            authorName: forkedFromRow.originalAuthorName ?? 'Unknown creator',
+          }
+        : forkedFromRow
+          ? { gameId: null, title: null, slug: null, authorClerkId: null, authorName: null, unavailable: true as const }
+          : null;
+
     // Format response
     const formattedGame = {
       id: game.id,
@@ -102,6 +156,7 @@ export async function GET(
       description: game.description,
       slug: game.slug,
       authorId: game.authorId,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
       authorName: game.authorName || 'Unknown',
       playCount: game.playCount,
       likeCount: Number(game.likeCount),
@@ -109,6 +164,8 @@ export async function GET(
       ratingCount: Number(game.ratingCount),
       ratingBreakdown: breakdown,
       tags: tagsResult.map((t) => t.tag),
+      forkCount,
+      forkedFrom,
       cdnUrl: game.cdnUrl,
       status: game.status,
       createdAt: game.createdAt.toISOString(),
@@ -124,6 +181,7 @@ export async function GET(
         content: c.content,
         parentId: c.parentId,
         authorId: c.authorId,
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
         authorName: c.authorName || 'Unknown',
         createdAt: c.createdAt.toISOString(),
       })),
@@ -137,9 +195,13 @@ export async function GET(
   } catch (error) {
     console.error('Failed to fetch game:', error);
     captureException(error, { route: '/api/community/games/[id]' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch game' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

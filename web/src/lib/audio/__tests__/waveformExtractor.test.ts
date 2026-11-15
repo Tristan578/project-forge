@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { extractWaveform, extractWaveformFromUrl } from '../waveformExtractor';
+import { extractWaveform, extractWaveformFromUrl, sliceWaveform } from '../waveformExtractor';
 
 // ---------------------------------------------------------------------------
 // Helpers — build mock AudioBuffers without a real browser context
@@ -175,5 +175,21 @@ describe('extractWaveformFromUrl', () => {
     ).rejects.toThrow('HTTP 404');
 
     fetchSpy.mockRestore();
+  });
+});
+
+describe('sliceWaveform', () => {
+  it('returns the sub-window of peaks for a fractional trim range', () => {
+    const peaks = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+    // 0.2–0.6 of a 10-bucket array → buckets [2,6)
+    expect(sliceWaveform(peaks, 0.2, 0.6)).toEqual([0.2, 0.3, 0.4, 0.5]);
+  });
+
+  it('clamps fractions to [0,1] and returns [] for a reversed/empty window', () => {
+    const peaks = [1, 2, 3, 4];
+    expect(sliceWaveform(peaks, -1, 2)).toEqual([1, 2, 3, 4]);
+    expect(sliceWaveform(peaks, 0.6, 0.6)).toEqual([]);
+    expect(sliceWaveform(peaks, 0.8, 0.2)).toEqual([]);
+    expect(sliceWaveform([], 0, 1)).toEqual([]);
   });
 });

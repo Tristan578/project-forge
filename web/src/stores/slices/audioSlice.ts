@@ -47,10 +47,10 @@ export interface AudioSlice {
   applyReverbZoneRemovedFromEngine: (entityId: string) => void;
   fadeInAudio: (entityId: string, durationMs: number) => void;
   fadeOutAudio: (entityId: string, durationMs: number) => void;
-  playOneShotAudio: (assetId: string, options?: { position?: [number, number, number]; bus?: string; volume?: number; pitch?: number }) => void;
-  addAudioLayer: (entityId: string, slotName: string, assetId: string, options?: { volume?: number; loop?: boolean; bus?: string }) => void;
+  playOneShotAudio: (assetId: string, options?: { position?: [number, number, number] | undefined; bus?: string | undefined; volume?: number | undefined; pitch?: number | undefined }) => void;
+  addAudioLayer: (entityId: string, slotName: string, assetId: string, options?: { volume?: number | undefined; loop?: boolean | undefined; bus?: string | undefined }) => void;
   removeAudioLayer: (entityId: string, slotName: string) => void;
-  setDuckingRule: (rule: { triggerBus: string; targetBus: string; duckLevel?: number; attackMs?: number; releaseMs?: number }) => void;
+  setDuckingRule: (rule: { triggerBus: string; targetBus: string; duckLevel?: number | undefined; attackMs?: number | undefined; releaseMs?: number | undefined }) => void;
   setAdaptiveMusicIntensity: (intensity: number) => void;
   setCurrentMusicSegment: (segment: string) => void;
   saveAudioSnapshot: (name: string, crossfadeDurationMs?: number) => void;

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "note": "Stable capability-ID aliases. Each entry maps a prior capability ID to its current ID so a capability's identity survives a rename or file move. Every 'to' must resolve to a declared capability in capabilityRules.ts, or scan.ts reports a broken-alias gap.",
+  "aliases": [
+    { "from": "stores.chat", "to": "shell-stores.chat" },
+    { "from": "stores.editor", "to": "shell-stores.editor" },
+    { "from": "mcp-manifest.commands", "to": "mcp.command-manifest" }
+  ]
+}

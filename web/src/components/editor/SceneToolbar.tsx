@@ -4,6 +4,11 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
 import { saveSceneToCloud } from '@/lib/projects/cloudSave';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
+import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import { showError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
 import { SceneBrowser } from './SceneBrowser';
@@ -15,12 +20,30 @@ import {
   type SceneExportedDetail,
 } from '@/lib/engine/sceneExportWire';
 
+// The prefab-instance registry (and its transitive definitions) is folded into
+// `e.detail.json` upstream, at the single `SCENE_EXPORTED` choke point in
+// `transformEvents.ts` — every consumer of that event, this toolbar's
+// download/cloud-save included, now receives already-folded JSON. Folding was
+// previously duplicated here, reading the LIVE registry at answer-time, which
+// raced a concurrent scene load (scene.FR-1 N1 BUG-3): `handleSave` /
+// `handleCloudSave` below stage the registry as it stood at REQUEST time
+// instead, so the upstream fold reflects what was active when the save was
+// asked for rather than whatever is active when the answer happens to land.
+
+// The toast for a `loadScene`/`newScene` that THREW is `sceneDispatchFailureMessage`
+// (`@/lib/scenes/engineDispatchThrew`): the store re-raises an engine throw as
+// `EngineDispatchThrewError` after locking every save path (#10079, #10202),
+// and that helper is where the lockout claim is narrowed to that class — a
+// plain error (a storage write refused) set no lockout and is reported as the
+// failure it is. Same sentence the Scene Browser's `switchScene` shows.
+
 export function SceneToolbar() {
   const sceneName = useEditorStore((s) => s.sceneName);
   const sceneModified = useEditorStore((s) => s.sceneModified);
   const saveScene = useEditorStore((s) => s.saveScene);
   const loadScene = useEditorStore((s) => s.loadScene);
   const newScene = useEditorStore((s) => s.newScene);
+  const newSceneRefusal = useEditorStore((s) => s.newSceneRefusal);
   const setSceneName = useEditorStore((s) => s.setSceneName);
   const engineMode = useEditorStore((s) => s.engineMode);
   const undo = useEditorStore((s) => s.undo);
@@ -34,6 +57,11 @@ export function SceneToolbar() {
   const saveToCloud = useEditorStore((s) => s.saveToCloud);
   const setCloudSaveStatus = useEditorStore((s) => s.setCloudSaveStatus);
   const setLastCloudSave = useEditorStore((s) => s.setLastCloudSave);
+  // Set while the engine is holding a scene it REJECTED rather than this
+  // project's. `saveScene`/`saveToCloud` already refuse in that state, but a
+  // silent refusal from a button press reads as a broken button — this is what
+  // turns the store's data guard into an answer for the user (#10056).
+  const sceneLoadError = useEditorStore((s) => s.sceneLoadError);
 
   const { confirm, ConfirmDialogPortal } = useConfirmDialog();
   const [editing, setEditing] = useState(false);
@@ -63,7 +91,10 @@ export function SceneToolbar() {
       if (cloudSaveId !== null && isSceneExportResponseFor(cloudSaveId, e.detail) && projectId) {
         pendingCloudSaveRef.current = null;
         const { json, name } = e.detail;
-        void saveSceneToCloud(projectId, name, json).then((result) => {
+        // Persist the music arrangement alongside the scene (#9854) so it
+        // survives save → reopen through the same project payload.
+        const arrangement = useMusicArrangementStore.getState().serialize();
+        void saveSceneToCloud(projectId, name, json, arrangement).then((result) => {
           if (result.ok && result.savedAt) {
             setCloudSaveStatus('saved');
             setLastCloudSave(result.savedAt);
@@ -78,10 +109,17 @@ export function SceneToolbar() {
   }, [projectId, setCloudSaveStatus, setLastCloudSave]);
 
   const handleSave = useCallback(() => {
+    if (sceneLoadError) {
+      showError(`${sceneLoadError.reason} Saving is disabled until a scene loads successfully.`);
+      return;
+    }
     const requestId = newSceneExportRequestId();
     pendingDownloadRef.current = requestId;
+    // Stage the registry as it stands RIGHT NOW, before the async round trip —
+    // not whatever it holds when the answer lands (scene.FR-1 N1 BUG-3).
+    stagePrefabInstancesForExport(requestId, loadPrefabInstances());
     saveScene(requestId);
-  }, [saveScene]);
+  }, [saveScene, sceneLoadError]);
 
   /**
    * Trigger a cloud save. Records the request id so the matching
@@ -89,24 +127,89 @@ export function SceneToolbar() {
    */
   const handleCloudSave = useCallback(() => {
     if (!projectId) return;
+    if (sceneLoadError) {
+      // Same refusal as `handleSave`, and the consequential one: without it the
+      // pending-ref would be armed for an export the store never dispatches, so
+      // the cloud-save indicator would sit on 'saving' forever (#10056).
+      showError(`${sceneLoadError.reason} Your saved project was left untouched.`);
+      return;
+    }
     const requestId = newSceneExportRequestId();
     pendingCloudSaveRef.current = requestId;
+    // Same request-time staging as `handleSave` — see its comment.
+    stagePrefabInstancesForExport(requestId, loadPrefabInstances());
     saveToCloud(requestId);
-  }, [projectId, saveToCloud]);
+  }, [projectId, saveToCloud, sceneLoadError]);
 
   const handleLoad = useCallback(async () => {
     const json = await openSceneFilePicker();
-    if (json) {
-      loadScene(json);
+    if (!json) return;
+    // The scene currently on screen stays on screen if the import is rejected,
+    // so this must not strand the editor: the toast below is the whole report
+    // and saving of the current scene stays enabled (#10056).
+    let accepted: boolean;
+    try {
+      accepted = loadScene(json, { rejectionStrandsEditor: false });
+    } catch (error) {
+      // A THROWN dispatch is re-raised after `loadScene` has locked saving
+      // (#10079, #10202): the import may have half-applied over the current
+      // scene, so "try again" would be the wrong advice and an uncaught throw
+      // here would be an unhandled rejection. The helper narrows: only the
+      // engine throw gets the reload-and-locked sentence (#10202 review).
+      showError(sceneDispatchFailureMessage('The scene could not be opened', error));
+      return;
+    }
+    if (accepted === false) {
+      // Parity with the AI/MCP `load_scene` handler, which surfaces the same
+      // rejection: without this the scene silently vanishes into a no-op when
+      // its embedded prefab graph is rejected or the engine is not ready.
+      showError('The scene was not loaded. Check its prefab metadata and that the engine is ready, then try again.');
     }
   }, [loadScene]);
+
+  /**
+   * Report a `newScene()` that returned false, naming the RIGHT cause.
+   *
+   * The boolean is false for three unrelated facts, and only one of them is
+   * the engine refusing. This button is reachable during the window that
+   * produces another: the toolbar renders as soon as the editor page does,
+   * while the dispatcher is only attached once the WASM engine has finished
+   * loading. And the store refuses on its own when browser storage will not
+   * clear the prefab-instance registry before the dispatch (#10202 review).
+   * Calling either "the engine did not accept a new scene" tells the user
+   * their engine refused them when it was never asked — and the three want
+   * different reactions (retry in a moment / free up storage / something is
+   * wrong with the engine). `newSceneRefusal()` reads the fact the boolean
+   * drops; the words are the same ones the AI/MCP `new_scene` handler uses.
+   */
+  const reportNewSceneFailure = useCallback(() => {
+    showError(`${describeNewSceneRefusal(newSceneRefusal())} The current scene is unchanged.`);
+  }, [newSceneRefusal]);
+
+  /**
+   * `newScene()` for the button and the shortcut. A `false` is reported by
+   * cause (`reportNewSceneFailure`). A THROW is the engine failing mid-apply,
+   * and `newScene` has already locked saving before re-raising it (#10079,
+   * #10202) — so the user is told to reload, not that the scene is unchanged,
+   * and the throw does not escape the event handler.
+   */
+  const runNewScene = useCallback(() => {
+    let accepted: boolean;
+    try {
+      accepted = newScene();
+    } catch (error) {
+      showError(sceneDispatchFailureMessage('A new scene could not be created', error));
+      return;
+    }
+    if (accepted === false) reportNewSceneFailure();
+  }, [newScene, reportNewSceneFailure]);
 
   const handleNew = useCallback(async () => {
     if (sceneModified) {
       if (!await confirm('Discard unsaved changes and create a new scene?')) return;
     }
-    newScene();
-  }, [newScene, sceneModified, confirm]);
+    runNewScene();
+  }, [runNewScene, sceneModified, confirm]);
 
   // Ctrl+S shortcut
   useEffect(() => {
@@ -124,12 +227,12 @@ export function SceneToolbar() {
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'N') {
         e.preventDefault();
-        newScene();
+        runNewScene();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleSave, newScene, projectId, handleCloudSave]);
+  }, [handleSave, runNewScene, projectId, handleCloudSave]);
 
   const handleExport = useCallback(() => {
     setShowExportDialog(true);
@@ -278,6 +381,7 @@ export function SceneToolbar() {
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title="Export Game"
         aria-label="Export game"
+        data-testid="scene-toolbar-export"
       >
         <Download size={13} />
       </button>

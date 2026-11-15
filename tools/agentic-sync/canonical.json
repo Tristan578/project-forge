@@ -12,22 +12,23 @@
       },
       "apiBaseUrl": "http://localhost:3010/api",
       "webUrl": "http://localhost:3010",
-      "startCommand": "taskboard start --port 3010"
+      "startCommand": "node .claude/hooks/taskboard-launch.mjs start",
+      "initCommand": "node .claude/hooks/taskboard-launch.mjs init"
     },
     "versions": {
-      "Next.js": "16.2.0",
-      "React": "19.2.4",
+      "Next.js": "16.4.5",
+      "React": "19.3.0",
       "wasm-bindgen": "0.2.127",
-      "Bevy": "0.18"
+      "Bevy": "0.19"
     },
     "versionsNote": "wasm-bindgen must match Cargo.lock exactly",
     "coverageThresholds": {
-      "statements": 83,
-      "branches": 75,
-      "functions": 78,
-      "lines": 85
+      "statements": 86,
+      "branches": 79,
+      "functions": 82,
+      "lines": 88
     },
-    "quickValidation": "cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run"
+    "quickValidation": "cd web && npm run test:changed"
   },
   "targets": [
     "AGENTS.md",

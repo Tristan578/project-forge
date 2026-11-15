@@ -5,17 +5,22 @@ import { desc, asc, eq, ilike, and, or, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'marketplace-assets', 30, 5 * 60 * 1000);
   if (limited) return limited;
 
   try {
     const { searchParams } = new URL(req.url);
-    const query = searchParams.get('q') || '';
+    const query = searchParams.get('q') ?? '';
     const category = searchParams.get('category');
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `sort` query param is the same as an omitted one, not a distinct value
     const sort = (searchParams.get('sort') || 'popular') as 'newest' | 'popular' | 'top_rated' | 'price_low' | 'price_high' | 'free';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `price` query param is the same as an omitted one, not a distinct value
     const priceFilter = (searchParams.get('price') || 'all') as 'all' | 'free' | 'paid';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `page` query param is the same as an omitted one, not a distinct value
     const page = parseInt(searchParams.get('page') || '1', 10);
     const { limit } = parsePaginationParams(new URL(req.url).searchParams);
 
@@ -106,6 +111,7 @@ export async function GET(req: NextRequest) {
       priceTokens: r.priceTokens,
       license: r.license,
       previewUrl: r.previewUrl,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored sellerName is unset, same as absent; falls back to a display placeholder
       sellerName: r.sellerName || 'Unknown',
       sellerId: r.sellerId,
       downloadCount: r.downloadCount,
@@ -122,6 +128,10 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets' });
     console.error('Error fetching marketplace assets:', error);
-    return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

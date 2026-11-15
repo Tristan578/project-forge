@@ -1,9 +1,37 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockDispatch } from './sliceTestTemplate';
 import { createSceneTestStore } from './sceneSliceTestStore';
-import { setSceneDispatcher } from '../sceneSlice';
-import { loadProjectScenes } from '@/lib/scenes/sceneManager';
+import { setSceneDispatcher, hasDeferredSceneLoad, cancelDeferredSceneLoad } from '../sceneSlice';
+import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
+import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
+import * as prefabStoreModule from '@/lib/prefabs/prefabStore';
+import * as sceneAudioManifestModule from '@/lib/audio/sceneAudioManifest';
+import * as toastModule from '@/lib/toast';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
+import type { SceneLoadError } from '../sceneSlice';
+
+// `switchScene` surfaces a thrown-dispatch failure through `showError`. Mock the
+// toast module so the message can be asserted without sonner's DOM host (#10079).
+vi.mock('@/lib/toast', () => ({
+  showError: vi.fn(),
+  showPersistentError: vi.fn(),
+  showSuccess: vi.fn(),
+  showInfo: vi.fn(),
+}));
+
+/** Run `fn` and return what it threw, so the SAME throw can be inspected for class, fields and message. */
+function catchThrow(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to throw');
+}
 
 describe('sceneSlice', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -61,6 +89,457 @@ describe('sceneSlice', () => {
       expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
     });
 
+    it('locks saving and preserves the engine error when new-scene rollback storage fails', () => {
+      const engineError = new Error('engine despawned before failure');
+      const saveInstances = prefabStoreModule.savePrefabInstancesToStorage;
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(saveInstances)
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      setSceneDispatcher((command) => {
+        if (command === 'new_scene') throw engineError;
+        return { success: true };
+      });
+      try {
+        // The engine error is preserved: as the typed error's message and as
+        // its `cause` (#10202 review wrapped the rethrowing shape too).
+        const thrown = catchThrow(() => store.getState().newScene());
+        expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+        expect((thrown as Error).message).toBe(engineError.message);
+        expect((thrown as Error).cause).toBe(engineError);
+        expect(write).toHaveBeenCalledTimes(2);
+        expect(store.getState().sceneLoadError?.reason).toContain(engineError.message);
+        mockDispatch.mockClear();
+        setSceneDispatcher(mockDispatch);
+        store.getState().saveScene();
+        expect(mockDispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    // Two dispatchers can report a throw: one that RETHROWS it, and the one the
+    // editor actually registers (`useEngineEvents`), which CATCHES it and
+    // answers `{ success: false, error, threw: true }`. The policy must read the
+    // same for both — before #10202 the second was taken for a clean rejection,
+    // so `rejectionStrandsEditor: false` left saving enabled over a wrecked
+    // viewport.
+    const throwReporters = [
+      {
+        via: 'rethrows',
+        dispatcher: (failure: Error) => (command: string) => {
+          if (command === 'load_scene') throw failure;
+          return { success: true };
+        },
+      },
+      {
+        via: 'answers threw: true',
+        dispatcher: (failure: Error) => (command: string) => (
+          command === 'load_scene'
+            ? { success: false, error: failure.message, threw: true as const }
+            : { success: true }
+        ),
+      },
+    ] as const;
+
+    it.each(throwReporters.flatMap(({ via, dispatcher }) => [
+      { via, dispatcher, opts: { rejectionStrandsEditor: false }, prior: null, locks: true },
+      { via, dispatcher, opts: { rejectionStrandsEditor: false, strandOnThrow: false }, prior: null, locks: false },
+      { via, dispatcher, opts: { strandOnThrow: false }, prior: { reason: 'Standing lockout', at: 12 }, locks: false },
+    ]))('respects throw policy $opts while rethrowing the original engine failure (dispatcher $via)', ({ dispatcher, opts, prior, locks }) => {
+      store.setState({ sceneLoadError: prior });
+      const failure = new Error('engine failed mid-apply');
+      setSceneDispatcher(dispatcher(failure));
+      // Both shapes surface as the ONE typed error every caller narrows on
+      // (#10202 review): the class is the fact "the engine threw", however
+      // the dispatcher reported it, and it still carries the engine's text.
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Target')), opts));
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as EngineDispatchThrewError).command).toBe('load_scene');
+      expect((thrown as Error).message).toBe(failure.message);
+      if (locks) expect(store.getState().sceneLoadError?.reason).toContain(failure.message);
+      else expect(store.getState().sceneLoadError).toEqual(prior);
+    });
+
+    // The two message branches of the `threw: true` conversion, pinned
+    // (#10202 review, m5). The text ends up in the non-dismissible lockout
+    // notice and the model's tool result, and a remixed scene is a
+    // stranger's input, so it is bounded like a rejection's `error` (#10267).
+    it('bounds a multi-KiB threw: true answer in the lockout reason, keeping the head and a visible marker', async () => {
+      const { MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = `JsValue("${'A'.repeat(64 * 1024)}")`;
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, error: hostile, threw: true as const }
+        : { success: true }));
+
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Hostile'))));
+
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as Error).message.length).toBe(MAX_ENGINE_ERROR_CHARS);
+      const reason = store.getState().sceneLoadError?.reason ?? '';
+      const prefix = 'This scene could not be opened: the engine failed while loading it. ';
+      expect(reason.startsWith(`${prefix}JsValue("AAAA`)).toBe(true);
+      expect(reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+      expect(reason.length).toBe(prefix.length + MAX_ENGINE_ERROR_CHARS);
+    });
+
+    it('bounds a multi-KiB message from a dispatcher that RETHROWS the same way', async () => {
+      const { MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = new Error(`JsValue("${'A'.repeat(64 * 1024)}")`);
+      setSceneDispatcher((command) => {
+        if (command === 'load_scene') throw hostile;
+        return { success: true };
+      });
+
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Hostile'))));
+
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as Error).cause).toBe(hostile);
+      expect((thrown as Error).message.length).toBe(MAX_ENGINE_ERROR_CHARS);
+      expect((thrown as Error).message.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+      expect(store.getState().sceneLoadError?.reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+    });
+
+    it('says so when a threw: true answer carries no message at all', () => {
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, threw: true as const }
+        : { success: true }));
+
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Silent throw'))));
+
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as Error).message).toBe('the engine call threw without a message');
+      expect(store.getState().sceneLoadError?.reason).toBe(
+        'This scene could not be opened: the engine failed while loading it. the engine call threw without a message',
+      );
+    });
+
+    // #10202 review, M3(b): `newScene` wrote the empty registry BEFORE the
+    // try that sets the lockout, and that write is documented `@throws` on a
+    // storage failure. The plain error then reached every caller's catch,
+    // which claimed an engine error and a lockout that did not exist.
+    // `loadScene` already treats a failed pre-dispatch registry write as a
+    // refusal (`restorePrefabInstances` → `false`); this is the same contract.
+    it('refuses a new scene without dispatching when the registry cannot be cleared first, and locks nothing', () => {
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      // Staged by a previous caller; a refusal must put it back, as the
+      // engine-refusal branch does.
+      const unstage = stageSceneCompletionMode('endless');
+      try {
+        let accepted: boolean | undefined;
+        expect(() => { accepted = store.getState().newScene(); }).not.toThrow();
+
+        expect(accepted).toBe(false);
+        expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(takeStagedSceneCompletionMode()).toBe('endless');
+        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('registry'), expect.any(DOMException));
+      } finally {
+        unstage();
+        write.mockRestore();
+        errorLog.mockRestore();
+      }
+    });
+
+    it('still returns false, without throwing, when restoring the registry after an engine refusal fails', () => {
+      // The pre-dispatch clear succeeds (real write); the restore after the
+      // refusal is what fails.
+      const saveInstances = prefabStoreModule.savePrefabInstancesToStorage;
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(saveInstances)
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      setSceneDispatcher((command) => (command === 'new_scene' ? { success: false, error: 'Refused' } : { success: true }));
+      try {
+        let accepted: boolean | undefined;
+        expect(() => { accepted = store.getState().newScene(); }).not.toThrow();
+
+        expect(accepted).toBe(false);
+        expect(write).toHaveBeenCalledTimes(2);
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('refused'), expect.any(DOMException));
+      } finally {
+        write.mockRestore();
+        errorLog.mockRestore();
+      }
+    });
+
+    // #10202 review, round 2: three unrelated facts share `newScene()`'s
+    // `false`, and every surface reported all three as the engine refusing.
+    // The slice now records WHICH, for `newSceneRefusal()` to read right after.
+    describe('newSceneRefusal() names why the last newScene() answered false', () => {
+      it('is registry_not_cleared when the pre-dispatch registry write fails, and the engine was never asked', () => {
+        const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+          .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          expect(store.getState().newScene()).toBe(false);
+          expect(store.getState().newSceneRefusal()).toBe('registry_not_cleared');
+          expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
+        } finally {
+          write.mockRestore();
+          errorLog.mockRestore();
+        }
+      });
+
+      it('is engine_refused after a clean { success: false }', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+
+        expect(store.getState().newScene()).toBe(false);
+        expect(store.getState().newSceneRefusal()).toBe('engine_refused');
+      });
+
+      it('is engine_not_attached when there is no dispatcher', () => {
+        setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+        expect(store.getState().newScene()).toBe(false);
+        expect(store.getState().newSceneRefusal()).toBe('engine_not_attached');
+      });
+
+      it('is null after an accepted new scene, and after a throw — a throw is not a refusal', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().newScene()).toBe(false);
+        expect(store.getState().newSceneRefusal()).toBe('engine_refused');
+
+        setSceneDispatcher(mockDispatch);
+        expect(store.getState().newScene()).toBe(true);
+        expect(store.getState().newSceneRefusal()).toBeNull();
+
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().newScene()).toBe(false);
+        setSceneDispatcher(vi.fn(() => { throw new Error('engine trapped'); }));
+        expect(() => store.getState().newScene()).toThrow(EngineDispatchThrewError);
+        expect(store.getState().newSceneRefusal()).toBeNull();
+      });
+    });
+
+    // #10202 review, round 2: `dispatchSceneLoad`'s catch ran the audio and
+    // mode rollbacks bare before rethrowing. A rollback that threw would have
+    // left the catch with ITS error instead of the typed one — a plain error
+    // every caller reports as a storage failure, with no lockout, for an
+    // engine throw that did happen.
+    it('a rollback that throws cannot replace the typed engine error, skip the lockout or skip the other rollback', () => {
+      const stage = sceneAudioManifestModule.stageSceneAudio;
+      const staging = vi.spyOn(sceneAudioManifestModule, 'stageSceneAudio').mockImplementationOnce((json) => {
+        stage(json);
+        return () => { throw new Error('audio rollback exploded'); };
+      });
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, error: 'Engine failed', threw: true as const }
+        : { success: true }));
+      try {
+        const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' })));
+
+        expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+        expect((thrown as Error).message).toBe('Engine failed');
+        expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+        // The mode rollback still ran after the audio rollback threw.
+        expect(takeStagedSceneCompletionMode()).toBe('narrative');
+        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('staged scene audio'), expect.any(Error));
+      } finally {
+        staging.mockRestore();
+        errorLog.mockRestore();
+      }
+    });
+
+    // #10202 review, round 2: `loadScene`'s catch rolled the prefab registry
+    // back BEFORE setting the lockout. The rollback is guarded inside, but
+    // the lockout is the one thing that branch must not skip, so it goes
+    // first — as `loadTemplate` already did. Observed from inside the
+    // rollback write itself.
+    it('sets the throw lockout before rolling the prefab registry back', () => {
+      const saveInstances = prefabStoreModule.savePrefabInstancesToStorage;
+      const lockoutAtWrite: Array<SceneLoadError | null> = [];
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage').mockImplementation((instances) => {
+        lockoutAtWrite.push(store.getState().sceneLoadError);
+        return saveInstances(instances);
+      });
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, error: 'Engine failed', threw: true as const }
+        : { success: true }));
+      try {
+        expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('S')))).toThrow(EngineDispatchThrewError);
+
+        // Two writes: the install before the dispatch, the rollback after the throw.
+        expect(lockoutAtWrite).toHaveLength(2);
+        expect(lockoutAtWrite[0]).toBeNull();
+        expect(lockoutAtWrite[1]?.reason).toContain('the engine failed while loading it');
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    // #10202 review, round 2: `newScene`'s catch was broad, so a JS failure
+    // AFTER the engine had accepted `new_scene` rolled the registry back to
+    // the OUTGOING scene's instances — describing a scene that was gone, and
+    // attaching them to the empty one on the next save (BUG-1 again) — and
+    // put the dropped audio stash and the outgoing mode back with it.
+    it('does not roll back the registry or the staged mode when a JS step fails after the engine accepted new_scene', () => {
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }]);
+      stageSceneCompletionMode('narrative');
+      const unsubscribe = store.subscribe((state, previous) => {
+        if (state.sceneOperationRevision !== previous.sceneOperationRevision) throw new Error('subscriber exploded');
+      });
+      try {
+        const thrown = catchThrow(() => store.getState().newScene({ completionMode: 'endless' }));
+
+        // A plain error, not the engine's: the callers report it as such.
+        expect(thrown).toBeInstanceOf(Error);
+        expect(thrown).not.toBeInstanceOf(EngineDispatchThrewError);
+        expect((thrown as Error).message).toBe('subscriber exploded');
+        expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+        // The engine holds the empty scene, so the state describing it stands.
+        expect(loadPrefabInstances()).toEqual([]);
+        expect(takeStagedSceneCompletionMode()).toBe('endless');
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(store.getState().newSceneRefusal()).toBeNull();
+      } finally {
+        unsubscribe();
+      }
+    });
+
+    // #10267: the engine's `error` says what a scene failed on. It used to be
+    // discarded at `dispatchSceneLoad`, leaving the person with only the
+    // constant sentence; the lockout reason now carries it, in plain words
+    // (no repeated `Invalid scene file:` prefix, no serde line/column).
+    it('records the engine\'s own error, in plain words, in the rejection lockout reason', () => {
+      const engineError = 'Invalid scene file: invalid type: string "x", expected f32 at line 1 column 900';
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: engineError })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Bad material')))).toBe(false);
+      expect(store.getState().sceneLoadError?.reason).toBe(
+        'This scene could not be opened: the engine refused to load it. Details: Invalid type: string "x", expected f32.',
+      );
+      // Still a clean REJECTION, not a throw: a later recovery must not treat
+      // the viewport as wrecked because a reason was appended.
+      expect(store.getState().sceneLoadError?.reason).not.toContain('the engine failed while loading it');
+    });
+
+    // Round 3 (security): serde_json embeds the ENTIRE offending value in
+    // `invalid type: string "…"`, and a remixed scene is a stranger's input,
+    // so the relayed text is bounded at BOTH capture points — a scene cannot
+    // dictate the size of the non-dismissible notice or the model's tool input.
+    it('caps a multi-KiB engine refusal in the lockout reason, keeping the head and a visible marker', async () => {
+      const { MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = `Invalid scene file: invalid type: string "${'A'.repeat(64 * 1024)}", expected f32`;
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: hostile })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Hostile')))).toBe(false);
+      const reason = store.getState().sceneLoadError?.reason ?? '';
+      // The bound applies to the engine's raw text; the plain rendering then
+      // drops its 20-character `Invalid scene file: ` prefix.
+      const prefix = 'This scene could not be opened: the engine refused to load it. Details: ';
+      expect(reason.length).toBe(prefix.length + MAX_ENGINE_ERROR_CHARS - 'Invalid scene file: '.length);
+      expect(reason.startsWith(`${prefix}Invalid type: string "AAAA`)).toBe(true);
+      expect(reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+    });
+
+    it('caps a multi-KiB validate_scene refusal handed to the scene validator', async () => {
+      const { validateSceneFile, MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = `Invalid scene file: invalid type: string "${'A'.repeat(64 * 1024)}", expected f32`;
+      setSceneDispatcher(vi.fn((command: string) =>
+        command === 'validate_scene' ? { success: false, error: hostile } : { success: true }));
+      const verdict = validateSceneFile(sceneFixture('Hostile'));
+      expect(verdict.valid).toBe(false);
+      const reason = verdict.valid ? '' : verdict.reason ?? '';
+      expect(reason.length).toBe(MAX_ENGINE_ERROR_CHARS);
+      expect(reason.startsWith('Invalid scene file: invalid type: string "AAAA')).toBe(true);
+      expect(reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+    });
+
+    it('falls back to the constant sentence when the engine refuses without a reason', () => {
+      setSceneDispatcher(vi.fn(() => ({ success: false })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Silently refused')))).toBe(false);
+      expect(store.getState().sceneLoadError?.reason).toBe(
+        'This scene could not be opened: the engine refused to load it.',
+      );
+    });
+
+    it('hands the engine\'s validate_scene error to the scene validator', async () => {
+      const { validateSceneFile } = await import('@/lib/scenes/sceneValidation');
+      // Raw, position included: this is what the AI validate_scene tool relays.
+      const engineError = 'Invalid scene file: missing field `entities` at line 1 column 2';
+      setSceneDispatcher(vi.fn((command: string) =>
+        command === 'validate_scene' ? { success: false, error: engineError } : { success: true }));
+      expect(validateSceneFile(sceneFixture('Bad material'))).toEqual({ valid: false, reason: engineError });
+      setSceneDispatcher(vi.fn((command: string) =>
+        command === 'validate_scene' ? { success: false } : { success: true }));
+      expect(validateSceneFile(sceneFixture('Silently refused'))).toEqual({ valid: false, reason: null });
+      setSceneDispatcher(vi.fn(() => ({ success: true })));
+      expect(validateSceneFile(sceneFixture('Accepted'))).toEqual({ valid: true });
+    });
+
+    it('keeps the original throw lockout when a later direct load is cleanly rejected', () => {
+      const failure = new Error('viewport may be wrecked');
+      setSceneDispatcher((command) => {
+        if (command === 'load_scene') throw failure;
+        return { success: true };
+      });
+      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Throwing load')))).toThrow(failure.message);
+      const prior = store.getState().sceneLoadError;
+      setSceneDispatcher(() => ({ success: false }));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected load')))).toBe(false);
+      expect(store.getState().sceneLoadError).toEqual(prior);
+    });
+
+    // #10058: newScene()/loadScene() used to leave whatever music arrangement
+    // was in the store from the PREVIOUS scene — stale tracks/clips that then
+    // rode along into the new scene's next cloud save.
+    it('newScene clears a stale music arrangement left by the previous scene', () => {
+      const trackId = useMusicArrangementStore.getState().addTrack('Stale');
+      useMusicArrangementStore.getState().addClip({ trackId, sourceUrl: 'x', sourceDurationSeconds: 10 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      store.getState().newScene();
+
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(0);
+    });
+
+    it('loadScene clears a stale music arrangement when the loaded scene carries none', () => {
+      useMusicArrangementStore.getState().addTrack('Stale');
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      store.getState().loadScene('{"entities":[]}');
+
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
+    });
+
+    it('loadScene restores the loaded scene\'s own music arrangement instead of the stale one', () => {
+      useMusicArrangementStore.getState().addTrack('Stale');
+
+      store.getState().loadScene(JSON.stringify({
+        entities: [],
+        musicArrangement: {
+          version: 1,
+          tracks: [{ id: 'track_new', name: 'From loaded scene', muted: false }],
+          clips: [],
+          tempoBpm: 120,
+        },
+      }));
+
+      const tracks = useMusicArrangementStore.getState().arrangement.tracks;
+      expect(tracks).toHaveLength(1);
+      expect(tracks[0].name).toBe('From loaded scene');
+    });
+
+    it('loadScene rejects malformed json before touching the music arrangement', () => {
+      // Malformed JSON is now caught by `restorePrefabInstances`'s own parse
+      // BEFORE `dispatchSceneLoad` ever runs (#10056), so the load is rejected
+      // outright and the scene on screen — and its arrangement — is unchanged.
+      // `syncArrangementFromLoadedScene` never runs on a rejected load.
+      useMusicArrangementStore.getState().hydrate(null); // known starting state
+      useMusicArrangementStore.getState().addTrack('Live');
+
+      let accepted: boolean | undefined;
+      expect(() => { accepted = store.getState().loadScene('not valid json'); }).not.toThrow();
+
+      expect(accepted).toBe(false);
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+      expect(useMusicArrangementStore.getState().arrangement.tracks[0].name).toBe('Live');
+    });
+
     it('stages the audio the scene declares, since SCENE_LOADED carries only a name', () => {
       clearStagedSceneAudio();
       store.getState().loadScene(
@@ -109,6 +588,607 @@ describe('sceneSlice', () => {
       );
 
       expect(takeStagedSceneAudio()).toEqual({});
+    });
+  });
+
+  // #9998: a scene's completion mode is frontend-only, so the SCENE_LOADED
+  // handler is where the incoming scene's mode lands (it is also where the
+  // outgoing one is cleared). These pin the staging side of that handoff.
+  describe('completion mode crosses the load boundary (#9998)', () => {
+    beforeEach(() => {
+      takeStagedSceneCompletionMode();
+    });
+
+    it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
+      'loadScene stages the %s mode the scene file declares',
+      (mode) => {
+        store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: mode }));
+
+        expect(takeStagedSceneCompletionMode()).toBe(mode);
+      },
+    );
+
+    it('a legacy scene stages no mode, displacing whatever an earlier rejected load left', () => {
+      stageSceneCompletionMode('sandbox');
+
+      store.getState().loadScene(JSON.stringify(sceneFixture('Legacy')));
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('rolls the staging back when the engine refuses the load', () => {
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      expect(store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }))).toBe(false);
+
+      expect(takeStagedSceneCompletionMode()).toBe('narrative');
+    });
+
+    it('rolls the staging back when the load dispatch throws', () => {
+      setSceneDispatcher(vi.fn(() => { throw new Error('engine trapped'); }));
+
+      expect(() => store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }))).toThrow('engine trapped');
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('stages nothing when there is no engine to load the scene', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }));
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('newScene clears a stash the engine never confirmed', () => {
+      store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }));
+      store.getState().newScene();
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('newScene stages the mode its caller asks the empty scene to open with', () => {
+      // `scene_create` uses this to give a generated game the brief's mode.
+      store.getState().newScene({ completionMode: 'endless' });
+
+      expect(takeStagedSceneCompletionMode()).toBe('endless');
+    });
+
+    it('a rejected newScene puts the previous staging back', () => {
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+
+      expect(store.getState().newScene({ completionMode: 'endless' })).toBe(false);
+
+      expect(takeStagedSceneCompletionMode()).toBe('narrative');
+    });
+  });
+
+  // scene.FR-1 N1 BUG-1/BUG-2: the prefab-instance registry must mirror the
+  // ACTIVE scene, not silently carry the outgoing scene's instances forward.
+  describe('newScene / loadScene keep the prefab-instance registry in sync', () => {
+    it('newScene clears the registry so a fresh save does not attach old instances', () => {
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_1', prefabId: 'src', overrides: {} }]);
+      store.getState().newScene();
+      expect(loadPrefabInstances()).toEqual([]);
+    });
+
+    it('loadScene installs the incoming scene\'s registry', () => {
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_old', prefabId: 'old', overrides: {} }]);
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabInstances: [{ instanceId: 'pfi_new', prefabId: 'new', overrides: {} }],
+          prefabDefinitions: [{
+            id: 'new', name: 'New', category: 'test', description: '',
+            snapshot: { entityType: 'cube', name: 'New', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+          }],
+        })
+      );
+      expect(loadPrefabInstances()).toEqual([{ instanceId: 'pfi_new', prefabId: 'new', overrides: {} }]);
+    });
+
+    it('restores the PREVIOUS registry when the engine rejects the load', () => {
+      // A rejected dispatch never emits SCENE_LOADED — the scene on screen is
+      // still the previous one, so its registry must come back rather than
+      // stay overwritten by the rejected scene's (scene.FR-1 N1 BUG-2): a
+      // later save would otherwise persist the wrong instances onto the scene
+      // that is actually still active.
+      const previous = [{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }];
+      savePrefabInstancesToStorage(previous);
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      store.getState().loadScene(
+        JSON.stringify({ entities: [], prefabInstances: [{ instanceId: 'pfi_bad', prefabId: 'bad', overrides: {} }] })
+      );
+
+      expect(loadPrefabInstances()).toEqual(previous);
+    });
+
+    it('merges a scene\'s embedded prefab definitions into the local library on load', () => {
+      expect(getPrefab('prefab_embedded')).toBeUndefined();
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabInstances: [{ instanceId: 'pfi_1', prefabId: 'prefab_embedded', overrides: {} }],
+          prefabDefinitions: [{
+            id: 'prefab_embedded', name: 'Embedded', category: 'cat', description: '',
+            snapshot: { entityType: 'cube', name: 'Embedded', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          }],
+        })
+      );
+      expect(getPrefab('prefab_embedded')?.name).toBe('Embedded');
+    });
+
+    it('drops a single malformed embedded definition rather than rejecting the whole scene load', () => {
+      // Routed through `readPrefabDefinitions`, an individual malformed or
+      // oversized entry is dropped (fail-soft) instead of one bad definition
+      // rejecting the ENTIRE scene load — which is what passing the raw array
+      // straight to `mergeImportedPrefabDefinitions` did.
+      expect(getPrefab('prefab_ok')).toBeUndefined();
+      const loaded = store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabInstances: [{ instanceId: 'pfi_ok', prefabId: 'prefab_ok', overrides: {} }],
+          prefabDefinitions: [
+            {
+              id: 'prefab_ok', name: 'Ok', category: 'cat', description: '',
+              snapshot: { entityType: 'cube', name: 'Ok', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+            },
+            // Structurally invalid — no `snapshot`; `sanitizePrefabDefinition`
+            // rejects it, so `readPrefabDefinitions` drops it before the merge.
+            { id: 'prefab_bad', name: 'Bad', category: 'cat', description: '' },
+          ],
+        })
+      );
+      expect(loaded).toBe(true);
+      expect(getPrefab('prefab_ok')?.name).toBe('Ok');
+      expect(getPrefab('prefab_bad')).toBeUndefined();
+      // The valid instance survives; nothing dangled it out.
+      expect(loadPrefabInstances()).toEqual([{ instanceId: 'pfi_ok', prefabId: 'prefab_ok', overrides: {} }]);
+    });
+
+    it('never overwrites a local prefab definition with an embedded one of the same id', () => {
+      const local = savePrefab('LocalName', 'cat', '', {
+        entityType: 'cube', name: 'LocalName', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabDefinitions: [{ ...local, name: 'RemoteStaleCopy' }],
+        })
+      );
+      expect(getPrefab(local.id)?.name).toBe('LocalName');
+    });
+
+    it('rolls back an embedded definition too when the engine rejects the load', () => {
+      // `mergeImportedPrefabDefinitions` is not itself part of the rejected
+      // dispatch — without rolling it back, a rejected scene's definitions
+      // would install into the library permanently even though the engine
+      // never actually loaded that scene (scene.FR-1 N1 BUG-5).
+      expect(getPrefab('prefab_rejected')).toBeUndefined();
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabDefinitions: [{
+            id: 'prefab_rejected', name: 'Rejected', category: 'cat', description: '',
+            snapshot: { entityType: 'cube', name: 'Rejected', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          }],
+        })
+      );
+
+      expect(getPrefab('prefab_rejected')).toBeUndefined();
+    });
+
+    it('rolls the prefab library back even when the instances write throws during rollback (scene.FR-1 N1 BUG-5 / #10079)', () => {
+      // A single try/catch around both storage writes let a throw from the
+      // instances write skip the library rollback, so a rejected scene's
+      // embedded definitions installed permanently. The two writes are now
+      // guarded independently, so the library rollback still runs.
+      const seeded = savePrefab('KeptLibraryPrefab', 'cat', '', {
+        entityType: 'cube', name: 'KeptLibraryPrefab', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+      setSceneDispatcher(vi.fn());
+      const instancesSpy = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementation(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      const librarySpy = vi.spyOn(prefabStoreModule, 'savePrefabsToStorage');
+      try {
+        expect(() => store.getState().loadScene(JSON.stringify({ entities: [] }))).not.toThrow();
+        // The library rollback write was still ATTEMPTED after the instances
+        // write threw — the whole point of the independent guards.
+        expect(librarySpy).toHaveBeenCalledWith([expect.objectContaining({ id: seeded.id, name: 'KeptLibraryPrefab' })]);
+      } finally {
+        instancesSpy.mockRestore();
+        librarySpy.mockRestore();
+      }
+      // ...and it landed: the seeded library survived the rejected load.
+      expect(getPrefab(seeded.id)?.name).toBe('KeptLibraryPrefab');
+    });
+
+    it('rejects invalid dependency graphs before dispatch without replacing existing prefab state', () => {
+      const previous = [{ instanceId: 'old-link', prefabId: 'old-source', overrides: { name: 'Kept' } }];
+      savePrefabInstancesToStorage(previous);
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+      const definition = {
+        id: 'cycle', name: 'Cycle', category: 'test', description: '',
+        snapshot: { entityType: 'cube', name: 'Cycle', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+        children: [{ instanceId: 'edge', prefabId: 'cycle' }],
+      };
+      expect(store.getState().loadScene(JSON.stringify({ entities: [], prefabDefinitions: [definition] }))).toBe(false);
+      expect(dispatcher).not.toHaveBeenCalled();
+      expect(loadPrefabInstances()).toEqual(previous);
+      expect(getPrefab('cycle')).toBeUndefined();
+    });
+
+    it('newScene restores the PREVIOUS registry when the engine rejects new_scene', () => {
+      // scene.FR-1 N1 BUG-4: `new_scene` can fail too (e.g. the engine's
+      // PendingCommands resource is not yet initialized) — a failed dispatch
+      // must not still clear the registry describing the UNCHANGED scene.
+      const previous = [{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }];
+      savePrefabInstancesToStorage(previous);
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'PendingCommands resource not initialized' })));
+
+      store.getState().newScene();
+
+      expect(loadPrefabInstances()).toEqual(previous);
+    });
+
+    it('newScene leaves the registry untouched when there is no dispatcher at all', () => {
+      // No engine means the scene never actually changed — clearing here would
+      // describe a scene that is still showing its old instances.
+      const previous = [{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }];
+      savePrefabInstancesToStorage(previous);
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      store.getState().newScene();
+
+      expect(loadPrefabInstances()).toEqual(previous);
+    });
+  });
+
+  /**
+   * #10056. `loadScene` gained rejection paths that return WITHOUT dispatching,
+   * and the editor page discards its boolean — so a rejected scene left an empty
+   * viewport with the project's name on it, and the next save wrote that empty
+   * scene over the project's stored `sceneData`.
+   *
+   * The boolean alone cannot fix it: it is also false on a healthy cold open
+   * (the engine dispatcher mounts after the editor page), so gating the UI on it
+   * would error on every working open. `sceneLoadError` is the field that
+   * separates REJECTION from DEFERRAL, which is what the first tests pin.
+   */
+  describe('sceneLoadError (#10056)', () => {
+    /** A definition whose only child edge points back at itself — a cycle. */
+    const cyclicDefinition = {
+      id: 'cycle', name: 'Cycle', category: 'test', description: '',
+      snapshot: { entityType: 'cube', name: 'Cycle', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      children: [{ instanceId: 'edge', prefabId: 'cycle' }],
+    };
+    const cyclicScene = JSON.stringify({ entities: [], prefabDefinitions: [cyclicDefinition] });
+    // A definition dropped by `readPrefabDefinitions` for exceeding the 256 KiB
+    // cap (SEC bound), nested by a second, otherwise-valid definition. The drop
+    // is fail-SOFT on its own, but leaves `parentDefinition.children` pointing
+    // at an id the merge no longer has — a dangling reference the graph-level
+    // check in `prepareImportedDefinitions` fail-HARD rejects.
+    const oversizedDefinition = {
+      id: 'oversized_child', name: 'Oversized', category: 'test', description: 'x'.repeat(300 * 1024),
+      snapshot: { entityType: 'cube', name: 'Oversized', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    };
+    const parentDefinition = {
+      id: 'parent', name: 'Parent', category: 'test', description: '',
+      snapshot: { entityType: 'cube', name: 'Parent', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      children: [{ instanceId: 'edge', prefabId: 'oversized_child' }],
+    };
+    const danglingReferenceScene = JSON.stringify({
+      entities: [], prefabDefinitions: [oversizedDefinition, parentDefinition],
+    });
+    const healthyScene = JSON.stringify({ entities: [] });
+
+    it('starts null', () => {
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    it('records a reason and dispatches nothing when the embedded prefab graph is invalid', () => {
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+
+      expect(store.getState().loadScene(cyclicScene)).toBe(false);
+
+      expect(dispatcher).not.toHaveBeenCalled();
+      expect(store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('could not be opened'),
+        at: expect.any(Number),
+      });
+    });
+
+    it('records a reason and dispatches nothing when a nested definition references one dropped for being oversized', () => {
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+
+      expect(store.getState().loadScene(danglingReferenceScene)).toBe(false);
+
+      expect(dispatcher).not.toHaveBeenCalled();
+      expect(store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('could not be opened'),
+        at: expect.any(Number),
+      });
+    });
+
+    // Sentry: a QuotaExceededError (or any other storage failure) from the
+    // rollback write itself used to propagate uncaught out of `loadScene`,
+    // replacing the diagnosed rejection above with an unhandled exception.
+    it('does not throw when the rollback write itself fails (Sentry)', () => {
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+      const spy = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage').mockImplementation(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      });
+
+      try {
+        expect(() => store.getState().loadScene(cyclicScene)).not.toThrow();
+        expect(store.getState().loadScene(cyclicScene)).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('records a reason when the engine itself rejects the load', () => {
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      expect(store.getState().loadScene(healthyScene)).toBe(false);
+
+      expect(store.getState().sceneLoadError?.reason).toContain('the engine refused');
+    });
+
+    it('leaves sceneLoadError null with no dispatcher, because a deferred load is not an error', () => {
+      // THE regression this field exists for: the editor page calls `loadScene`
+      // before `EditorLayout` mounts the engine, so every healthy cold open
+      // takes this branch and returns false. Treating that as a rejection would
+      // put an error banner on a working editor and block all of its saves.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      expect(store.getState().loadScene(healthyScene)).toBe(false);
+
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    // ---- Deferred cold-open load (#10192) ----------------------------------
+    //
+    // The editor page calls `loadScene` before `EditorLayout` mounts the
+    // engine. Returning `false` there is correct (it is a deferral, not a
+    // rejection) — but nothing ever re-issued that load, so a project opened
+    // in a fresh tab showed the engine's starter scene, and the next autosave
+    // could write that starter scene over the stored one.
+
+    it('replays the load deferred before the engine attached, exactly once', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = JSON.stringify({ entities: [{ entityId: 'e1', name: 'Cube', parentId: null, visible: true }] });
+      expect(store.getState().loadScene(scene, { deferUntilEngineAttaches: true })).toBe(false);
+      expect(store.getState().sceneLoadError).toBeNull();
+      const revisionBefore = store.getState().sceneOperationRevision;
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      const loads = engine.mock.calls.filter(([command]) => command === 'load_scene');
+      expect(loads).toEqual([['load_scene', { json: scene }]]);
+      // The replay went through `loadScene`'s accepted path, not a raw dispatch.
+      expect(store.getState().sceneOperationRevision).toBe(revisionBefore + 1);
+      expect(store.getState().sceneLoadError).toBeNull();
+
+      // Consumed: a later attach (a second engine, a test re-install) must not
+      // load the scene again over whatever the user has done since.
+      const later = createMockDispatch();
+      setSceneDispatcher(later);
+      expect(later.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('keeps only the latest deferred load', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const first = JSON.stringify({ entities: [], metadata: { name: 'first' } });
+      const second = JSON.stringify({ entities: [], metadata: { name: 'second' } });
+      store.getState().loadScene(first, { deferUntilEngineAttaches: true });
+      store.getState().loadScene(second, { deferUntilEngineAttaches: true });
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([
+        ['load_scene', { json: second }],
+      ]);
+    });
+
+    it('strands the editor when the engine rejects the replayed load, so nothing saves over the stored scene', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+
+      const engine = vi.fn((command: string) =>
+        command === 'load_scene' ? { success: false, error: 'Scene JSON too large' } : undefined,
+      );
+      setSceneDispatcher(engine);
+
+      expect(store.getState().sceneLoadError?.reason).toContain('the engine refused');
+      // Every save path asks the engine to export first; a stranded editor
+      // never asks (#10056), so the starter scene cannot reach the project.
+      store.getState().saveScene();
+      expect(engine.mock.calls.filter(([command]) => command === 'export_scene')).toEqual([]);
+    });
+
+    it('locks saving and does not throw out of the attach when the replayed load throws', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        // `setSceneDispatcher` runs inside the effect that installs the
+        // engine; a throw escaping it would unmount the editor.
+        expect(() => setSceneDispatcher(vi.fn(() => { throw new Error('engine unreachable'); }))).not.toThrow();
+        expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('discards the deferred load when the engine detaches before attaching', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('does not hold a load its caller did not ask to defer: an interactive import before the engine attaches is refused, not queued', () => {
+      // SceneToolbar, AutoSaveRecovery and the AI/MCP load_scene handler all
+      // report a `false` return as a failed load. Queueing that scene anyway
+      // would make the toolbar say "not loaded" and then load it over the
+      // project scene once the engine attached.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      expect(store.getState().loadScene(healthyScene, { rejectionStrandsEditor: false })).toBe(false);
+      expect(store.getState().loadScene(healthyScene)).toBe(false);
+      expect(hasDeferredSceneLoad()).toBe(false);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('cancelDeferredSceneLoad drops the held load, so an abandoned cold open cannot replay into the next editor', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+      expect(hasDeferredSceneLoad()).toBe(true);
+
+      cancelDeferredSceneLoad();
+      expect(hasDeferredSceneLoad()).toBe(false);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('leaves the music arrangement alone on replay, so edits made while the engine loaded survive', () => {
+      // The editor page hydrates the arrangement from the project data the
+      // moment it defers the load; the arrangement store is JS-only, so the
+      // user can edit it before WASM attaches. The replay must not reset it.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = {
+        entities: [],
+        musicArrangement: {
+          version: 1,
+          tracks: [{ id: 'track_saved', name: 'From the project', muted: false }],
+          clips: [],
+          tempoBpm: 120,
+        },
+      };
+      store.getState().loadScene(JSON.stringify(scene), { deferUntilEngineAttaches: true });
+      useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(scene));
+      useMusicArrangementStore.getState().addTrack('Added while loading');
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(2);
+
+      setSceneDispatcher(createMockDispatch());
+
+      const tracks = useMusicArrangementStore.getState().arrangement.tracks;
+      expect(tracks.map((t) => t.name)).toEqual(['From the project', 'Added while loading']);
+
+      // A LIVE load of the same scene still resets the arrangement to the scene's own (#10058).
+      expect(store.getState().loadScene(JSON.stringify(scene))).toBe(true);
+      expect(useMusicArrangementStore.getState().arrangement.tracks.map((t) => t.name)).toEqual(['From the project']);
+    });
+
+    it('keeps a completion mode chosen while the engine loaded when the deferred load replays (#9998)', () => {
+      // Same contract as the arrangement above: the editor page hydrates the
+      // mode from the project data when it defers the load, and the picker (or
+      // the AI's set_completion_mode) can change it before WASM attaches. The
+      // replay's SCENE_LOADED must hand over THAT mode, not the saved one.
+      takeStagedSceneCompletionMode();
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = JSON.stringify({ entities: [], completionMode: 'sandbox' });
+      store.getState().loadScene(scene, { deferUntilEngineAttaches: true });
+      store.setState({ sceneGraph: { ...store.getState().sceneGraph, completionMode: 'endless' } });
+
+      setSceneDispatcher(createMockDispatch());
+      expect(takeStagedSceneCompletionMode()).toBe('endless');
+
+      // A LIVE load of the same scene still adopts the scene's own mode.
+      expect(store.getState().loadScene(scene)).toBe(true);
+      expect(takeStagedSceneCompletionMode()).toBe('sandbox');
+    });
+
+    it('holds nothing when the load was dispatched live', () => {
+      expect(store.getState().loadScene(healthyScene)).toBe(true);
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('clears sceneLoadError once a scene loads successfully', () => {
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+      store.getState().loadScene(healthyScene);
+      expect(store.getState().sceneLoadError).not.toBeNull();
+
+      setSceneDispatcher(createMockDispatch());
+      expect(store.getState().loadScene(healthyScene)).toBe(true);
+
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    it('clears sceneLoadError when the user starts a new scene', () => {
+      // A deliberately empty scene IS trustworthy, so `newScene` is a way back
+      // out of the save lockout rather than a dead end.
+      store.getState().loadScene(cyclicScene);
+      expect(store.getState().sceneLoadError).not.toBeNull();
+
+      expect(store.getState().newScene()).toBe(true);
+
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    it('keeps sceneLoadError set when the engine also rejects the new scene', () => {
+      store.getState().loadScene(cyclicScene);
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'PendingCommands resource not initialized' })));
+
+      expect(store.getState().newScene()).toBe(false);
+
+      // The untrustworthy scene is still on screen, so the lockout must stand.
+      expect(store.getState().sceneLoadError).not.toBeNull();
+    });
+
+    it('refuses to export the engine scene while a load stands rejected', () => {
+      // The data guard. Every persistence consumer downstream of SCENE_EXPORTED
+      // (localStorage autosave, the IndexedDB cache, the sessionStorage panic
+      // backup, the cloud PUT) writes whatever JSON comes back, so not ASKING is
+      // what keeps the engine's empty scene off the project's stored sceneData.
+      store.getState().loadScene(cyclicScene);
+      const dispatcher = createMockDispatch();
+      setSceneDispatcher(dispatcher);
+
+      store.getState().saveScene('req_1');
+      store.getState().saveToCloud('req_2');
+
+      expect(dispatcher).not.toHaveBeenCalledWith('export_scene', expect.anything());
+    });
+
+    it('exports again once the rejection clears', () => {
+      store.getState().loadScene(cyclicScene);
+      const dispatcher = createMockDispatch();
+      setSceneDispatcher(dispatcher);
+      store.getState().saveScene('req_blocked');
+      expect(dispatcher).not.toHaveBeenCalledWith('export_scene', expect.anything());
+
+      expect(store.getState().loadScene(healthyScene)).toBe(true);
+      store.getState().saveScene('req_allowed');
+      store.getState().saveToCloud('req_allowed_cloud');
+
+      expect(dispatcher).toHaveBeenCalledWith('export_scene', { requestId: 'req_allowed' });
+      expect(dispatcher).toHaveBeenCalledWith('export_scene', { requestId: 'req_allowed_cloud' });
     });
   });
 
@@ -363,10 +1443,11 @@ describe('sceneSlice', () => {
       // correctly decline to do anything.
       setSceneDispatcher((command, payload) => {
         mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
         if (command === 'export_scene') {
           window.dispatchEvent(
             new CustomEvent('forge:scene-exported', {
-              detail: { json: '{"formatVersion":3,"sceneName":"Live","entities":[]}' },
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
             })
           );
         }
@@ -389,6 +1470,23 @@ describe('sceneSlice', () => {
       expect(store.getState().scenes.some((s) => s.name === 'New Scene')).toBe(true);
     });
 
+    it('createNewScene states the live project type in the new scene (#10227)', () => {
+      // A scene created in a 2D project is a 2D scene: `metadata.projectType`
+      // comes from the store's mirror of the engine's type, so the scene is
+      // self-describing even when opened cold in a fresh engine. Without the
+      // key a switch would still keep the session's dimension (the engine
+      // leaves its type alone for a key-less scene), but a cold open would
+      // come up 3D.
+      store.setState({ projectType: '2d' });
+      store.getState().createNewScene('Cave');
+      const entry = persisted().scenes.find((s) => s.name === 'Cave');
+      expect(entry?.data?.metadata?.projectType).toBe('2d');
+
+      store.setState({ projectType: '3d' });
+      store.getState().createNewScene('Hall');
+      expect(persisted().scenes.find((s) => s.name === 'Hall')?.data?.metadata?.projectType).toBe('3d');
+    });
+
     it('switchScene makes the target active and loads its data', async () => {
       store.getState().createNewScene('Second');
       const target = store.getState().scenes.find((s) => s.name === 'Second');
@@ -404,6 +1502,193 @@ describe('sceneSlice', () => {
       const before = store.getState().activeSceneId;
       await store.getState().switchScene('scene_does_not_exist');
       expect(store.getState().activeSceneId).toBe(before);
+    });
+
+    // Sentry: `loadScene`/`newScene` roll back their OWN state before
+    // rethrowing a dispatch error, but `switchScene` previously let that
+    // exception propagate straight past its `saveProjectScenes` calls —
+    // silently losing the outgoing scene's captured work, and surfacing as an
+    // unhandled rejection at `SceneBrowser.tsx`'s bare `void switchScene(...)`.
+    it('persists the outgoing scene when the engine dispatch throws instead of losing it (Sentry)', async () => {
+      store.getState().createNewScene('Second');
+      const before = store.getState().activeSceneId;
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      setSceneDispatcher((command, payload) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(
+            new CustomEvent('forge:scene-exported', {
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
+            })
+          );
+        }
+        if (command === 'load_scene') {
+          throw new Error('engine unreachable');
+        }
+      });
+
+      await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+      // The switch itself did not go through...
+      expect(store.getState().activeSceneId).toBe(before);
+      expect(persisted().activeSceneId).toBe(before);
+      // ...but the outgoing scene's freshly captured data was NOT discarded.
+      const outgoing = persisted().scenes.find((s) => s.id === before);
+      expect(outgoing?.data?.metadata?.name).toBe('Live');
+    });
+
+    // #10079: a THROWN dispatch is not a clean rejection. switchScene passes
+    // `rejectionStrandsEditor: false` (a clean rejection leaves the outgoing
+    // scene intact), but a throw can have despawned it mid-apply, so the
+    // editor must strand and lock saving — and the user must be told to reload,
+    // not that the scene is unchanged. Before the fix, `strandOnThrow` did not
+    // exist and `sceneLoadError` stayed null, so the next autosave overwrote
+    // the stored scene with the wrecked engine viewport.
+    it('locks saving with an ENGINE_LOAD_THREW reason and tells the user to reload when the switch dispatch throws (#10079)', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      vi.mocked(toastModule.showError).mockClear();
+
+      setSceneDispatcher((command, payload) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(
+            new CustomEvent('forge:scene-exported', {
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
+            })
+          );
+        }
+        if (command === 'load_scene') throw new Error('engine unreachable');
+      });
+
+      await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+      // The lockout is set with the THREW-shaped reason (not null as before).
+      expect(store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('the engine failed while loading it'),
+        at: expect.any(Number),
+      });
+      // The lockout is what it is for: saving now refuses to export.
+      mockDispatch.mockClear();
+      store.getState().saveScene();
+      expect(mockDispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
+      // The user is told to reload, not that the scene is unchanged — in the
+      // one sentence every surface imports (#10202 review, m6).
+      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+      expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
+    });
+
+    // Sentry (#10079 follow-up): when the TARGET scene's stored `data` is
+    // null, `switchSceneIn` returns `sceneToLoad: null` and `switchScene`
+    // falls back to `newScene()` instead of `loadScene()`. The catch block
+    // above tells the user saving is locked no matter which branch threw —
+    // but before this fix only `loadScene`'s `strandOnThrow` actually set
+    // `sceneLoadError`; a thrown `newScene()` left it null, so the message was
+    // a lie and the next autosave could silently overwrite the previous scene
+    // with the wrecked engine viewport's corrupted state.
+    it('locks saving with an ENGINE_LOAD_THREW reason when the newScene() fallback throws (#10079 follow-up, Sentry)', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const project = loadProjectScenes(store.getState().projectId);
+      saveProjectScenes(
+        { ...project, scenes: project.scenes.map((s) => (s.id === target!.id ? { ...s, data: null } : s)) },
+        store.getState().projectId
+      );
+      vi.mocked(toastModule.showError).mockClear();
+
+      setSceneDispatcher((command, payload) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(
+            new CustomEvent('forge:scene-exported', {
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
+            })
+          );
+        }
+        if (command === 'new_scene') throw new Error('engine unreachable');
+      });
+
+      await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+      // Confirms the fallback branch actually ran (`new_scene`, not `load_scene`).
+      expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+      // The lockout is set with the THREW-shaped reason, same as the
+      // `loadScene` branch above — before the fix this stayed null.
+      expect(store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('the engine failed while loading it'),
+        at: expect.any(Number),
+      });
+      // The lockout is what it is for: saving now refuses to export.
+      mockDispatch.mockClear();
+      store.getState().saveScene();
+      expect(mockDispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
+      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+    });
+
+    // #10202 review, M3(c): the catch above used to claim "due to an engine
+    // error … saving is locked" for ANY throw out of `loadScene`/`newScene`.
+    // Only the typed engine throw carries that lockout; anything else — here a
+    // JS-side step after the engine accepted — is reported as the plain
+    // failure it is, with the outgoing capture still persisted.
+    it('reports a non-engine throw from the switch as a plain failure, never as an engine error with a lockout', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const project = loadProjectScenes(store.getState().projectId);
+      // `data: null` takes the `newScene()` branch, whose last step is the
+      // arrangement sync — a store action, not the engine.
+      saveProjectScenes(
+        { ...project, scenes: project.scenes.map((s) => (s.id === target!.id ? { ...s, data: null } : s)) },
+        store.getState().projectId
+      );
+      vi.mocked(toastModule.showError).mockClear();
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const hydrate = vi.spyOn(useMusicArrangementStore.getState(), 'hydrate')
+        .mockImplementation(() => { throw new Error('hydrate failed'); });
+      try {
+        await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+        expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+        expect(hydrate).toHaveBeenCalled();
+        // No lockout: the engine accepted the command, so nothing is wrecked.
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith('The scene could not be opened: hydrate failed');
+        expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('engine error'));
+        expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+        // The outgoing capture was persisted either way.
+        expect(loadProjectScenes().scenes[0].data?.metadata?.name).toBe('Live');
+      } finally {
+        hydrate.mockRestore();
+        errorLog.mockRestore();
+      }
+    });
+
+    it('reports a refusal, not an engine error, when the registry cannot be cleared before the newScene() fallback', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const project = loadProjectScenes(store.getState().projectId);
+      saveProjectScenes(
+        { ...project, scenes: project.scenes.map((s) => (s.id === target!.id ? { ...s, data: null } : s)) },
+        store.getState().projectId
+      );
+      vi.mocked(toastModule.showError).mockClear();
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      try {
+        await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+        expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('unchanged'));
+        expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('engine error'));
+      } finally {
+        write.mockRestore();
+        errorLog.mockRestore();
+      }
     });
 
     it('duplicateScene adds a copy', async () => {

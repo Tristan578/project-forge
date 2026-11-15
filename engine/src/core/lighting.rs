@@ -105,7 +105,7 @@ fn sync_light_data(
     for (data, mut light) in point_lights.iter_mut() {
         light.color = Color::linear_rgb(data.color[0], data.color[1], data.color[2]);
         light.intensity = data.intensity;
-        light.shadows_enabled = data.shadows_enabled;
+        light.shadow_maps_enabled = data.shadows_enabled;
         light.shadow_depth_bias = data.shadow_depth_bias;
         light.shadow_normal_bias = data.shadow_normal_bias;
         light.range = data.range;
@@ -115,7 +115,7 @@ fn sync_light_data(
     for (data, mut light) in dir_lights.iter_mut() {
         light.color = Color::linear_rgb(data.color[0], data.color[1], data.color[2]);
         light.illuminance = data.intensity;
-        light.shadows_enabled = data.shadows_enabled;
+        light.shadow_maps_enabled = data.shadows_enabled;
         light.shadow_depth_bias = data.shadow_depth_bias;
         light.shadow_normal_bias = data.shadow_normal_bias;
     }
@@ -123,7 +123,7 @@ fn sync_light_data(
     for (data, mut light) in spot_lights.iter_mut() {
         light.color = Color::linear_rgb(data.color[0], data.color[1], data.color[2]);
         light.intensity = data.intensity;
-        light.shadows_enabled = data.shadows_enabled;
+        light.shadow_maps_enabled = data.shadows_enabled;
         light.shadow_depth_bias = data.shadow_depth_bias;
         light.shadow_normal_bias = data.shadow_normal_bias;
         light.range = data.range;

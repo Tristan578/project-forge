@@ -19,11 +19,12 @@ import {
   sanitizeChatInput,
   sanitizeSystemPrompt,
   sanitizeToolText,
+  sanitizeSceneContext,
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { assertTier } from '@/lib/auth/api-auth';
+import { assertAiAccess } from '@/lib/auth/api-auth';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
@@ -32,19 +33,24 @@ import { DEEP_GEN_SURFACES, type DeepGenSurface } from '@/lib/ai/surfaces';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent, resolveToolApprovalSecret } from '@/lib/ai/spawnforgeAgent';
+import { resolveAnthropicClientAuth } from '@/lib/ai/wifCredential';
 import {
   verifyApprovedToolApprovals,
   deniedApprovalsAreAuthentic,
 } from '@/lib/ai/toolApprovalSignature';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { insertSceneContextMessage, buildTrailingSceneContextMessage } from '@/lib/ai/cachedContext';
 import { isDeepTierEnabled } from '@/lib/ai/deepTier';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
+import { isCommandAvailable } from '@/lib/config/providers';
 import type {
   UserModelMessage,
   AssistantModelMessage,
   ToolModelMessage,
 } from '@ai-sdk/provider-utils';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -120,6 +126,19 @@ async function getDocsEntries(): Promise<DocEntry[]> {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * #9117: the prompt must not instruct the model to call a tool that is
+ * withheld from its tool set. While `music` is declared unavailable the
+ * soundtrack clauses say so and point at what the model CAN do instead.
+ */
+const MUSIC_AVAILABLE = isCommandAvailable('generate_music');
+const MUSIC_WORKFLOW_CLAUSE = MUSIC_AVAILABLE
+  ? ', and generate_music (\`targetEntityId\` for spatial source, or scene-wide) for soundtrack'
+  : '. Background music generation is not available yet — do not call generate_music; suggest the user upload a track, or use generate_sfx for ambient loops';
+const MUSIC_EXAMPLE_STEP = MUSIC_AVAILABLE
+  ? 'generate_music with \`targetEntityId\` for a spatial source on the hero, or scene-wide for background music.'
+  : 'skip — music generation is not available yet; mention that the user can upload their own track from the Asset panel.';
+
 const SYSTEM_PROMPT = `You are an expert game creation assistant for SpawnForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
 ## What You Can Do
@@ -141,7 +160,7 @@ You have access to ${MCP_COMMAND_COUNT} MCP commands across ${MCP_CATEGORY_COUNT
 
 ## Game Creation Workflow
 1. **Plan the scene** - Identify what entities are needed (player, enemies, environment, collectibles, lights)
-2. **Generate AI assets for characters and key props** - For named characters and signature props (the frog hero, the boss, the treasure), spawn a placeholder primitive first, then call generate_3d_model with \`targetEntityId\` set to that placeholder's id so the generated model swaps in when ready. Use generate_texture / generate_pbr_maps (\`targetEntityId\`) to skin a surface, generate_skybox for the environment backdrop, and generate_music (\`targetEntityId\` for spatial source, or scene-wide) for soundtrack. **Heuristic:** characters and key props → generated assets; ground, walls, platforms, and abstract gameplay shapes → plain primitives (faster, no credits, no wait). Don't generate a model for a floor.
+2. **Generate AI assets for characters and key props** - For named characters and signature props (the frog hero, the boss, the treasure), spawn a placeholder primitive first, then call generate_3d_model with \`targetEntityId\` set to that placeholder's id so the generated model swaps in when ready. Use generate_texture / generate_pbr_maps (\`targetEntityId\`) to skin a surface, generate_skybox for the environment backdrop${MUSIC_WORKFLOW_CLAUSE}. **Heuristic:** characters and key props → generated assets; ground, walls, platforms, and abstract gameplay shapes → plain primitives (faster, no credits, no wait). Don't generate a model for a floor.
 3. **Spawn entities** - Use spawn_entity with types: cube, sphere, cylinder, plane, cone, torus, capsule
 4. **Position everything** - Use update_transform to place entities (position [x,y,z], rotation, scale)
 5. **Add materials** - Use update_material for colors, metallic/roughness, emissive glow, textures
@@ -159,6 +178,7 @@ Scripts run in a sandboxed TypeScript environment with these APIs:
 ### Transform & Spawning
 - \`forge.getTransform(entityId)\` → { position, rotation, scale }
 - \`forge.setPosition(entityId, x, y, z)\`
+- \`forge.setScale(entityId, x, y, z)\`
 - \`forge.translate(entityId, dx, dy, dz)\` — relative movement
 - \`forge.rotate(entityId, dx, dy, dz)\` — degrees
 - \`forge.spawn(type, { name, position })\` → entity ID
@@ -178,12 +198,16 @@ Scripts run in a sandboxed TypeScript environment with these APIs:
 ### Input
 - \`forge.input.isPressed(action)\` / \`justPressed\` / \`justReleased\`
 - \`forge.input.getAxis(action)\`
-- Default actions: move_forward, move_backward, move_left, move_right, jump, fire, interact
+- **Actions are names the project defines, never key codes.** Pass \`move_left\`, not \`ArrowLeft\`.
+- Every scene starts with these, and the creator may rename, rebind, delete or add to them:
+  - digital: \`move_left\`, \`move_right\`, \`move_up\`, \`move_down\`, \`move_forward\`, \`move_backward\`, \`jump\`, \`interact\`, \`pause\`, \`action_primary\`, \`action_secondary\`
+  - axis (\`getAxis\`, returns -1..1): \`move_horizontal\`, \`move_vertical\`
+- \`move_up\`/\`move_down\` for a top-down or 2D game, \`move_forward\`/\`move_backward\` for a 3D one — both are bound to the same keys.
+- \`action_primary\` is the main verb (attack, shoot, grab). A game that needs its own action — \`grapple\`, \`rewind\`, \`p2_attack\` — gets one with \`set_input_binding\` FIRST; only then may a script name it.
 
 ### Physics
 - \`forge.physics.applyForce(entityId, fx, fy, fz)\`
 - \`forge.physics.applyImpulse(entityId, fx, fy, fz)\`
-- \`forge.physics.setVelocity(entityId, vx, vy, vz)\`
 - \`forge.physics.getContacts(entityId, radius?)\` → overlapping entity IDs
 - \`forge.physics.distanceTo(entityIdA, entityIdB)\`
 - \`forge.physics.isGrounded(entityId)\` → boolean, synchronous. True while a kinematic character controller is touching the ground. Gate every jump on it — an ungated jump lets the player climb the sky by holding the key. (2D projects use \`forge.physics2d.isGrounded(entityId, distance?)\`, which returns a Promise and must be awaited.)
@@ -243,7 +267,7 @@ For a request like "make me a 3D platformer about a frog", orchestrate the gener
 2. **Spawn placeholders** - spawn_entity cube named "Frog" for the hero; spawn plain primitive planes/cubes for the platforms and ground (these stay primitives — no generated assets for gameplay geometry).
 3. **Generate the hero asset** - generate_3d_model with prompt "cartoon frog character" and \`targetEntityId\` = the Frog placeholder's id, so the model swaps onto that entity when the job finishes (the entity keeps its transform, physics, and scripts).
 4. **Skin / dress the scene** - generate_texture or generate_pbr_maps with \`targetEntityId\` to texture a signature surface; generate_skybox for the backdrop.
-5. **Soundtrack** - generate_music with \`targetEntityId\` for a spatial source on the hero, or scene-wide for background music.
+5. **Soundtrack** - ${MUSIC_EXAMPLE_STEP}
 6. **Physics & scripts on the placeholder** - set_physics (dynamic) and set_script on the Frog entity now; they apply to the same entity the generated model lands on.
 7. **Win condition** - add_game_component with componentType \`win_condition\` (e.g. reach the goal flag) so the level can be completed.
 8. **Playtest** - tell the user to press Play to test the frog, Stop to return to editing.
@@ -443,7 +467,7 @@ export function buildModelMessages(messages: IncomingMessage[]): BuiltModelMessa
 // Load manifest tools for AI SDK
 // ---------------------------------------------------------------------------
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   // 1. Authenticate + rate-limit via shared middleware pipeline
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
@@ -453,8 +477,10 @@ export async function POST(request: NextRequest) {
   if (mid.error) return mid.error;
   const auth = { ctx: mid.authContext! };
 
-  // 1b. Tier gate — starter tier has no AI access
-  const tierError = assertTier(auth.ctx.user, ['hobbyist', 'creator', 'pro']);
+  // 1b. Tier gate — starter tier has no AI access unless it holds trial
+  //     tokens to spend (#7715); the platform-key resolver applies the same
+  //     rule before it deducts.
+  const tierError = assertAiAccess(auth.ctx.user);
   if (tierError) return tierError;
 
   // 2. Validate request size (max 4MB — sized to fit MAX_INPUT_CHARS=2M plus
@@ -483,7 +509,7 @@ export async function POST(request: NextRequest) {
   try {
     body = JSON.parse(bodyText);
   } catch {
-    return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const { messages, sceneContext, thinking, effort, systemOverride } = body;
@@ -635,6 +661,14 @@ export async function POST(request: NextRequest) {
   // Only deduct tokens / check tier when using the direct (platform key) path.
   const chatRoute = resolveChatRoute(model);
   const usingDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
+  // Mid-conversation system messages (#8859): on the direct backend with the
+  // premium model, the scene context leaves the leading prefix and goes in as a
+  // `role: "system"` entry immediately BEFORE the latest user turn, so an
+  // entity edit no longer invalidates the cached history. The gateway path flattens instruction blocks to a plain string
+  // (no cache controls at all), and the non-premium models are not documented
+  // for mid-conversation system messages, so both keep the leading embed.
+  const canUseMidConversationSystem =
+    usingDirectBackend && isPremiumModel(chatRoute?.modelId ?? model);
 
   if (usingDirectBackend) {
     try {
@@ -648,7 +682,7 @@ export async function POST(request: NextRequest) {
       usageId = resolved.usageId;
     } catch (err) {
       if (err instanceof ApiKeyError) {
-        return Response.json({ error: err.message, code: err.code }, { status: 402 });
+        return redactedJson({ error: err.message, code: err.code }, { status: 402 });
       }
       throw err;
     }
@@ -744,13 +778,21 @@ export async function POST(request: NextRequest) {
     { text: effectiveSystemPrompt, tier: 'long' },
   ];
 
-  if (sceneContext && typeof sceneContext === 'string') {
-    // sceneContext is client-supplied structured data (engine scene state).
-    // Strip control characters (security) but do NOT apply the 10k system
-    // prompt length cap — scene context for complex scenes can legitimately
-    // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 2M) at
-    // step 5b is the real size guard for the entire conversation.
-    const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  if (sceneContext && typeof sceneContext === 'string' && !canUseMidConversationSystem) {
+    // Leading-prefix embed, kept for every path that cannot use a
+    // mid-conversation system message (gateway backend, non-premium models).
+    // On the premium direct path the scene goes in just before the latest
+    // user turn instead — see `messagesForAgent` below.
+    // sceneContext is client-supplied and user-authored (entity names, script
+    // text, whatever a .forge file or modified client sends), so it goes
+    // through the SAME `sanitizeSceneContext` the premium placement uses:
+    // NFKC, control characters stripped, `&` `<` `>` and angle lookalikes
+    // escaped, otherwise verbatim (nothing redacted — see the function for
+    // why). No 10k system-prompt length cap — scene
+    // context for complex scenes can legitimately be 50k+ chars. The total
+    // input budget (MAX_INPUT_CHARS = 2M) at step 5b is the real size guard
+    // for the entire conversation.
+    const sanitizedContext = sanitizeSceneContext(sceneContext);
     // Prepend a per-user nonce so the cached prefix is unique per user even
     // under the shared platform Anthropic API key. Anthropic's prompt cache
     // is scoped to API key / org granularity, so without this two users with
@@ -798,8 +840,14 @@ export async function POST(request: NextRequest) {
   // Effort piggybacks the same tier gate as thinking — both consume extra reasoning
   // tokens and must be off by default for free/starter tiers.
   const resolvedEffort = canUseThinking && effort ? effort : undefined;
+  // Direct-backend Anthropic auth (#8858): a federated short-lived token when
+  // Workload Identity Federation is configured, else ANTHROPIC_API_KEY. Never
+  // throws — a failed exchange is reported and falls back to the static key.
+  // The gateway branch does not use it and does not resolve it.
+  const anthropicAuth = usingDirect ? await resolveAnthropicClientAuth() : undefined;
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
+    ...(anthropicAuth ? { anthropicAuthOverride: anthropicAuth } : {}),
     model: resolvedModelId,
     instructions: instructionBlocks,
     thinking: canUseThinking && thinking === true,
@@ -814,6 +862,17 @@ export async function POST(request: NextRequest) {
 
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
+  // 8a. Mid-conversation scene context (#8859). Same escaping + nonce as the
+  // leading embed, plus data framing (and an annotation when the scene text
+  // resembles instructions), inserted immediately BEFORE the latest
+  // user turn — never after it, so the highest-recency slot stays the user's
+  // own message and user-authored scene text cannot pose as the last word.
+  // Null (and `messagesForAgent === modelMessages`) whenever the leading embed
+  // is the one in effect.
+  const sceneMessage = canUseMidConversationSystem
+    ? buildTrailingSceneContextMessage(sceneContext, auth.ctx.user.id)
+    : null;
+  const messagesForAgent = insertSceneContextMessage(modelMessages, sceneMessage);
 
   // 8b. Bind every approved approval to the input the user actually approved.
   //
@@ -858,7 +917,7 @@ export async function POST(request: NextRequest) {
   let resumeProducedToolCalls = false;
   try {
     const result = await agent.stream({
-      messages: modelMessages,
+      messages: messagesForAgent,
       onStepFinish: async ({ usage, toolCalls }) => {
         // Tracks whether the turn did any real work, for the paused-turn
         // refund below. A denial resume that only narrates "I didn't do that"
@@ -1025,7 +1084,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const message = err instanceof Error ? err.message : 'AI API error';
-    return Response.json({ error: message }, { status: 500 });
+    // The model provider's text stays server-side: it is already on the
+    // Sentry event above, and an upstream body can carry the platform
+    // credential or backend identifiers (#9736).
+    return redactedJson({ error: 'The assistant could not complete that request. Please try again.' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

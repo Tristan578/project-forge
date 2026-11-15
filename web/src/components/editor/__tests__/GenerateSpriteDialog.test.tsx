@@ -4,7 +4,9 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
+import { toast } from 'sonner';
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), warning: vi.fn() } }));
 import { GenerateSpriteDialog } from '../GenerateSpriteDialog';
 import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
@@ -20,7 +22,41 @@ vi.mock('@/stores/generationStore', () => ({
 vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
   Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props} />,
+  // Rendered only while a submit is in flight (the new synchronous-completion
+  // cases below click Generate and exercise that branch).
+  Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
+
+// Capability gate (#9117): report "available" so these tests exercise the
+// submit path; the gate itself is covered by useGenerationGate.test.tsx.
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { spriteTokenCost } from '@/lib/config/providers';
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
+}));
+
+describe('GenerateSpriteDialog capability gate (#9117)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false });
+  });
+
+  it('asks the gate for sprite-generation', () => {
+    render(<GenerateSpriteDialog isOpen={true} onClose={vi.fn()} />);
+    expect(useGenerationGate).toHaveBeenCalledWith('sprite-generation', 'replicate');
+  });
+
+  it('shows the notice and disables Generate when blocked', () => {
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false, byokConfigurable: false });
+    render(<GenerateSpriteDialog isOpen={true} onClose={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveAttribute('id', 'generate-sprite-unavailable');
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sprite-unavailable');
+    expect(screen.getByText('Generate').closest('button')).toBeDisabled();
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.getAllByRole('combobox')[0]).toBeEnabled(); // Allow switching to a supported provider.
+    expect(screen.getAllByRole('combobox')[1]).toBeDisabled();
+  });
+});
 
 describe('GenerateSpriteDialog', () => {
   const mockOnClose = vi.fn();
@@ -50,6 +86,19 @@ describe('GenerateSpriteDialog', () => {
     cleanup();
   });
 
+  it.each([
+    ['pixel-art', 9, false, '10'], ['pixel-art', 10, true, '10'],
+    ['pixel-art', 14, true, '10'], ['hand-drawn', 15, false, '20'],
+    ['hand-drawn', 19, false, '20'], ['hand-drawn', 20, true, '20'],
+  ])('quotes and gates %s at balance %s', (style, balance, enabled, quote) => {
+    setupStore(balance as number);
+    render(<GenerateSpriteDialog isOpen onClose={mockOnClose} />);
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: style } });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    expect(screen.getByText('Token cost:').nextElementSibling).toHaveTextContent(String(quote));
+    expect(screen.getByText('Generate').closest('button')?.disabled).toBe(!enabled);
+  });
+
   it('returns null when isOpen is false', () => {
     const { container } = render(<GenerateSpriteDialog isOpen={false} onClose={mockOnClose} />);
     expect(container.firstChild).toBeNull();
@@ -74,9 +123,25 @@ describe('GenerateSpriteDialog', () => {
     expect(screen.getByText('Vector')).toBeInTheDocument();
   });
 
-  it('renders token cost of 15 for single sprite', () => {
+  // This asserted 15, which is the number that shipped and is neither
+  // provider's price (#9741). The dialog defaults to the pixel-art style, which
+  // the route resolves to SDXL and charges 10 for; a DALL-E style costs 20. The
+  // old assertion could only pass while the quote disagreed with the charge.
+  it('quotes the price of the provider the default style resolves to', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('15')).toBeInTheDocument();
+    expect(screen.getByText(String(spriteTokenCost('pixel-art')))).toBeInTheDocument();
+    expect(screen.queryByText('15')).not.toBeInTheDocument();
+  });
+
+  it('re-quotes when the style changes provider', () => {
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    expect(screen.getByText(String(spriteTokenCost('pixel-art')))).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Style'), { target: { value: 'realistic' } });
+
+    // 20, not 10 — and the point of the test is that the number MOVED.
+    expect(screen.getByText(String(spriteTokenCost('realistic')))).toBeInTheDocument();
+    expect(spriteTokenCost('realistic')).not.toBe(spriteTokenCost('pixel-art'));
   });
 
   it('disables Generate when prompt is empty', () => {
@@ -125,4 +190,81 @@ describe('GenerateSpriteDialog', () => {
     fireEvent.click(tilesetTabs[0]);
     expect(screen.getByText(/Tile Size/)).toBeInTheDocument();
   });
+
+  // The submit path is the glue #9734 wires: the sprite route's
+  // synchronous-completion contract (`resultUrl` in the body) reaches
+  // useGenerationPolling's inline-result shortcut ONLY if the dialog copies
+  // `data.resultUrl` onto the queued job. Nothing else in the suite exercises
+  // this fetch → addJob hop, so an inverted condition, a renamed field, or a
+  // dropped `data.resultUrl` read would ship silently. These two cases pin both
+  // branches of the `inlineResultUrl` computation at the call site.
+  it('carries data.resultUrl onto the job when the response completes synchronously', async () => {
+    const dataUrl = 'data:image/png;base64,AAAABBBBCCCC';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jobId: 'sprite-immediate',
+          status: 'completed',
+          resultUrl: dataUrl,
+          provider: 'openai',
+          usageId: 'usage-immediate',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    fireEvent.click(screen.getByText('Generate'));
+
+    await waitFor(() => expect(mockAddJob).toHaveBeenCalledTimes(1));
+    expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({ resultUrl: dataUrl }));
+
+    fetchMock.mockRestore();
+  });
+
+  it('leaves resultUrl undefined when the response is still pending', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jobId: 'sprite-pending',
+          status: 'pending',
+          resultUrl: 'https://example.com/partial.png',
+          provider: 'replicate',
+          usageId: 'usage-pending',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    fireEvent.click(screen.getByText('Generate'));
+
+    await waitFor(() => expect(mockAddJob).toHaveBeenCalledTimes(1));
+    expect(mockAddJob.mock.calls[0][0].resultUrl).toBeUndefined();
+
+    fetchMock.mockRestore();
+  });
+  it.each(['unavailable', 'unsupported'])('warns when requested removal is %s and persists the outcome', async (backgroundRemoval) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ jobId: 'sprite-fallback', status: 'completed', resultUrl: 'https://example.com/original.png', provider: 'dalle3', backgroundRemoval })));
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    fireEvent.click(screen.getByText('Generate'));
+    await waitFor(() => expect(mockAddJob).toHaveBeenCalledTimes(1));
+    expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({ metadata: { backgroundRemoval } }));
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/background/));
+    fetchMock.mockRestore();
+  });
+
+  it('does not treat a malformed completed result as an inline artifact', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ jobId: 'sprite-malformed', status: 'completed', resultUrl: 123, provider: 'dalle3' })));
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    fireEvent.click(screen.getByText('Generate'));
+    await waitFor(() => expect(mockAddJob).toHaveBeenCalledTimes(1));
+    expect(mockAddJob.mock.calls[0][0].resultUrl).toBeUndefined();
+    fetchMock.mockRestore();
+  });
+
 });

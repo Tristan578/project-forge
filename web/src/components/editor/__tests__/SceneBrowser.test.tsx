@@ -18,6 +18,8 @@ vi.mock('lucide-react', () => ({
   Trash2: (props: Record<string, unknown>) => <span data-testid="trash-icon" {...props} />,
   Copy: (props: Record<string, unknown>) => <span data-testid="copy-icon" {...props} />,
   CheckCircle2: (props: Record<string, unknown>) => <span data-testid="check-icon" {...props} />,
+  Save: (props: Record<string, unknown>) => <span data-testid="save-icon" {...props} />,
+  RotateCcw: (props: Record<string, unknown>) => <span data-testid="restore-icon" {...props} />,
 }));
 
 // PF-1100: switching and duplicating now read the live scene back out of the
@@ -27,11 +29,17 @@ const mockSwitchScene = vi.fn(async () => {});
 const mockCreateNewScene = vi.fn();
 const mockDeleteScene = vi.fn();
 const mockDuplicateScene = vi.fn(async () => {});
+// scene.FR-3.OP-02 checkpoint actions.
+const mockCreateCheckpoint = vi.fn(async () => ({ id: 'ckpt_1', label: 'cp', createdAt: 't', snapshot: {} }));
+const mockListCheckpoints = vi.fn(() => [] as Array<{ id: string; label: string; createdAt: string; snapshot: unknown }>);
+const mockRestoreCheckpoint = vi.fn(async () => true);
+const mockDeleteCheckpoint = vi.fn(() => []);
 
 function buildState(overrides: {
   scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
   activeSceneId?: string | null;
   nodeCount?: number;
+  checkpointError?: string | null;
 }) {
   const nodes: Record<string, { entityId: string; name: string; parentId: null; children: string[]; components: string[]; visible: boolean }> = {};
   for (let i = 0; i < (overrides.nodeCount ?? 0); i++) {
@@ -39,12 +47,17 @@ function buildState(overrides: {
   }
   return {
     scenes: overrides.scenes ?? [],
+    checkpointError: overrides.checkpointError ?? null,
     activeSceneId: overrides.activeSceneId ?? null,
     sceneGraph: { nodes, rootIds: Object.keys(nodes) },
     switchScene: mockSwitchScene,
     createNewScene: mockCreateNewScene,
     deleteScene: mockDeleteScene,
     duplicateScene: mockDuplicateScene,
+    createCheckpoint: mockCreateCheckpoint,
+    listCheckpoints: mockListCheckpoints,
+    restoreCheckpoint: mockRestoreCheckpoint,
+    deleteCheckpoint: mockDeleteCheckpoint,
   };
 }
 
@@ -61,6 +74,8 @@ describe('SceneBrowser', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRestoreCheckpoint.mockReset().mockResolvedValue(true);
+    mockListCheckpoints.mockReturnValue([]);
     setupStore();
   });
 
@@ -203,5 +218,117 @@ describe('SceneBrowser', () => {
     const dialog = screen.getByRole('dialog');
     fireEvent.click(dialog);
     expect(mockOnClose).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Recovery checkpoints — scene.FR-3.OP-02 (manual controls)
+  // -------------------------------------------------------------------------
+
+  it('reads the checkpoint list from storage when opened', () => {
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    expect(mockListCheckpoints).toHaveBeenCalled();
+    expect(screen.getByText(/No checkpoints yet/i)).toBeTruthy();
+  });
+
+  it('calls createCheckpoint when Save checkpoint is clicked', async () => {
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Save checkpoint'));
+    });
+    expect(mockCreateCheckpoint).toHaveBeenCalled();
+    // The list is re-read after creating so the new checkpoint appears.
+    expect(mockListCheckpoints.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('restores a checkpoint after confirmation', async () => {
+    mockListCheckpoints.mockReturnValue([
+      { id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} },
+    ]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Restore pre-change'));
+    expect(screen.getByLabelText('Confirm restore pre-change')).toHaveAccessibleDescription(
+      'Restoring this checkpoint replaces all scenes in the current project and discards newer unsaved work. Save a new checkpoint first if you want to keep your current work.'
+    );
+    expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
+    // A confirm step guards the destructive restore.
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    });
+    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('shows an actionable error when checkpoint restore fails', async () => {
+    mockRestoreCheckpoint.mockResolvedValueOnce(false);
+    mockListCheckpoints.mockReturnValue([{ id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} }]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Restore pre-change'));
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('previous save is intact');
+    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('wraps a long unbroken token in the checkpoint error instead of overflowing the dialog', () => {
+    // #10267: the checkpoint error can carry the engine's refusal text (bounded
+    // upstream to ~490 characters), which may quote a scene value with no
+    // spaces. jsdom has no layout, so this pins what makes wrapping possible
+    // inside the fixed-width dialog: the alert wraps anywhere a word cannot
+    // (`break-words`). Its parent is a flex COLUMN, so the alert is stretched
+    // to the dialog's width on the cross axis and needs no `min-w-0`; if the
+    // parent ever becomes a row, that assumption breaks and this test says so.
+    const token = 'A'.repeat(500);
+    setupStore({ checkpointError: `The engine refused this scene: ${token} No checkpoint was saved.` });
+
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(token);
+    expect(alert.classList.contains('break-words')).toBe(true);
+    expect(alert.parentElement?.classList.contains('flex-col')).toBe(true);
+  });
+
+  it('keeps recovery controls busy until the async engine confirmation finishes', async () => {
+    let finish!: (success: boolean) => void;
+    mockRestoreCheckpoint.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    mockListCheckpoints.mockReturnValue([{ id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} }]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Restore pre-change'));
+    fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    expect(screen.getByLabelText('Save checkpoint')).toBeDisabled();
+    expect(screen.getByLabelText('Add new scene')).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting');
+    await act(async () => finish(true));
+    expect(screen.getByLabelText('Save checkpoint')).not.toBeDisabled();
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('deletes a checkpoint after confirmation', () => {
+    mockListCheckpoints.mockReturnValue([
+      { id: 'cp1', label: 'scratch', createdAt: 't', snapshot: {} },
+    ]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Delete checkpoint scratch'));
+    // A confirm step guards the irreversible checkpoint delete, matching scene
+    // delete and checkpoint restore. The first click only arms the gate.
+    expect(mockDeleteCheckpoint).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('Confirm delete checkpoint scratch'));
+    expect(mockDeleteCheckpoint).toHaveBeenCalledWith('cp1');
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('does not delete a checkpoint when the confirm is cancelled', () => {
+    mockListCheckpoints.mockReturnValue([
+      { id: 'cp1', label: 'scratch', createdAt: 't', snapshot: {} },
+    ]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Delete checkpoint scratch'));
+    fireEvent.click(screen.getByLabelText('Cancel delete checkpoint'));
+    expect(mockDeleteCheckpoint).not.toHaveBeenCalled();
+    // The delete control is back, so the safety net is still reachable.
+    expect(screen.getByLabelText('Delete checkpoint scratch')).toBeInTheDocument();
+    mockListCheckpoints.mockReturnValue([]);
   });
 });

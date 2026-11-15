@@ -7,11 +7,45 @@
 
 import type {
   EnvironmentData,
-  InputBinding,
   AudioBusDef,
   LightData,
   AssetMetadata,
 } from '@/stores/slices/types';
+
+/**
+ * One input source as the ENGINE serialises it: `InputSource` is
+ * `#[serde(tag = "type", content = "value")]`, so a bare `'ArrowLeft'` is not a
+ * source and serde will reject it.
+ */
+export type EngineInputSource =
+  | { type: 'Key'; value: string }
+  | { type: 'MouseButton'; value: string };
+
+/**
+ * One action as the ENGINE deserialises it — `core/input.rs`'s `ActionDef`,
+ * `#[serde(rename_all = "camelCase")]`, with `ActionType` as a `tag = "type"`
+ * enum.
+ *
+ * NOT the same thing as `InputBinding` in `stores/slices/types.ts`, which is
+ * the EDITOR STORE's shape (`actionName`, `actionType: 'digital'`,
+ * `sources: string[]`). `audioEvents.ts` converts engine -> store when the
+ * engine reports bindings back. A template writes engine JSON, so it needs
+ * this one.
+ *
+ * This field used to be typed `Record<string, InputBinding | unknown>`, which
+ * is just `Record<string, unknown>` — the union with `unknown` swallowed the
+ * constraint, so both shapes typechecked and a template written in the store's
+ * spelling produced JSON `load_scene` silently dropped.
+ */
+export interface EngineActionDef {
+  name: string;
+  actionType:
+    | { type: 'Digital' }
+    | { type: 'Axis'; positive: EngineInputSource[]; negative: EngineInputSource[] };
+  /** Sources for Digital actions (ignored for Axis). */
+  sources?: EngineInputSource[];
+  deadZone?: number;
+}
 
 // Game template metadata and data
 export interface GameTemplate {
@@ -29,8 +63,14 @@ export interface GameTemplate {
   // Scripts keyed by entityId
   scripts: Record<string, { source: string; enabled: boolean }>;
 
-  // Input preset to apply (fps | platformer | topdown | racing)
-  inputPreset?: string;
+  // NO INPUT PRESET. A template used to name a genre here and `loadTemplate`
+  // applied it, replacing the scene's action map with that genre's handful of
+  // bindings — so shipped content could only speak one of four vocabularies,
+  // and a two-player game had no way to give its second player a key (#9764).
+  //
+  // Every scene starts with a complete set of actions, and a template that
+  // wants one of its own declares it in `sceneData.inputBindings`, which is
+  // carried through to the scene. See `2d-fighter` for a template that does.
 }
 
 export interface TemplateThumbnail {
@@ -45,8 +85,8 @@ export interface SceneFileData {
   metadata: { name: string; createdAt: string; modifiedAt: string };
   environment: Partial<EnvironmentData>;
   ambientLight: { color: [number, number, number]; brightness: number };
-  /** Keyed by action name. Typed as record of InputBinding when fully specified. */
-  inputBindings: Record<string, InputBinding | unknown>;
+  /** Keyed by action name; the value's own `name` must match the key. */
+  inputBindings: Record<string, EngineActionDef>;
   assets?: Record<string, AssetMetadata>;
   /** Post-processing settings. Legacy template format uses flat keys; store format uses PostProcessingData. */
   postProcessing?: Record<string, unknown>;

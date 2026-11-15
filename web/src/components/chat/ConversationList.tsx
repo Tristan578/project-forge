@@ -42,6 +42,7 @@ export function ConversationList() {
   }, [isOpen, handleClickOutside]);
 
   const activeConv = conversations.find((c) => c.id === activeConversationId);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank conversation name is unset; falls back to a display placeholder
   const displayName = activeConv?.name || 'New Chat';
 
   const handleStartRename = useCallback((id: string, currentName: string) => {

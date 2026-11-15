@@ -262,7 +262,20 @@ export const creditTransactions = pgTable(
   ]
 );
 
-export const publishStatusEnum = pgEnum('publish_status', ['published', 'unpublished', 'processing']);
+// 'flagged' = hidden pending moderation review after viewer reports crossed
+// REPORT_AUTOHIDE_THRESHOLD. Distinct from 'unpublished' (creator-initiated or
+// admin takedown) so an appeal can restore the game to 'published' (#8354).
+//
+// APPEND ONLY, AND 'flagged' MUST STAY LAST. Production DDL is applied by
+// `npx drizzle-kit push --verbose --force` from THIS FILE on merge to main
+// (.github/workflows/cd.yml), not by replaying web/drizzle/*.sql — those files
+// only build the PGlite test harness. See
+// docs/decisions/2026-08-29-drizzle-push-vs-migrate.md. Push diffs the enum and
+// emits `ALTER TYPE ... ADD VALUE`, which can only append; reordering or
+// inserting a value mid-list makes the diff unrepresentable and the deploy
+// either fails or (worse, with --force) drops and recreates the type, taking
+// published_games.status with it.
+export const publishStatusEnum = pgEnum('publish_status', ['published', 'unpublished', 'processing', 'flagged']);
 
 export const publishedGames = pgTable(
   'published_games',
@@ -275,9 +288,31 @@ export const publishedGames = pgTable(
     description: text('description'),
     status: publishStatusEnum('status').notNull().default('processing'),
     version: integer('version').notNull().default(1),
+    // The game's PLAY-PAGE path (`/play/{clerkId}/{slug}`), despite the name.
+    // Every consumer (publish/list `url`, the community routes' `cdnUrl`,
+    // GameDetailModal's `href`) treats it as the link to the player. Published
+    // games are served through the gated play API, not from a CDN; the object
+    // that IS in storage is `cdnBundleKey` below. Kept under this name because
+    // it is a public API field. docs/decisions/2026-09-23-published-game-hosting.md
     cdnUrl: text('cdn_url'),
+    // Private immutable R2 snapshot; NULL when optional storage is unavailable.
+    cdnBundleKey: text('cdn_bundle_key'),
+    // Publication-time fallback, independent of later editor saves.
+    publishedSceneData: jsonb('published_scene_data'),
     thumbnail: text('thumbnail'),
     playCount: integer('play_count').notNull().default(0),
+    // Distinct reporters SINCE THE LAST MODERATOR REVIEW (one row per reporter
+    // in game_reports, which keeps the full history). Reset to 0 by an admin
+    // approve and by a won appeal, so REPORT_AUTOHIDE_THRESHOLD means the same
+    // thing at every point in a game's life; a monotonic counter would leave a
+    // reviewed game parked one report below the threshold forever (#8354).
+    reportCount: integer('report_count').notNull().default(0),
+    // THE MODERATION HOLD. Set when status flips to 'flagged'; cleared ONLY by
+    // an admin approve or a won appeal. POST /api/publish refuses to republish
+    // any row of the creator's whose flagged_at is non-null, which is why it —
+    // not `status` — is the field every recovery path must clear: an admin
+    // takedown leaves the row 'unpublished' with the hold still on.
+    flaggedAt: timestamp('flagged_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -287,6 +322,45 @@ export const publishedGames = pgTable(
     index('idx_published_games_slug').on(table.slug),
   ]
 );
+
+/**
+ * Reason taxonomy for viewer-initiated game reports (#8354).
+ * Mirrors the `reason` union accepted by POST /api/community/games/[id]/report
+ * and the labels rendered by ReportGameDialog.
+ */
+export const gameReportReasonEnum = pgEnum('game_report_reason', [
+  'sexual_content',
+  'violence',
+  'hate_speech',
+  'copyright',
+  'spam',
+  'other',
+]);
+
+/**
+ * One row per (game, reporter). The unique index is the ON CONFLICT arbiter
+ * that makes a repeat report from the same account a no-op — it is the only
+ * thing stopping a single user from inflating `publishedGames.reportCount`
+ * past REPORT_AUTOHIDE_THRESHOLD by resubmitting.
+ */
+export const gameReports = pgTable(
+  'game_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    reporterId: uuid('reporter_id').notNull().references(() => users.id),
+    reason: gameReportReasonEnum('reason').notNull(),
+    details: text('details'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_game_reports_reporter_game').on(table.gameId, table.reporterId),
+    index('idx_game_reports_game').on(table.gameId),
+  ]
+);
+
+export type GameReport = typeof gameReports.$inferSelect;
+export type NewGameReport = typeof gameReports.$inferInsert;
 
 // --- Community Gallery Tables ---
 
@@ -375,6 +449,9 @@ export const gameForks = pgTable(
   },
   (table) => [
     index('idx_game_forks_original').on(table.originalGameId),
+    // Attribution lookup: "was THIS project created by a fork?" (#7858).
+    // Each fork creates a fresh project row, so the match is effectively unique.
+    index('idx_game_forks_forked_project').on(table.forkedProjectId),
   ]
 );
 
@@ -550,6 +627,35 @@ export const generationJobs = pgTable(
   (table) => [
     index('idx_generation_jobs_user_status').on(table.userId, table.status),
     index('idx_generation_jobs_user_created').on(table.userId, table.createdAt),
+  ]
+);
+
+// --- Provider Job Ownership (#10262) ---
+//
+// Binds a provider job id to the user whose request produced it. Written by
+// `createGenerationHandler` right after the provider returns the job id and
+// BEFORE the response reaches the client (see `lib/generate/jobOwnership.ts`).
+// Every `/api/generate/<type>/status` route that resolves a provider key (all
+// but `music/status`, which resolves none) gets the PLATFORM key by default,
+// so without this table any signed-in caller could poll ANY job id and read
+// back another user's result. `generation_jobs` cannot serve
+// this purpose on its own: its rows are created by the CLIENT, fire-and-forget,
+// with a client-supplied `providerJobId` — a caller can claim someone else's
+// id, and the row can be missing or late relative to the first poll.
+export const providerJobOwners = pgTable(
+  'provider_job_owners',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    provider: text('provider').notNull(),
+    providerJobId: text('provider_job_id').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // First writer wins: a status route's ownership check keys off this pair,
+    // never off `generation_jobs`, so it cannot be spoofed via that client-owned
+    // table.
+    uniqueIndex('uq_provider_job_owners_provider_job').on(table.provider, table.providerJobId),
   ]
 );
 
@@ -781,8 +887,15 @@ export type SellerProfile = typeof sellerProfiles.$inferSelect;
 export type GenerationJob = typeof generationJobs.$inferSelect;
 export type NewGenerationJob = typeof generationJobs.$inferInsert;
 
+export type ProviderJobOwner = typeof providerJobOwners.$inferSelect;
+export type NewProviderJobOwner = typeof providerJobOwners.$inferInsert;
+
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
-export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';
+// The runtime list `Provider` is derived from, so a query that must cover every
+// provider a row can carry (`findOtherProviderJobOwnerId`, #10262) reads the
+// same set the type admits rather than a second copy of it.
+export const PROVIDERS = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno', 'openai', 'replicate', 'removebg'] as const;
+export type Provider = (typeof PROVIDERS)[number];
 export type { ApiKeyScope } from '@/lib/config/scopes';
 export type AssetCategory = 'model_3d' | 'sprite' | 'texture' | 'audio' | 'script' | 'prefab' | 'template' | 'shader' | 'animation';
 export type AssetStatus = 'draft' | 'pending_review' | 'published' | 'rejected' | 'removed';

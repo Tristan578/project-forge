@@ -2,5 +2,8 @@
 # Vercel's remote build uses the installCommand to set up deps
 engine/target/
 .transform-gizmo-fork/
-web/public/engine-pkg-*
+# The four web/public/engine-pkg-* directories are populated by CD immediately
+# before `vercel deploy`. They are an intentional same-origin fallback and must
+# remain in the deployment manifest; scripts/assert-vercel-engine-manifest.sh
+# fails the deploy when any bundle is absent or empty.
 .git/

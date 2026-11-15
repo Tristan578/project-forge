@@ -91,7 +91,7 @@
           "commentCount": { "type": "integer" },
           "tags": { "type": "array", "items": { "type": "string" } },
           "thumbnail": { "type": "string", "nullable": true },
-          "cdnUrl": { "type": "string", "nullable": true },
+          "cdnUrl": { "type": "string", "nullable": true, "description": "Path to the play page, /play/{clerkId}/{slug}, where clerkId is the creator's Clerk user id (NOT this object's authorId, which is the internal user uuid). Not a CDN origin. See docs/decisions/2026-09-23-published-game-hosting.md.", "example": "/play/user_xxx/my-awesome-game" },
           "createdAt": { "type": "string", "format": "date-time" }
         }
       },
@@ -137,6 +137,106 @@
           "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed"] },
           "estimatedSeconds": { "type": "integer" },
           "usageId": { "type": "string", "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered." }
+        }
+      },
+      "SpriteAsyncGenerationJob": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "provider",
+          "status",
+          "estimatedSeconds",
+          "backgroundRemoval"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "sdxl"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "starting",
+              "processing",
+              "succeeded",
+              "failed",
+              "canceled",
+              "aborted"
+            ]
+          },
+          "estimatedSeconds": {
+            "type": "integer"
+          },
+          "usageId": {
+            "type": "string",
+            "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered."
+          },
+          "durable": { "type": "boolean", "enum": [true], "description": "Present when durable callbacks are configured for this route." },
+          "backgroundRemoval": {
+            "type": "string",
+            "enum": [
+              "not-requested",
+              "unsupported"
+            ]
+          }
+        }
+      },
+      "SpriteSyncGenerationJob": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "provider",
+          "status",
+          "estimatedSeconds",
+          "resultUrl",
+          "backgroundRemoval"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "dalle3"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          },
+          "estimatedSeconds": {
+            "type": "integer"
+          },
+          "usageId": {
+            "type": "string",
+            "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered."
+          },
+          "durable": { "type": "boolean", "enum": [true], "description": "Present when durable callbacks are configured for this route." },
+          "backgroundRemoval": {
+            "type": "string",
+            "enum": [
+              "removed",
+              "not-requested",
+              "unavailable"
+            ]
+          },
+          "resultUrl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4194304,
+            "description": "Completed image URL or base64 PNG data URL. Delivered in the body; never poll the opaque jobId."
+          }
         }
       },
       "GenerationStatus": {
@@ -276,8 +376,25 @@
                         "type": "object",
                         "properties": {
                           "name": { "type": "string" },
-                          "status": { "type": "string", "enum": ["healthy", "degraded", "down"] },
-                          "latencyMs": { "type": "number" }
+                          "status": {
+                            "type": "string",
+                            "enum": ["up", "degraded", "down"],
+                            "description": "Public vocabulary: the internal 'healthy' is emitted as 'up'."
+                          },
+                          "latencyMs": { "type": "number" },
+                          "lastChecked": { "type": "string", "format": "date-time" },
+                          "summary": {
+                            "type": "string",
+                            "description": "Public-safe one-liner saying what is wrong, present only when the probe knows. Emitted values: \"Available only with your own API key: <feature labels>\" (platform generation keys unset — the features still work for callers using their own key), \"AI Chat is unavailable without your own API key\", and \"Payments are unavailable\". Never names a credential or an environment variable, and the raw error is never exposed on this route."
+                          },
+                          "configurationOnly": {
+                            "type": "boolean",
+                            "description": "Present and true when this service is degraded by a deliberate configuration state (e.g. a generation capability with no platform key) rather than by a fault. Such a service does not raise the top-level `overall`, and the synthetic health monitor logs it at warn instead of reporting it to Sentry."
+                          },
+                          "error": {
+                            "type": "string",
+                            "description": "Sanitized to \"<name> is <status>\" on this public route; present only when the probe recorded an error."
+                          }
                         }
                       }
                     }
@@ -842,6 +959,56 @@
         }
       }
     },
+    "/api/creator/stats": {
+      "get": {
+        "tags": ["Publishing"],
+        "summary": "Get creator analytics",
+        "description": "Returns the signed-in creator's published games with their play counts, the number of live games, total plays, and token usage this billing cycle. Always scoped to the session's user; the route takes no user id. Rate limited per user to 30 requests per 5 minutes.",
+        "security": [{ "ClerkSession": [] }],
+        "responses": {
+          "200": {
+            "description": "Creator stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalPublishedGames": { "type": "integer", "description": "Games currently live (status published)" },
+                    "totalPlays": { "type": "integer", "description": "Plays across every game listed, live or not" },
+                    "games": {
+                      "type": "array",
+                      "description": "Most played first",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "format": "uuid" },
+                          "title": { "type": "string" },
+                          "slug": { "type": "string" },
+                          "status": { "type": "string", "enum": ["published", "unpublished", "processing", "flagged"] },
+                          "playCount": { "type": "integer" },
+                          "createdAt": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    },
+                    "tokenUsage": {
+                      "type": "object",
+                      "properties": {
+                        "monthlyUsed": { "type": "integer" },
+                        "monthlyTotal": { "type": "integer" },
+                        "addon": { "type": "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "description": "Rate limit exceeded" },
+          "503": { "description": "Stats are temporarily unavailable" }
+        }
+      }
+    },
     "/api/community/games": {
       "get": {
         "tags": ["Community"],
@@ -949,6 +1116,20 @@
                           "type": "object",
                           "properties": {
                             "status": { "type": "string", "enum": ["published", "unpublished"] },
+                            "forkCount": { "type": "integer", "description": "How many times this game has been forked." },
+                            "forkedFrom": {
+                              "description": "The game this one was forked from. null when it is not a fork; every field null with unavailable=true when the original is no longer public, so a taken-down game is never exposed through its forks.",
+                              "nullable": true,
+                              "type": "object",
+                              "properties": {
+                                "gameId": { "type": "string", "format": "uuid", "nullable": true },
+                                "title": { "type": "string", "nullable": true },
+                                "slug": { "type": "string", "nullable": true },
+                                "authorClerkId": { "type": "string", "nullable": true, "description": "The original creator's Clerk user id — the first segment of that game's own /play/{clerkId}/{slug} URL." },
+                                "authorName": { "type": "string", "nullable": true },
+                                "unavailable": { "type": "boolean", "description": "Present and true only when the original is no longer published." }
+                              }
+                            },
                             "ratingBreakdown": {
                               "type": "array",
                               "items": {
@@ -1741,7 +1922,9 @@
             }
           },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },
@@ -1807,7 +1990,9 @@
             }
           },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },
@@ -1904,7 +2089,7 @@
       "post": {
         "tags": ["Asset Generation"],
         "summary": "Generate background music",
-        "description": "Starts an async music generation job via Suno. Returns a `jobId` to poll at `/api/generate/music/status`.",
+        "description": "Synchronous — returns audio data immediately (no polling required). Uses ElevenLabs `/v1/music` (#9522: replaced Suno). One key, `PLATFORM_ELEVENLABS_KEY`, now serves sfx, voice and music.",
         "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
@@ -1923,7 +2108,21 @@
           }
         },
         "responses": {
-          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "201": {
+            "description": "Generated audio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "audioBase64": { "type": "string", "description": "Base64-encoded MP3 audio data" },
+                    "durationSeconds": { "type": "number" },
+                    "provider": { "type": "string", "example": "elevenlabs" }
+                  }
+                }
+              }
+            }
+          },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "402": { "$ref": "#/components/responses/PaymentRequired" },
           "422": { "description": "Validation error" }
@@ -2002,7 +2201,9 @@
         "responses": {
           "200": { "description": "Job status with equirectangular image URL in resultUrl", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },
@@ -2010,7 +2211,7 @@
       "post": {
         "tags": ["Asset Generation"],
         "summary": "Generate sprite",
-        "description": "Starts a sprite generation job. Provider auto-selects DALL-E 3 for photorealistic styles and Replicate/SDXL for pixel-art. Returns a `jobId` to poll at `/api/generate/sprite/status`.",
+        "description": "Generates a sprite. DALL-E completes synchronously with a body resultUrl and an opaque nonpollable jobId; SDXL returns a prediction jobId to poll. backgroundRemoval reports the outcome.",
         "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
@@ -2035,7 +2236,7 @@
           }
         },
         "responses": {
-          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "201": { "description": "Completed image or pending prediction", "content": { "application/json": { "schema": { "oneOf": [{ "$ref": "#/components/schemas/SpriteAsyncGenerationJob" }, { "$ref": "#/components/schemas/SpriteSyncGenerationJob" }] } } } },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "402": { "$ref": "#/components/responses/PaymentRequired" },
           "422": { "description": "Prompt validation error" }
@@ -2051,7 +2252,9 @@
         "responses": {
           "200": { "description": "Job status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },
@@ -2190,22 +2393,22 @@
       }
     },
     "/api/keys/{provider}": {
-      "parameters": [
-        {
-          "name": "provider",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"]
-          }
-        }
-      ],
       "put": {
         "tags": ["Keys"],
         "summary": "Store or update a BYOK provider key",
-        "description": "Encrypts and stores an API key for the specified provider. Requires hobbyist tier or above.",
+        "description": "Encrypts and stores an API key for the specified provider. Requires hobbyist tier or above. Retired providers (Suno) can no longer be added, so this enum omits them — it mirrors BYOK_PROVIDERS in web/src/lib/config/providers.ts.",
         "security": [{ "ClerkSession": [] }],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs"]
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2244,7 +2447,19 @@
       "delete": {
         "tags": ["Keys"],
         "summary": "Remove a BYOK provider key",
+        "description": "Removes a stored BYOK key. Retired providers (Suno) can no longer be added but a stale stored key must stay removable, so this enum retains them — it mirrors REMOVABLE_BYOK_PROVIDERS in web/src/lib/config/providers.ts.",
         "security": [{ "ClerkSession": [] }],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Key removed",

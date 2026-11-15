@@ -78,6 +78,41 @@
       "when": 1784640476531,
       "tag": "0010_graph_retrieval_nodes_edges",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788300000000,
+      "tag": "0011_publish_status_flagged",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788300001000,
+      "tag": "0012_game_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789473581019,
+      "tag": "0013_published_games_r2_bundle",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790225789405,
+      "tag": "0014_game_forks_forked_project_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1790453678609,
+      "tag": "0015_provider_job_owners",
+      "breakpoints": true
     }
   ]
 }

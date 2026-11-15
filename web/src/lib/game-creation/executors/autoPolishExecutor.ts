@@ -4,7 +4,13 @@ import { makeStepError, successResult, failResult } from './shared';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
 import { resolveCameraEntityId } from '../cameraResolution';
-import { waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
+import {
+  waitForEngineFrame,
+  sendCommands,
+  observeTransformEffect,
+  SPAWN_TRANSFORM_OPERATION,
+  type EngineCommand,
+} from './engineDispatch';
 import { PHYSICS_ROLE_PROFILES } from '../physicsRoles';
 import { COLLIDER_FOR_SHAPE } from '../entityShape';
 import { buildDefaultGroundDescriptor } from '../worldGeometry';
@@ -12,6 +18,21 @@ import { buildDefaultGroundDescriptor } from '../worldGeometry';
 // [B4] diagnoseIssues() requires GameMetrics (avgPlayTime, completionRate, etc.)
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
 // heuristics instead -- checking for common setup problems, not player behavior.
+
+/**
+ * Stable id for the ground plane `auto_polish` spawns to repair a
+ * `no_ground_plane` scene (#9899 review).
+ *
+ * A stable id lets a repeated invocation reuse a positively observed repair
+ * instead of minting a new id and spawning another plane. The spawn-site guard
+ * uses that positive observation; a cache miss cannot establish that an earlier
+ * accepted spawn failed. Scale-confirmation timeouts therefore remain terminal.
+ * The id is reserved for this repair within the active scene, which a fresh run
+ * clears through `newScene`.
+ * Satisfies `engineEntityId` / `is_valid_override_id`: non-empty, <= 64 bytes, no
+ * control characters.
+ */
+export const AUTO_POLISH_GROUND_ENTITY_ID = 'ai.auto-polish.ground';
 
 const inputSchema = z.object({
   projectType: z.enum(['2d', '3d']),
@@ -90,7 +111,7 @@ export const autoPolishExecutor: ExecutorDefinition = {
         //
         // No `followSmoothing` here. It used to send 0.8, read as a 0..1 blend
         // factor — but the engine's `damping` is a RATE PER SECOND
-        // (`let t = (damping * delta).min(1.0)`), so 0.8 is roughly six times
+        // (`t = damping * delta`, clamped to [0, 1]), so 0.8 is roughly six times
         // slower than the default 5.0, and every auto-polished 3D game shipped a
         // sluggish follow camera. Omitting the field is how you ask for the
         // engine default, and it carries no second copy of that number to drift.
@@ -143,16 +164,28 @@ export const autoPolishExecutor: ExecutorDefinition = {
     // `update_transform` below, exactly as `worldBuildExecutor` pays it.
     const groundDescriptor = buildDefaultGroundDescriptor(parsed.data.projectType);
     if (issues.includes('no_ground_plane')) {
-      groundEntityId = crypto.randomUUID();
-      commands.push({
-        command: 'spawn_entity',
-        payload: {
-          id: groundEntityId,
-          entityType: groundDescriptor.entityType,
-          name: groundDescriptor.name,
-          position: groundDescriptor.position,
-        },
-      });
+      // Reuse the repair's reserved id across repeated invocations.
+      groundEntityId = AUTO_POLISH_GROUND_ENTITY_ID;
+
+      // Skip spawning a repair already identified by the observation cache.
+      // Missing cached state does not authorize retrying an uncertain mutation;
+      // the confirmation path below returns a nonretryable failure in that case.
+      // Avoid querying after cancellation; preserve the existing dispatch path.
+      const alreadySpawned =
+        ctx.observeEntity !== undefined && !ctx.signal.aborted
+          ? ctx.observeEntity(groundEntityId) !== undefined
+          : false;
+      if (!alreadySpawned) {
+        commands.push({
+          command: 'spawn_entity',
+          payload: {
+            id: groundEntityId,
+            entityType: groundDescriptor.entityType,
+            name: groundDescriptor.name,
+            position: groundDescriptor.position,
+          },
+        });
+      }
       fixes.push('Added ground plane');
     }
 
@@ -229,6 +262,38 @@ export const autoPolishExecutor: ExecutorDefinition = {
         return failResult(
           makeStepError('ABORTED', 'Executor was aborted mid-repair', this.userFacingErrorMessage),
         );
+      }
+
+      // CONFIRMED path (#9899): the ground's `update_transform` scale above is a
+      // deferred command, and an accepted dispatch is NOT an applied resize — it
+      // lands a frame later inside `apply_pending_transforms`, which drops any
+      // update matching no entity yet. A ground plane still at 1x1x1 gets a
+      // half-metre collider the player falls through everywhere but the origin
+      // (the exact repair this branch exists to make), so when the context can
+      // query the engine, prove the scale reached the engine before building the
+      // collider from it — rather than trusting acceptance plus a frame wait.
+      if (ctx.observeEntity) {
+        const effect = await observeTransformEffect({
+          operationId: SPAWN_TRANSFORM_OPERATION,
+          entityId: groundEntityId,
+          field: 'scale',
+          expected: groundDescriptor.scale,
+          observe: ctx.observeEntity,
+          signal: ctx.signal,
+        });
+        if (effect.status !== 'applied') {
+          return failResult(
+            makeStepError(
+              effect.status === 'cancelled' ? 'ABORTED' : 'EFFECT_TIMED_OUT',
+              effect.status === 'cancelled'
+                ? 'Ground-plane resize cancelled before the engine confirmed it'
+                : `Repaired ground plane was not confirmed at its requested scale (operation ${effect.operationId})`,
+              this.userFacingErrorMessage,
+              false, // Accepted spawns may still apply; replaying would create duplicates.
+              { effect },
+            ),
+          );
+        }
       }
 
       // The `geometry` profile — the one `worldBuildExecutor`'s ground, walls

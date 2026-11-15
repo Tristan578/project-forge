@@ -64,6 +64,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'weekly',
       priority: 1.0,
     },
+    // Rendered from the statically imported data/capability-matrix.json by
+    // app/capability-matrix/page.tsx, not from content/, so the MDX walk below
+    // cannot discover it.
+    {
+      url: `${DOCS_URL}/capability-matrix`,
+      lastModified: now,
+      changeFrequency: 'weekly',
+      priority: 0.8,
+    },
     ...mdxEntries
       .filter((e) => e.path !== '')
       .map((entry) => ({

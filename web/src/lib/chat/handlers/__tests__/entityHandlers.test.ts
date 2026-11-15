@@ -35,6 +35,20 @@ describe('PF-854 regression: despawn_entity not in entityHandlers', () => {
   });
 });
 
+describe('PF-235 prototype-key safety', () => {
+  it.each(['__proto__', 'constructor', 'toString'])('reports %s as a missing entity', async (entityId) => {
+    const inherited = Object.create(null) as Record<string, unknown>;
+    inherited[entityId] = { entityId, name: 'Inherited phantom' };
+    const nodes = Object.create(inherited);
+
+    const { result } = await invokeHandler(entityHandlers, 'get_entity_details', { entityId }, {
+      sceneGraph: { nodes },
+    });
+
+    expect(result).toEqual({ success: false, error: `Entity not found: ${entityId}` });
+  });
+});
+
 // ===========================================================================
 // spawn_entity
 // ===========================================================================
@@ -686,6 +700,53 @@ describe('play', () => {
     });
     expect(result.success).toBe(true);
     expect(store.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('enters play for a sandbox scene with a player but no win condition (#9901)', async () => {
+    // The AI play path must forward sceneGraph.completionMode into
+    // validateWinnability, not just default to 'win'. A sandbox scene with a
+    // valid interaction and NO win condition is intentionally complete: it must
+    // play. Reverting the third argument (or wiring the wrong field) makes this
+    // scene fail with "can't be won" and this test red.
+    const { result, store } = await invokeHandler(entityHandlers, 'play', {}, {
+      engineMode: 'edit',
+      sceneGraph: {
+        nodes: {
+          player: { entityId: 'player', name: 'player', parentId: null, children: [], components: [], visible: true },
+        },
+        rootIds: ['player'],
+        completionMode: 'sandbox',
+      },
+      allGameComponents: {
+        player: [{ type: 'characterController', characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false } }],
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(store.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('still loops back on a malformed win condition even in sandbox mode (#9901)', async () => {
+    // completionMode only exempts the "no win condition" requirement. A win
+    // condition that IS present is validated in every mode, so a sandbox scene
+    // with a broken reachGoal target must still fail — proving the exemption is
+    // not a blanket bypass at this call site.
+    const { result, store } = await invokeHandler(entityHandlers, 'play', {}, {
+      engineMode: 'edit',
+      sceneGraph: {
+        nodes: {
+          player: { entityId: 'player', name: 'player', parentId: null, children: [], components: [], visible: true },
+        },
+        rootIds: ['player'],
+        completionMode: 'sandbox',
+      },
+      allGameComponents: {
+        player: [{ type: 'characterController', characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false } }],
+        wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'ghost' } }],
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("can't be won");
+    expect(store.play).not.toHaveBeenCalled();
   });
 
   it('loops the AI back without entering play when the scene cannot be won', async () => {

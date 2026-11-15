@@ -164,29 +164,45 @@ export function handleAudioEvent(
     }
 
     case 'INPUT_BINDINGS_CHANGED': {
+      type EngineAction = {
+        name: string;
+        actionType: { type: string; positive?: { type: string; value: string }[]; negative?: { type: string; value: string }[] };
+        sources: { type: string; value: string }[];
+        deadZone: number;
+      };
       const payload = castPayload<{
-        actions: Record<string, {
-          name: string;
-          actionType: { type: string; positive?: { type: string; value: string }[]; negative?: { type: string; value: string }[] };
-          sources: { type: string; value: string }[];
-          deadZone: number;
-        }>;
+        actions: Record<string, EngineAction>;
         preset: string | null;
+        // Slots 1+ (physics.FR-1.OP-04). Absent for a single-player scene.
+        players?: Record<string, { actions: Record<string, EngineAction>; preset: string | null }>;
       }>(data);
-      // Convert Rust InputMap format to flat InputBinding array
-      const bindings: InputBinding[] = Object.values(payload.actions).map((action) => {
-        const isAxis = action.actionType.type === 'Axis';
-        return {
-          actionName: action.name,
-          actionType: isAxis ? 'axis' as const : 'digital' as const,
-          sources: action.sources.map((s) => s.value),
-          positiveKeys: isAxis ? (action.actionType.positive ?? []).map((s) => s.value) : undefined,
-          negativeKeys: isAxis ? (action.actionType.negative ?? []).map((s) => s.value) : undefined,
-          deadZone: action.deadZone,
-        };
-      });
+      // Convert one Rust action map to flat InputBindings tagged with a slot.
+      const convert = (actions: Record<string, EngineAction>, player: number): InputBinding[] =>
+        Object.values(actions).map((action) => {
+          const isAxis = action.actionType.type === 'Axis';
+          return {
+            actionName: action.name,
+            actionType: isAxis ? 'axis' as const : 'digital' as const,
+            sources: action.sources.map((s) => s.value),
+            positiveKeys: isAxis ? (action.actionType.positive ?? []).map((s) => s.value) : undefined,
+            negativeKeys: isAxis ? (action.actionType.negative ?? []).map((s) => s.value) : undefined,
+            deadZone: action.deadZone,
+            player,
+          };
+        });
+      // Player 0 (top-level), then every extra slot the engine reported. Each
+      // slot's preset is carried alongside its bindings so player 1+'s
+      // provenance survives to the store like player 0's, rather than being
+      // dropped on the floor.
       const preset = payload.preset as InputPreset;
-      useEditorStore.getState().setInputBindings(bindings, preset);
+      const bindings: InputBinding[] = convert(payload.actions, 0);
+      const presetByPlayer: Record<number, InputPreset> = { 0: preset };
+      for (const [slot, pb] of Object.entries(payload.players ?? {})) {
+        const player = Number(slot);
+        bindings.push(...convert(pb.actions, player));
+        presetByPlayer[player] = pb.preset as InputPreset;
+      }
+      useEditorStore.getState().setInputBindings(bindings, preset, presetByPlayer);
       return true;
     }
 

@@ -3,6 +3,7 @@ import {
   CHAT_BACKEND_ENV_VARS,
   PROVIDER_NAMES,
   BYOK_PROVIDERS,
+  REMOVABLE_BYOK_PROVIDERS,
   BACKEND_IDS,
   PROVIDER_CAPABILITIES,
   DIRECT_CAPABILITY_PROVIDER,
@@ -48,11 +49,29 @@ describe('BYOK_PROVIDERS', () => {
     expect(providers).toContain('meshy');
     expect(providers).toContain('hyper3d');
     expect(providers).toContain('elevenlabs');
-    expect(providers).toContain('suno');
+  });
+
+  it('no longer offers Suno as an addable BYOK provider (#9522)', () => {
+    expect([...BYOK_PROVIDERS]).not.toContain('suno');
   });
 
   it('has no duplicates', () => {
     const providers = [...BYOK_PROVIDERS];
+    expect(providers.length).toBe(new Set(providers).size);
+  });
+});
+
+describe('REMOVABLE_BYOK_PROVIDERS (#9522)', () => {
+  it('keeps retired Suno removable even though it is no longer addable', () => {
+    expect([...REMOVABLE_BYOK_PROVIDERS]).toContain('suno');
+    // Every addable provider is also removable.
+    for (const p of BYOK_PROVIDERS) {
+      expect([...REMOVABLE_BYOK_PROVIDERS]).toContain(p);
+    }
+  });
+
+  it('has no duplicates', () => {
+    const providers = [...REMOVABLE_BYOK_PROVIDERS];
     expect(providers.length).toBe(new Set(providers).size);
   });
 });

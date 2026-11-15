@@ -4,6 +4,7 @@ import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
 import { detectGameCreationIntent } from '@/lib/chat/intentDetector';
 import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
+import { formatToolResultOutput } from '@/lib/chat/toolResultOutput';
 
 /**
  * Confidence at or above which a message is routed to the game-creation
@@ -13,6 +14,40 @@ import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
  * direction, and the reason this can afford to be a plain threshold.
  */
 const GAME_CREATION_CONFIDENCE_THRESHOLD = 0.7;
+
+/**
+ * Every lifecycle state a tool invocation can be in, as ONE runtime list
+ * (PF-950 / #8931). The `status` field below is typed from it, so adding a
+ * state here is the only way to add one — and `ToolCallCard.test.tsx` and
+ * `chatStore.toolStates.test.ts` iterate it, so a new state without a
+ * rendering branch or a wire transition fails a test instead of falling
+ * through a `default`.
+ *
+ * How each state is reached (chunk names are the AI SDK v6 `UIMessageChunk`
+ * types `streamOneTurn` switches on; the fixtures in
+ * `test/utils/streamingTestUtils.ts` are the canonical bytes):
+ *   pending            `tool-input-start`
+ *   success | error    local execution after `finish` drains the buffered
+ *                      `tool-input-available`; or `tool-input-error` /
+ *                      `tool-output-error` from the wire (→ error, errorText)
+ *   preview | rejected the client-only `approvalMode` toggle: held for the
+ *                      user, then approveToolCalls / rejectToolCalls
+ *   undone             the user reverted a successful call
+ *   approval-required  `tool-approval-request` (server gate, PF-8860)
+ *   denied             `tool-output-denied` on the resumed stream
+ */
+export const TOOL_CALL_STATUSES = [
+  'pending',
+  'success',
+  'error',
+  'preview',
+  'rejected',
+  'undone',
+  'approval-required',
+  'denied',
+] as const;
+
+export type ToolCallStatusName = (typeof TOOL_CALL_STATUSES)[number];
 
 export interface ToolCallStatus {
   id: string;
@@ -26,24 +61,27 @@ export interface ToolCallStatus {
    * and the model is never told about it; an `'approval-required'` call is
    * blocked by the SDK server-side and can only be resolved by resuming the
    * turn with an approval-response — which is what `resumeAfterApproval` does.
+   * The full list, with how each state is reached, is `TOOL_CALL_STATUSES`.
    */
-  status:
-    | 'pending'
-    | 'success'
-    | 'error'
-    | 'preview'
-    | 'rejected'
-    | 'undone'
-    | 'approval-required'
-    | 'denied';
+  status: ToolCallStatusName;
   result?: unknown;
-  error?: string;
+  /**
+   * Admits `undefined` DELIBERATELY (#10306): an execution writes its whole
+   * outcome as a unit (`status`, `result`, `error: result.error`), so a
+   * success after an earlier failure clears the stale error rather than
+   * keeping it under a `'success'` status. The bare-spread merges
+   * (`updateToolCall`, the resume's `applyToolCallUpdate`) rely on that.
+   */
+  error?: string | undefined;
   undoable: boolean;
   /**
    * Set when the server blocks this call (and retained after the decision, so
    * the resume history can be rebuilt). The SDK correlates a resume by this id
    * and throws `InvalidToolApprovalError` for one it never issued, so a
    * decision whose call has no `approvalId` is dropped rather than sent.
+   *
+   * Exact on purpose (#10306): the tool-call merges use a bare spread, and
+   * no writer clears an approvalId, so a patch must not be able to erase it.
    */
   approvalId?: string;
   /**
@@ -52,8 +90,13 @@ export interface ToolCallStatus {
    * toolCallId, toolName, input) tuple is the one it signed — the client
    * rebuilds the approval history, so without this a modified client could
    * approve a narrow call and resume with a wider one.
+   *
+   * Admits `undefined` DELIBERATELY (#10306): a new gate writes the
+   * (approvalId, approvalSignature) pair as a unit, so a gate that arrives
+   * without a signature clears the previous one instead of pairing a stale
+   * signature with the new approvalId, which the server would reject.
    */
-  approvalSignature?: string;
+  approvalSignature?: string | undefined;
 }
 
 /** A tool call the server blocked pending the user's explicit approval. */
@@ -63,7 +106,7 @@ export interface ApprovalRequiredTool {
   input: Record<string, unknown>;
   approvalId: string;
   /** See `ToolCallStatus.approvalSignature`. */
-  approvalSignature?: string;
+  approvalSignature?: string | undefined;
 }
 
 /** One user decision on a blocked call, as handed to `resumeAfterApproval`. */
@@ -91,13 +134,13 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  images?: string[];
-  toolCalls?: ToolCallStatus[];
+  images?: string[] | undefined;
+  toolCalls?: ToolCallStatus[] | undefined;
   thinking?: string;
   tokenCost?: number;
   timestamp: number;
   feedback?: 'positive' | 'negative' | null;
-  entityRefs?: Record<string, string>; // @DisplayName → entity ID
+  entityRefs?: Record<string, string> | undefined; // @DisplayName → entity ID
 }
 
 export type ChatModel = typeof AI_MODEL_PRIMARY | typeof AI_MODEL_FAST | typeof AI_MODEL_PREMIUM;
@@ -134,6 +177,12 @@ interface ChatState {
   showEntityPicker: boolean;
   entityPickerFilter: string;
   pendingEntityRefs: Record<string, string>; // @DisplayName → entity ID for current input
+  /**
+   * Text waiting to be placed in the composer (#10172). `ChatInput` adopts a
+   * non-empty draft once, after any text the user already typed, and clears it.
+   * Never sent automatically: the user reviews the token estimate and sends.
+   */
+  composerDraft: string;
   conversations: Conversation[];
   activeConversationId: string | null;
   /** Non-null while a turn is parked on a server-side tool approval (PF-8860). */
@@ -167,6 +216,7 @@ interface ChatState {
   setEntityPickerFilter: (filter: string) => void;
   addEntityRef: (displayName: string, entityId: string) => void;
   clearEntityRefs: () => void;
+  setComposerDraft: (text: string) => void;
   createConversation: (name?: string) => string;
   switchConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
@@ -242,6 +292,7 @@ async function streamOneTurn(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
     throw new Error(errorData.error || `Chat request failed: ${response.status}`);
   }
 
@@ -262,7 +313,7 @@ async function streamOneTurn(
   // are buffered here and resolved once, after the whole turn has streamed.
   const bufferedToolInputs = new Map<string, { name: string; input: Record<string, unknown> }>();
   /** toolCallId → the approval the server issued, signature included. */
-  const gatedApprovalIds = new Map<string, { approvalId: string; signature?: string }>();
+  const gatedApprovalIds = new Map<string, { approvalId: string; signature?: string | undefined }>();
 
   /**
    * Set only by a terminal `finish` chunk. The drain executes NOTHING without
@@ -442,7 +493,7 @@ async function streamOneTurn(
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    buffer = lines.pop() ?? '';
 
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
@@ -465,7 +516,7 @@ async function streamOneTurn(
           break;
 
         case 'reasoning-delta':
-          onUpdate((msg) => ({ ...msg, thinking: (msg.thinking || '') + str(event.delta) }));
+          onUpdate((msg) => ({ ...msg, thinking: (msg.thinking ?? '') + str(event.delta) }));
           break;
 
         case 'tool-input-start': {
@@ -662,9 +713,13 @@ function appendToolTurn(
     // is how a denied destructive action gets narrated as done.
     let output: { type: 'text' | 'error-text'; value: string };
     if (tc.status === 'error') {
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank tool-call error message falls back to a generic one, same as an absent one
       output = { type: 'error-text', value: `Error: ${tc.error || 'Unknown error'}` };
     } else if (tc.status === 'success' || tc.status === 'undone') {
-      output = { type: 'text', value: String(tc.result ?? 'Success') };
+      // Serialised, not `String()`-coerced: most handlers return an object
+      // here, and `String({...})` handed the model "[object Object]" for every
+      // one of them, so query tools returned nothing (#10143).
+      output = { type: 'text', value: formatToolResultOutput(tc.result) };
     } else {
       output = { type: 'error-text', value: `Not executed (status: ${tc.status}).` };
     }
@@ -838,6 +893,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showEntityPicker: false,
   entityPickerFilter: '',
   pendingEntityRefs: {},
+  composerDraft: '',
   conversations: [],
   activeConversationId: null,
   pausedTurnState: null,
@@ -1371,11 +1427,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ pendingEntityRefs: refs });
   },
   clearEntityRefs: () => set({ pendingEntityRefs: {} }),
+  setComposerDraft: (text) => set({ composerDraft: text }),
 
   createConversation: (name?: string) => {
     const { messages, conversations, activeConversationId } = get();
     const now = Date.now();
     const id = `conv_${now}_${Math.random().toString(36).slice(2, 8)}`;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested chat name is unset; falls back to a generated name
     const newName = name || `Chat ${conversations.length + 1}`;
 
     // Save current messages to the active conversation before creating new one
@@ -1536,7 +1594,7 @@ useChatStore.subscribe((state, prevState) => {
 // We keep the latest pending write args and flush them via requestIdleCallback
 // (with a 2 s deadline) or setTimeout(0) as a fallback.
 // ---------------------------------------------------------------------------
-let _pendingSaveArgs: { conversations: Conversation[]; activeId?: string | null } | null = null;
+let _pendingSaveArgs: { conversations: Conversation[]; activeId?: string | null | undefined } | null = null;
 let _saveScheduled = false;
 
 // Per-project save debouncing — coalesces rapid saveConversation() calls so
@@ -1654,8 +1712,13 @@ const MAX_CONTEXT_TOKENS = 150000;
 
 /**
  * Build API messages with context window truncation.
- * Drops oldest messages (preserving tool_use/tool_result pairs) to fit within budget.
- * Inserts a "[Earlier conversation summarized]" marker when messages are dropped.
+ * Drops oldest messages to fit within budget and inserts a
+ * "[Earlier conversation summarized]" marker when messages are dropped.
+ *
+ * The input comes from buildApiMessages, which emits plain text (plus image
+ * blocks for user uploads). tool_use/tool_result turns exist only inside the
+ * per-turn agent loop (appendToolTurn) and never reach this function, so there
+ * are no block pairs to keep together here.
  */
 export function buildTruncatedApiMessages(
   messages: ChatMessage[],
@@ -1677,27 +1740,17 @@ export function buildTruncatedApiMessages(
   // If everything fits, return as-is
   if (totalTokens <= budget) return allApiMessages;
 
-  // Drop oldest messages, but preserve tool_use/tool_result pairs
-  // Always keep the last message (the current user message)
+  // Drop oldest messages from the front until we fit.
+  // Always keep the last message (the current user message).
   let droppedCount = 0;
   let droppedTokens = 0;
-
-  // Drop from the front until we fit (never drop the last message)
   let currentTokens = totalTokens;
   let i = 0;
   while (currentTokens > budget && i < allApiMessages.length - 1) {
-    // If this is a tool_use message, also drop its paired tool_result
-    if (isToolUseMessage(allApiMessages[i]) && i + 1 < allApiMessages.length && isToolResultMessage(allApiMessages[i + 1])) {
-      currentTokens -= tokenCounts[i] + tokenCounts[i + 1];
-      droppedTokens += tokenCounts[i] + tokenCounts[i + 1];
-      droppedCount += 2;
-      i += 2;
-    } else {
-      currentTokens -= tokenCounts[i];
-      droppedTokens += tokenCounts[i];
-      droppedCount += 1;
-      i += 1;
-    }
+    currentTokens -= tokenCounts[i];
+    droppedTokens += tokenCounts[i];
+    droppedCount += 1;
+    i += 1;
   }
 
   if (droppedCount === 0) return allApiMessages;
@@ -1734,16 +1787,4 @@ export function buildTruncatedApiMessages(
 
   // Fallback: just prepend the summary as a user message
   return [{ role: 'user' as const, content: summaryContent }, ...remaining];
-}
-
-function isToolUseMessage(msg: { role: string; content: unknown }): boolean {
-  if (msg.role !== 'assistant') return false;
-  if (!Array.isArray(msg.content)) return false;
-  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_use');
-}
-
-function isToolResultMessage(msg: { role: string; content: unknown }): boolean {
-  if (msg.role !== 'user') return false;
-  if (!Array.isArray(msg.content)) return false;
-  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_result');
 }

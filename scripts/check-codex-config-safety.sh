@@ -7,7 +7,7 @@
 #       approval_policy = "never"   AND   network_access = true
 # That pair lets a Codex agent run shell with no human approval gate while also
 # reaching the network — a silent, high-blast-radius supply-chain footgun. The
-# safe committed profile is approval-gated (e.g. "unless-allow-listed") with the
+# safe committed profile is approval-gated (e.g. "untrusted") with the
 # network off; this guard passes on it and only trips if a permissive profile is
 # committed. (Source: Codex config reference — approval_policy {untrusted,
 # on-request, never}; [sandbox_workspace_write].network_access.)
@@ -93,7 +93,7 @@ if [ "$has_never" -eq 1 ] && [ "$has_network" -eq 1 ]; then
   echo "  This pair lets a Codex agent run shell with no human approval while" >&2
   echo "  reaching the network — it must never be the COMMITTED profile." >&2
   echo "  Remediation: commit an approval-gated profile (e.g." >&2
-  echo "  approval_policy = \"unless-allow-listed\") and/or set network_access = false." >&2
+  echo "  approval_policy = \"untrusted\") and/or set network_access = false." >&2
   echo "  A permissive profile may remain as an UNCOMMITTED local edit." >&2
   exit 1
 fi

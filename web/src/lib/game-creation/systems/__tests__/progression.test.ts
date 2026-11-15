@@ -21,6 +21,7 @@ import { SYSTEM_REGISTRY } from '../index';
 import type { SystemStepContext, SystemStepInput, PlannedEntity } from '../index';
 import { EXECUTOR_REGISTRY } from '../../executors';
 import { gameComponentExecutor } from '../../executors/gameComponentExecutor';
+import { progressionPlansWinCondition } from '../progressionPrecondition';
 import type { ExecutorContext, GameSystem, OrchestratorGDD, EntityBlueprint } from '../../types';
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
 import type { GameComponentData, SceneGraph } from '@/stores/slices/types';
@@ -304,6 +305,21 @@ describe('progression system', () => {
 
     expect(steps).toEqual([]);
     expect(warn).toHaveBeenCalled();
+  });
+
+  it('plans a win condition exactly when the shared precondition says so', () => {
+    // `briefSchema.ts` asks THIS predicate before it reports a goal-free
+    // brief's progression system as COMPLETION_MODE_CONFLICT. Pinning the
+    // planner to it on both sides of the boundary is what keeps the editor's
+    // warning and the build from drifting apart (Devin review of 14f543b6).
+    const nothing: PlannedEntity[] = [];
+    const something = [planned('e1', 'Crate', 'decoration')];
+
+    expect(progressionPlansWinCondition(nothing)).toBe(false);
+    expect(winConditions(run(makeSystem('score'), makeGdd(), makeCtx(nothing)))).toHaveLength(0);
+
+    expect(progressionPlansWinCondition(something)).toBe(true);
+    expect(winConditions(run(makeSystem('score'), makeGdd(), makeCtx(something)))).toHaveLength(1);
   });
 
   // -------------------------------------------------------------------------

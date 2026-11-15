@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useId } from 'react';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { usePerformanceStore } from '@/stores/performanceStore';
 
@@ -9,6 +9,10 @@ interface LodConfig {
 }
 
 export function LodInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const sceneGraph = useEditorStore((state) => state.sceneGraph);
 
@@ -115,8 +119,9 @@ export function LodInspector() {
       {/* LOD Distances */}
       <div className="space-y-3 mb-3">
         <div>
-          <label className="text-xs text-zinc-400 block mb-1">LOD1 Distance</label>
+          <label htmlFor={fieldId('lod1-distance')} className="text-xs text-zinc-400 block mb-1">LOD1 Distance</label>
           <input
+            id={fieldId('lod1-distance')}
             type="range"
             min="5"
             max="200"
@@ -129,8 +134,9 @@ export function LodInspector() {
         </div>
 
         <div>
-          <label className="text-xs text-zinc-400 block mb-1">LOD2 Distance</label>
+          <label htmlFor={fieldId('lod2-distance')} className="text-xs text-zinc-400 block mb-1">LOD2 Distance</label>
           <input
+            id={fieldId('lod2-distance')}
             type="range"
             min="10"
             max="300"
@@ -143,8 +149,9 @@ export function LodInspector() {
         </div>
 
         <div>
-          <label className="text-xs text-zinc-400 block mb-1">LOD3 Distance</label>
+          <label htmlFor={fieldId('lod3-distance')} className="text-xs text-zinc-400 block mb-1">LOD3 Distance</label>
           <input
+            id={fieldId('lod3-distance')}
             type="range"
             min="20"
             max="500"
@@ -160,8 +167,9 @@ export function LodInspector() {
       {/* Triangle Reduction Ratios */}
       <div className="space-y-3 mb-3">
         <div>
-          <label className="text-xs text-zinc-400 block mb-1">LOD1 Quality (50% default)</label>
+          <label htmlFor={fieldId('lod1-quality')} className="text-xs text-zinc-400 block mb-1">LOD1 Quality (50% default)</label>
           <input
+            id={fieldId('lod1-quality')}
             type="range"
             min="0.1"
             max="1"
@@ -174,8 +182,9 @@ export function LodInspector() {
         </div>
 
         <div>
-          <label className="text-xs text-zinc-400 block mb-1">LOD2 Quality (25% default)</label>
+          <label htmlFor={fieldId('lod2-quality')} className="text-xs text-zinc-400 block mb-1">LOD2 Quality (25% default)</label>
           <input
+            id={fieldId('lod2-quality')}
             type="range"
             min="0.1"
             max="1"
@@ -188,8 +197,9 @@ export function LodInspector() {
         </div>
 
         <div>
-          <label className="text-xs text-zinc-400 block mb-1">LOD3 Quality (10% default)</label>
+          <label htmlFor={fieldId('lod3-quality')} className="text-xs text-zinc-400 block mb-1">LOD3 Quality (10% default)</label>
           <input
+            id={fieldId('lod3-quality')}
             type="range"
             min="0.1"
             max="1"
@@ -204,8 +214,9 @@ export function LodInspector() {
 
       {/* Simplification Backend Selector */}
       <div className="mb-3">
-        <label className="text-xs text-zinc-400 block mb-1">Simplification Algorithm</label>
+        <label htmlFor={fieldId('simplification-algorithm')} className="text-xs text-zinc-400 block mb-1">Simplification Algorithm</label>
         <select
+          id={fieldId('simplification-algorithm')}
           value={backend}
           onChange={(e) => {
             const v = e.target.value;

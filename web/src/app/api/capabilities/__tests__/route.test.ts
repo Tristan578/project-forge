@@ -8,6 +8,24 @@ import { NextRequest } from 'next/server';
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CapabilitiesResponse } from '../route';
+import { PLATFORM_KEY_ENV, GATEWAY_KEY_ENV } from '@/lib/config/providers';
+
+// The route is BYOK-aware since #9117: it consults Clerk and the key
+// resolver. These tests cover the anonymous, env-var-only surface, so both
+// are stubbed to "no user"; availability.test.ts covers the BYOK branch.
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/auth/safe-auth', () => ({
+  safeAuth: vi.fn(async () => ({ userId: null })),
+}));
+vi.mock('@/lib/auth/user-service', () => ({
+  getUserByClerkId: vi.fn(async () => null),
+}));
+vi.mock('@/lib/keys/resolver', () => ({
+  listConfiguredProviders: vi.fn(async () => []),
+}));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
 
 describe('GET /api/capabilities', () => {
   let GET: (req: NextRequest) => Promise<Response>;
@@ -17,6 +35,8 @@ describe('GET /api/capabilities', () => {
     vi.resetModules();
     // Clear all provider env vars
     vi.unstubAllEnvs();
+    for (const name of [...Object.values(PLATFORM_KEY_ENV), ...Object.values(GATEWAY_KEY_ENV),
+      'VERCEL', 'VERCEL_ENV']) vi.stubEnv(name, '');
 
     const mod = await import('../route');
     GET = mod.GET;
@@ -76,7 +96,23 @@ describe('GET /api/capabilities', () => {
       const body: CapabilitiesResponse = await res.json();
       for (const cap of body.capabilities) {
         expect(cap.hint).toBeDefined();
-        expect(cap.hint).toContain('Settings');
+        if (cap.unprovisionable) {
+          // No key can help; the hint is the user-facing reason and the
+          // tracking issue rides in its own field (#9117).
+          expect(cap.issue).toBeGreaterThan(0);
+          expect(cap.hint).not.toMatch(/#\d+/);
+          expect(cap.requiredProviders).toBeUndefined();
+          continue;
+        }
+        // Only a capability whose missing key `/api/keys/[provider]` would
+        // accept may be sent to Settings; the rest say who must configure it
+        // instead of pointing at a form that has no field for it (#9725 p8).
+        if (cap.byokConfigurable) {
+          expect(cap.hint).toContain('Settings');
+        } else {
+          expect(cap.hint).not.toContain('Settings');
+          expect(cap.hint).toContain('only this deployment can configure');
+        }
         expect(cap.requiredProviders).toBeDefined();
         expect(cap.requiredProviders!.length).toBeGreaterThan(0);
       }
@@ -121,19 +157,24 @@ describe('GET /api/capabilities', () => {
 
       const sfx = body.capabilities.find((c) => c.capability === 'sfx');
       const voice = body.capabilities.find((c) => c.capability === 'voice');
+      const music = body.capabilities.find((c) => c.capability === 'music');
       expect(sfx?.available).toBe(true);
       expect(voice?.available).toBe(true);
+      // #9522: one ElevenLabs key now serves all three audio capabilities.
+      expect(music?.available).toBe(true);
     });
 
-    it('marks music as available when PLATFORM_SUNO_KEY is set', async () => {
-      vi.stubEnv('PLATFORM_SUNO_KEY', 'suno-test');
+    it('reports music unavailable-but-provisionable when PLATFORM_ELEVENLABS_KEY is absent (#9522)', async () => {
+      // No ElevenLabs key: music (like sfx/voice) is offered-but-unconfigured,
+      // not unprovisionable — Suno's permanent-unavailability flag is gone.
       vi.resetModules();
       const mod = await import('../route');
       const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const music = body.capabilities.find((c) => c.capability === 'music');
-      expect(music?.available).toBe(true);
+      expect(music?.available).toBe(false);
+      expect(music?.unprovisionable).toBeFalsy();
     });
   });
 
@@ -163,7 +204,7 @@ describe('GET /api/capabilities', () => {
       expect(chat?.available).toBe(true);
     });
 
-    it('marks chat and embedding available via GITHUB_MODELS_PAT', async () => {
+    it('marks chat available via GITHUB_MODELS_PAT while embedding requires the gateway', async () => {
       vi.stubEnv('GITHUB_MODELS_PAT', 'ghp-test');
       vi.resetModules();
       const mod = await import('../route');
@@ -173,8 +214,33 @@ describe('GET /api/capabilities', () => {
       const chat = body.capabilities.find((c) => c.capability === 'chat');
       const embedding = body.capabilities.find((c) => c.capability === 'embedding');
       expect(chat?.available).toBe(true);
-      expect(embedding?.available).toBe(true);
+      expect(embedding?.available).toBe(false);
     });
+
+    it.each(['PLATFORM_OPENAI_KEY', 'OPENROUTER_API_KEY', 'GITHUB_MODELS_PAT'])(
+      'image and embedding stay unavailable with only %s configured', async (credential) => {
+        vi.stubEnv(credential, 'direct-or-router-key');
+        const res = await GET(new NextRequest('http://localhost/api/capabilities'));
+        const body: CapabilitiesResponse = await res.json();
+        for (const capability of ['image', 'embedding']) {
+          const entry = body.capabilities.find((c) => c.capability === capability);
+          expect(entry?.available).toBe(false);
+          expect(entry?.hint).toContain('Vercel AI Gateway');
+          expect(entry?.hint).not.toContain('Settings');
+        }
+      },
+    );
+
+    it.each(['AI_GATEWAY_API_KEY', 'VERCEL', 'VERCEL_ENV'])(
+      'image and embedding have credential readiness via %s', async (credential) => {
+        vi.stubEnv(credential, credential === 'VERCEL_ENV' ? 'production' : 'configured');
+        const res = await GET(new NextRequest('http://localhost/api/capabilities'));
+        const body: CapabilitiesResponse = await res.json();
+        for (const capability of ['image', 'embedding']) {
+          expect(body.capabilities.find((c) => c.capability === capability)?.available).toBe(true);
+        }
+      },
+    );
 
     it('model3d is NOT available via gateways (direct only)', async () => {
       vi.stubEnv('OPENROUTER_API_KEY', 'or-test');
@@ -204,8 +270,11 @@ describe('GET /api/capabilities', () => {
       const sfx = body.capabilities.find((c) => c.capability === 'sfx');
       expect(sfx?.hint).toContain('ElevenLabs');
 
+      // #9522: music now points at ElevenLabs like sfx/voice — its hint names
+      // that provider and it carries no unprovisionable tracking issue.
       const music = body.capabilities.find((c) => c.capability === 'music');
-      expect(music?.hint).toContain('Suno');
+      expect(music?.hint).toContain('ElevenLabs');
+      expect(music?.issue).toBeUndefined();
     });
 
     it('does not include hint for available capabilities', async () => {

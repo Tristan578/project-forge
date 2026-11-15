@@ -19,7 +19,6 @@ export const SHMUP_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'shooter', 'shmup', 'arcade'],
 
-  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,
@@ -292,74 +291,89 @@ const SPEED = 5;
 const FIRE_RATE = 0.15;
 let fireTimer = 0;
 
-forge.onUpdate((dt) => {
+function onUpdate(dt) {
   let dx = 0, dy = 0;
-  if (forge.input.isKeyDown('a') || forge.input.isKeyDown('ArrowLeft')) dx = -SPEED * dt;
-  if (forge.input.isKeyDown('d') || forge.input.isKeyDown('ArrowRight')) dx = SPEED * dt;
-  if (forge.input.isKeyDown('w') || forge.input.isKeyDown('ArrowUp')) dy = SPEED * dt;
-  if (forge.input.isKeyDown('s') || forge.input.isKeyDown('ArrowDown')) dy = -SPEED * dt;
+  if (forge.input.isPressed('move_left')) dx = -SPEED * dt;
+  if (forge.input.isPressed('move_right')) dx = SPEED * dt;
+  if (forge.input.isPressed('move_up')) dy = SPEED * dt;
+  if (forge.input.isPressed('move_down')) dy = -SPEED * dt;
 
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newX = Math.max(-6, Math.min(6, pos.x + dx));
-  const newY = Math.max(-7, Math.min(7, pos.y + dy));
-  forge.transform.setPosition(newX, newY, pos.z);
+  const newX = Math.max(-6, Math.min(6, state.position[0] + dx));
+  const newY = Math.max(-7, Math.min(7, state.position[1] + dy));
+  forge.setPosition(entityId, newX, newY, state.position[2]);
 
   fireTimer -= dt;
-  if (forge.input.isKeyDown('Space') && fireTimer <= 0) {
+  // Held, not tapped: action_primary is mouse-left or J.
+  if (forge.input.isPressed('action_primary') && fireTimer <= 0) {
     fireTimer = FIRE_RATE;
     forge.state.set('fireBullet', { x: newX, y: newY + 0.8 });
   }
-});`,
+}`,
       enabled: true,
     },
     bullet_spawner: {
       source: `// Bullet Spawner
+//
+// EVERY BULLET ADVANCES ON THE FRAME TICK. This used to call setInterval and
+// read Date.now(), and the script sandbox shadows both -- so no bullet ever
+// moved, and the interval that was meant to clear itself never ran at all.
+// onUpdate already gives a delta; a list of live bullets is all this needs.
 let bulletId = 0;
+let bullets = [];
 
-forge.onUpdate(() => {
+function onUpdate(dt) {
   const fireData = forge.state.get('fireBullet');
-  if (!fireData) return;
-  forge.state.set('fireBullet', null);
+  if (fireData) {
+    forge.state.set('fireBullet', null);
+    bulletId++;
+    const id = 'bullet_' + bulletId;
+    bullets.push({ id: id, x: fireData.x, y: fireData.y });
+    forge.ui.showText(id, '|', fireData.x * 10 + 50, 95 - (fireData.y + 7) * 5, {
+      fontSize: 12, color: '#00ffff'
+    });
+  }
 
-  bulletId++;
-  forge.ui.showText('bullet_' + bulletId, '|', fireData.x * 10 + 50, 95 - (fireData.y + 7) * 5, {
-    fontSize: 12, color: '#00ffff'
+  const enemies = forge.scene.findByType('Sprite').filter(function (id) {
+    const name = forge.scene.getEntityName(id);
+    return name !== null && name.indexOf('Enemy_') === 0;
   });
 
-  const startTime = Date.now();
-  const interval = setInterval(() => {
-    const elapsed = (Date.now() - startTime) / 1000;
-    const newY = fireData.y + elapsed * 15;
+  const surviving = [];
+  for (const bullet of bullets) {
+    bullet.y += 15 * dt;
 
-    if (newY > 12) {
-      clearInterval(interval);
-      forge.ui.removeText('bullet_' + bulletId);
-      return;
+    if (bullet.y > 12) {
+      forge.ui.removeText(bullet.id);
+      continue;
     }
 
-    forge.ui.updateText('bullet_' + bulletId, '|', fireData.x * 10 + 50, 95 - (newY + 7) * 5);
-
-    const enemies = forge.scene.findByType('Sprite').filter(id =>
-      forge.scene.getEntityName(id)?.startsWith('Enemy_')
-    );
-
+    let hit = false;
     for (const enemy of enemies) {
-      const enemyPos = forge.transform.getPosition(enemy);
-      if (!enemyPos) continue;
-      const dx = fireData.x - enemyPos.x;
-      const dy = newY - enemyPos.y;
+      const enemyState = forge.getTransform(enemy);
+      if (!enemyState) continue;
+      const dx = bullet.x - enemyState.position[0];
+      const dy = bullet.y - enemyState.position[1];
       if (Math.sqrt(dx * dx + dy * dy) < 0.8) {
         forge.setVisibility(enemy, false);
         forge.state.set('enemyKilled', true);
-        clearInterval(interval);
-        forge.ui.removeText('bullet_' + bulletId);
+        hit = true;
         break;
       }
     }
-  }, 16);
-});`,
+
+    if (hit) {
+      forge.ui.removeText(bullet.id);
+      continue;
+    }
+
+    forge.ui.updateText(bullet.id, '|', bullet.x * 10 + 50, 95 - (bullet.y + 7) * 5);
+    surviving.push(bullet);
+  }
+  bullets = surviving;
+}`,
       enabled: true,
     },
     enemy_01: {
@@ -368,19 +382,19 @@ const START_Y = 5;
 const SPEED = 1.0;
 let dir = 1;
 
-forge.onUpdate((dt) => {
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+function onUpdate(dt) {
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newX = pos.x + SPEED * dir * dt;
+  const newX = state.position[0] + SPEED * dir * dt;
   if (newX < -5 || newX > 5) dir *= -1;
 
-  forge.transform.setPosition(newX, pos.y - 0.3 * dt, pos.z);
-
-  if (pos.y < -8) {
-    forge.transform.setPosition(newX, START_Y, pos.z);
+  if (state.position[1] < -8) {
+    forge.setPosition(entityId, newX, START_Y, state.position[2]);
+  } else {
+    forge.setPosition(entityId, newX, state.position[1] - 0.3 * dt, state.position[2]);
   }
-});`,
+}`,
       enabled: true,
     },
     enemy_02: {
@@ -389,36 +403,36 @@ const START_Y = 5;
 const SPEED = 1.2;
 let dir = -1;
 
-forge.onUpdate((dt) => {
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+function onUpdate(dt) {
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newX = pos.x + SPEED * dir * dt;
+  const newX = state.position[0] + SPEED * dir * dt;
   if (newX < -5 || newX > 5) dir *= -1;
 
-  forge.transform.setPosition(newX, pos.y - 0.35 * dt, pos.z);
-
-  if (pos.y < -8) {
-    forge.transform.setPosition(newX, START_Y, pos.z);
+  if (state.position[1] < -8) {
+    forge.setPosition(entityId, newX, START_Y, state.position[2]);
+  } else {
+    forge.setPosition(entityId, newX, state.position[1] - 0.35 * dt, state.position[2]);
   }
-});`,
+}`,
       enabled: true,
     },
     bg_star_01: {
       source: `// Scrolling Background
 const SPEED = 0.5;
 
-forge.onUpdate((dt) => {
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+function onUpdate(dt) {
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newY = pos.y - SPEED * dt;
+  const newY = state.position[1] - SPEED * dt;
   if (newY < -8) {
-    forge.transform.setPosition(pos.x, 8, pos.z);
+    forge.setPosition(entityId, state.position[0], 8, state.position[2]);
   } else {
-    forge.transform.setPosition(pos.x, newY, pos.z);
+    forge.setPosition(entityId, state.position[0], newY, state.position[2]);
   }
-});`,
+}`,
       enabled: true,
     },
     game_manager: {
@@ -426,48 +440,62 @@ forge.onUpdate((dt) => {
 let score = 0;
 let hp = 3;
 
-forge.onStart(() => {
+let restartTimer = -1;
+
+function onStart() {
   forge.ui.showText('score', 'Score: 0', 5, 5, { fontSize: 20, color: '#00ffff' });
   forge.ui.showText('hp', 'HP: 3', 5, 10, { fontSize: 18, color: '#ff0000' });
-  forge.ui.showText('hint', 'WASD to move, Space to shoot', 5, 92, {
+  forge.ui.showText('hint', 'WASD to move, J or mouse to shoot', 5, 92, {
     fontSize: 14, color: '#aaa'
   });
 
-  const players = forge.scene.findByName('Player');
-  if (players.length === 0) return;
+  // ONE argument, and it reports every 2D collision -- so the player is
+  // identified from the event rather than subscribed to by id.
+  forge.physics2d.onCollisionEnter((event) => {
+    if (forge.scene.getEntityName(event.entityId) !== 'Player') return;
+    const name = event.otherEntityName;
+    if (!name) return;
 
-  forge.physics2d.onCollisionEnter(players[0], (other) => {
-    const name = forge.scene.getEntityName(other);
-    if (name && name.startsWith('Enemy_')) {
+    if (name.indexOf('Enemy_') === 0) {
       hp--;
       forge.ui.updateText('hp', 'HP: ' + hp);
-      forge.setVisibility(other, false);
+      forge.setVisibility(event.otherEntityId, false);
 
       if (hp <= 0) {
         forge.ui.showText('gameover', 'GAME OVER', 35, 45, {
           fontSize: 36, color: '#ff0000'
         });
-        setTimeout(() => forge.scene.restart(), 3000);
+        restartTimer = 3;
       }
     }
-    if (name && name.startsWith('Powerup_')) {
-      const collectible = forge.scene.getComponent(other, 'collectible');
-      if (collectible) {
-        score += collectible.value || 1;
-        forge.ui.updateText('score', 'Score: ' + score);
-        forge.setVisibility(other, false);
-      }
+
+    // The NAME is the contract: a script cannot read an entity's game
+    // components, so the scene names its pickups Powerup_NN and this matches
+    // on that rather than on a component it cannot see.
+    if (name.indexOf('Powerup_') === 0) {
+      score += 1;
+      forge.ui.updateText('score', 'Score: ' + score);
+      forge.setVisibility(event.otherEntityId, false);
     }
   });
-});
+}
 
-forge.onUpdate(() => {
+function onUpdate(dt) {
+  // A countdown, not setTimeout: the sandbox shadows the timer globals.
+  if (restartTimer > 0) {
+    restartTimer -= dt;
+    if (restartTimer <= 0) {
+      restartTimer = -1;
+      forge.scene.restart();
+    }
+  }
+
   if (forge.state.get('enemyKilled')) {
     forge.state.set('enemyKilled', false);
     score += 10;
     forge.ui.updateText('score', 'Score: ' + score);
   }
-});`,
+}`,
       enabled: true,
     },
   },

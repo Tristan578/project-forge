@@ -277,6 +277,33 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
   gcTargetScore: 'The score needed to win the game',
   gcGoalId: 'The ID of the object the player must reach to win',
 
+  // ── Game Camera ──
+  // Every `term` the GameCameraInspector references. The panel rendered a (?)
+  // for each of these and `InfoTooltip` returned null for all of them, so
+  // twelve controls shipped with no help at all; a test now scans the panel's
+  // source for `term="…"` and fails on any key missing here.
+  gameCameraActive: 'Makes this the camera the game looks through — only one camera can be active at a time',
+  gameCameraMode: 'How the camera frames the action — behind the player, first-person, side-on, top-down, fixed, or orbiting',
+  // Nothing substitutes the editor selection for a blank target: the engine
+  // resolves a missing target to none and skips every arm that reads it, so
+  // the camera keeps its mode and never moves. Only Fixed works without one.
+  // "Tracks", not "follows": First Person and Orbital use the target too but
+  // do not ease toward it, and the guide reserves "follow" for the three
+  // modes with Smoothing (docs/features/game-cameras.md).
+  gameCameraTarget: 'The ID of the object the camera tracks — every mode except Fixed needs one and will not move without it',
+  gameCameraFollowDist: 'How far behind the target the camera sits',
+  gameCameraFollowHeight: 'How high above the target the camera floats — a negative value looks up from below',
+  gameCameraSmoothing: 'How fast the camera catches up to its target, per second — higher is snappier, lower is floatier, 0 freezes it',
+  // Measured from the target's origin: `update_first_person` (game_camera.rs)
+  // adds it to the target's translation. A default capsule is centred on its
+  // origin, so 1.7 puts the eye about 2.45 above the capsule's base.
+  gameCameraFPHeight: 'Eye height above the target\'s origin — its pivot, which is the centre of a default capsule, not its feet. The engine default is 1.7',
+  gameCameraMouseSens: 'How far the view turns per pixel of mouse movement, in degrees — small values like 0.1 feel normal',
+  gameCameraSideScrollDist: 'How far back from the action the camera sits along the depth axis',
+  gameCameraTopDownHeight: 'How high above the target the camera hovers',
+  gameCameraOrbitalDist: 'How far from the target the camera circles',
+  gameCameraAutoRotate: 'How fast the camera circles on its own, in degrees per second — 0 stops it, a negative value circles the other way',
+
   // ── Script ──
   script: 'Custom code that runs on this object during gameplay',
   scriptEnabled: 'Whether this script is active during play mode',

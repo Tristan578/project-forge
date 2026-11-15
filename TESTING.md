@@ -2,7 +2,7 @@
 
 Manual verification checklist for user-facing features. Run these after major changes to ensure end-to-end functionality.
 
-> **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 400 MCP tests (`cd mcp-server && npx vitest run`)
+> **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 520+ MCP tests (`cd mcp-server && npx tsc --noEmit && npx vitest run`)
 >
 > **Vitest pool:** The standalone `vitest.config.ts` uses `pool: 'threads'`. All test files must use `vi.stubEnv()` / `vi.unstubAllEnvs()` for env var mutations — do NOT mutate `process.env` directly, as threads share the same process object. The `vitest.config.jsdom.ts` workspace config still uses `pool: 'forks'` for jsdom compatibility.
 
@@ -81,6 +81,17 @@ Manual verification checklist for user-facing features. Run these after major ch
 - [ ] Use fill tool → verify flood fill works
 - [ ] Add second layer → paint on layer 2 → verify layering
 
+### Tile collision-shape authoring
+
+These checks cover authored metadata. Runtime tilemap colliders remain unimplemented (#9814); shapes must not be presented as affecting gameplay physics. Leave these unchecked until exercised in a running editor.
+
+- [ ] Select a tilemap cell, choose each supported shape, and apply it. Verify queued feedback appears first and Authored shape changes only after the engine confirms the edit.
+- [ ] Undo and redo a shape edit. Reapply an unchanged shape (including None on a legacy layer with no shape array); verify no extra undo entry is created and existing redo remains available.
+- [ ] Save and reopen the scene; verify the authored shapes persist. Enter Play, edit a shape through an editor test-play script, then Stop; verify the pre-Play authored metadata returns.
+- [ ] Try blank, fractional, negative, and out-of-range inspector coordinates; verify Apply is disabled and existing cell data remains unchanged. With the engine unavailable, attempt an authoring action; verify an error is reported and the confirmed mirror remains unchanged.
+- [ ] In an editor test-play script, call `setCollisionShape` with fractional coordinates and verify they are floored before bounds checking. Read the same integer cell on a later update after the engine snapshot arrives; verify the authored shape. A fractional getter coordinate returns null, and unknown shapes or invalid bounds report an error without queuing an edit.
+- [ ] Verify the inspector and scripting reference identify this as authoring only. A shaped tile does not gain a physics collider, and standalone HTML/ZIP exports do not expose these tilemap script methods.
+
 ### 2D Physics
 - [ ] Add 2D physics to sprite → Play → verify gravity
 - [ ] Add 2D joint between sprites → Play → verify constraint
@@ -155,6 +166,29 @@ Manual verification checklist for user-facing features. Run these after major ch
 - [ ] Enter Play mode → verify physics simulation starts
 - [ ] Pause → verify simulation frozen
 - [ ] Stop → verify scene restored to edit state
+
+### Runtime input replay (#9902, #10007)
+Playtest panel → "Runtime replay". Needs a 2D scene with a player (character controller, `move_right` bound to a key), one collectible with `destroy_on_collect`, and the player selected.
+- [ ] Enter Play, click Record, hold the move key for a few seconds, click Stop Recording → Replay becomes enabled.
+- [ ] Click Replay → the progress line reads "Pinning the engine clock…" at once, then "Replaying tick N of M on the pinned clock"; the player moves without any key held; the verdict shows "Replay passed · N ticks · pinned 60 Hz" and both assertions (`qa.FR-1.OP-01`, `qa.FR-1.OP-03`) green.
+- [ ] Replay the same recording twice from a freshly stopped scene → the two end positions agree to within 0.01 world units.
+- [ ] Click Pause during a replay → "Pausing at tick N…" then "Paused at tick N of M; input released"; the game is paused and the player stops; the Resume control is offered. The replay must NOT be cancelled by its own pause.
+- [ ] Click Resume → the key is pressed again, the replay runs to a verdict with the full tick count.
+- [ ] Click Cancel (while paused and while running) → "Replay cancelled after N ticks. Input was released; no verdict was recorded."; the game keeps running; no key stays held (the player does not keep moving).
+- [ ] Click Stop (leave Play) mid-replay → the replay is cancelled immediately with the same message, not two seconds later with an error.
+- [ ] Remove the move binding (Input panel), keep the player and collectible, replay → the verdict is "Replay failed" with `qa.FR-1.OP-01` red; the heuristic AI Playtest rating does not change it.
+- [ ] AI parity: with Play active and the player selected, click Run Playtest → an "AI bot runtime replay" verdict appears under the heuristic report; ask the chat "replay a speedrunner strategy on the player" → the `replay_input_trace` tool card shows the same kind of verdict, and the same request in Edit mode is refused with "Replay requires Play mode…".
+
+### Completion Modes (#9998)
+Leave these unchecked until exercised in a running editor.
+- [ ] Scene Settings → Completion mode: pick each of Win / Endless / Sandbox / Narrative with the keyboard (Tab to the group, arrow keys). Verify the screen reader reads each option's consequence and the status line announces the change.
+- [ ] On a scene with a player and no win condition: Sandbox → Play starts; Win → Play refuses with the NO_WIN_CONDITION message in chat.
+- [ ] Undo / Redo buttons next to the heading step through mode changes, including back to the unsaved legacy default.
+- [ ] Ask the AI "make this a sandbox" → it calls `set_completion_mode`; the picker shows Sandbox. Ask it for an unknown mode → it reports the same error text the store action returns.
+- [ ] Set a mode by hand, then ask the AI to rename or move an entity → the mode is unchanged.
+- [ ] Save (.forge download, and cloud save), reload the tab, reopen the project → the chosen mode is back; Play behaves as before the reload.
+- [ ] Open a `.forge` file saved before this change → the picker shows Win with the "not saved with this scene yet" note; re-download it and verify the file gained no `completionMode` key.
+- [ ] Generate a game from "a sandbox toy where I roll a ball around" → the plan has no invented win condition, verification passes, the picker shows Sandbox.
 
 ### Game Templates
 - [ ] Create new project from Platformer template → verify entities and scripts loaded

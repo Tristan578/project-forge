@@ -21,7 +21,7 @@ SpawnForge is a game engine. Game engines have exponential state spaces — enti
 | Functions | see `web/vitest.config.ts` | 100% | No untested exported functions |
 | Lines | see `web/vitest.config.ts` | 100% | Full line coverage |
 
-Thresholds live in `web/vitest.config.ts` and ratchet upward automatically (coverage-ratchet workflow), with `web/vitest.config.node.ts` kept in lockstep by the same ratchet (PF-996) — read the config for the current values rather than trusting any doc snapshot.
+Aggregate thresholds live only in `web/vitest.config.ts` and ratchet upward automatically. Node and jsdom project configs choose environments; read the root config for enforced values.
 
 **100% coverage does not mean 100% bug-free.** It means every line of code has been proven to execute without crashing. Edge cases, race conditions, and integration failures need additional targeted tests beyond coverage.
 
@@ -36,7 +36,7 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 
 ### Vitest Configuration
 - Workspace split: `web/vitest.config.node.ts` (environment: node — lib, stores, API routes) and `web/vitest.config.jsdom.ts` (environment: jsdom — components, hooks)
-- Standalone `web/vitest.config.ts` is what CI uses for coverage thresholds (workspace configs drop thresholds)
+- Root `web/vitest.config.ts` aggregates Node and jsdom projects and enforces coverage thresholds.
 - Coverage: from the repository root, run `cd web && npm run test:coverage` (bounded, 600s timeout — see `scripts/run-vitest-coverage.sh`) or `cd web && npm run test:coverage:changed` (fast, changed-files only, for local/nightly iteration). The full command enforces coverage thresholds locally; CI runs the same threshold checks in `.github/workflows/quality-gates.yml` (`test-web`).
 - Run specific: `npx vitest run myTestFile`
 
@@ -56,17 +56,21 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 ### Store Slice Tests (most common)
 
 ```typescript
+// web/src/stores/slices/__tests__/sliceTestTemplate.ts:
+//   createSliceStore(sliceCreator) → zustand store; createMockDispatch() → vi.fn dispatcher
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 
 describe('mySlice', () => {
   it('updates data on set action', () => {
-    const store = createSliceStore();
+    const store = createSliceStore(createMySlice);
     store.getState().setMyData('entity-1', { value: 42 });
     expect(store.getState().myDataMap['entity-1']).toEqual({ value: 42 });
   });
 
   it('dispatches command correctly', () => {
-    const { store, dispatch } = createMockDispatch();
+    const dispatch = createMockDispatch();
+    setMyDispatcher(dispatch); // each slice exports set<Name>Dispatcher (see animationSlice.test.ts)
+    const store = createSliceStore(createMySlice);
     store.getState().someAction('entity-1', { value: 42 });
     expect(dispatch).toHaveBeenCalledWith('my_command', {
       entityId: 'entity-1',
@@ -81,7 +85,7 @@ describe('mySlice', () => {
 ```typescript
 describe('myDomainEvents', () => {
   it('handles MY_EVENT by updating store', () => {
-    const store = createSliceStore();
+    const store = createSliceStore(createMySlice);
     const handler = createEventHandler(store);
 
     handler({
@@ -124,7 +128,7 @@ describe('myHandler', () => {
 - **Always use `@/lib/...` alias in `vi.mock()`** — never relative paths from __tests__ dirs
 - **Use `vi.resetModules()` + dynamic import** for script worker tests
 - **Stub `self` with mock `postMessage`** for worker tests
-- **No mocking the database in integration tests** — use real test instances
+- **API route tests mock `@/lib/db/client`** (see `references/mock-patterns.md`); never mock the module under test
 
 ## What to Test (Priority Order)
 
@@ -190,7 +194,7 @@ bash .claude/skills/testing/scripts/check-regression-test.sh <PR_NUMBER>
 - Scans the diff for `.test.ts` / `.test.tsx` files
 - Exits 1 with an actionable error if no test files are found
 
-PRs that fail this check are **blocked** until a regression test is added.
+The validator agent runs this check; it is not a CI gate, so run it yourself before opening a bug-fix PR.
 
 ## Anti-Patterns (Never Do These)
 
@@ -264,10 +268,10 @@ cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 | Suite | Command |
 |-------|---------|
 | `lint` | `cd web && npx eslint --max-warnings 0 .` |
-| `tsc` | `cd web && npx tsc --noEmit` |
+| `tsc` | `cd web && npx tsc --noEmit` (also run in `mcp-server`, `packages/ui` and `apps/docs` when you touch them — CI type-checks all four) |
 | `vitest` | `cd web && npx vitest run` |
 | `playwright` | `cd web && npx playwright test` (requires WASM build) |
-| `mcp` | `cd mcp-server && npx vitest run` |
+| `mcp` | `cd mcp-server && npx tsc --noEmit && npx vitest run` (vitest does not type-check) |
 | `coverage` | `cd web && npm run test:coverage` (bounded, 600s timeout) |
 
 ### Targeted (preferred during development — avoid full suite when only a few files changed)
@@ -292,7 +296,7 @@ Playwright E2E tests require:
    device emulations and need no extra download)
 3. Dev server starts automatically via Playwright's `webServer` config.
 
-## Vitest 4.x API Reference
+## Vitest API Reference
 
 Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX support. Note: Vitest 4 defaults to the forks pool; jest-dom matchers need explicit `expect.extend(matchers)` in vitest.setup.ts.
 
@@ -318,5 +322,5 @@ Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX 
 - Workspace config: `web/vitest.workspace.ts` — splits into two environments:
   - `web/vitest.config.node.ts` (environment: node) — lib, stores, API routes
   - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
-- Standalone config: `web/vitest.config.ts` — used by CI for coverage thresholds (auto-ratcheted, read the config for live values; `vitest.config.node.ts` thresholds are kept in lockstep by the ratchet)
+- Root config: `web/vitest.config.ts` — aggregates projects and is the only auto-ratcheted coverage threshold authority.
 - Coverage report outputs to `web/coverage/`

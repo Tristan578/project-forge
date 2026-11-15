@@ -4,7 +4,8 @@
  * that can be included in AI prompts for modification planning.
  */
 
-import type { SceneGraph, SceneNode, AmbientLightData, EnvironmentData, EngineMode } from '@/stores/slices/types';
+import type { SceneGraph, AmbientLightData, EnvironmentData, EngineMode } from '@/stores/slices/types';
+import { inferEntityType } from '@/lib/chat/handlers/helpers';
 
 /** Lightweight entity representation for AI context. */
 export interface EntitySummary {
@@ -36,19 +37,6 @@ export interface SceneContextStore {
   ambientLight: AmbientLightData;
   environment: Pick<EnvironmentData, 'clearColor' | 'fogEnabled' | 'skyboxPreset'>;
   engineMode: EngineMode;
-}
-
-/**
- * Infer entity type from the SceneNode components list.
- */
-function inferEntityType(node: SceneNode): string {
-  if (node.components.includes('TerrainEnabled')) return 'terrain';
-  if (node.components.includes('PointLight')) return 'point_light';
-  if (node.components.includes('DirectionalLight')) return 'directional_light';
-  if (node.components.includes('SpotLight')) return 'spot_light';
-  if (node.components.includes('SpriteData')) return 'sprite';
-  if (node.components.includes('Mesh3d')) return 'mesh';
-  return 'entity';
 }
 
 /**

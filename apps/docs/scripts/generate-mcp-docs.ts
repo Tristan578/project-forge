@@ -59,10 +59,12 @@ export interface GenerateResult {
    * The manifest itself could not be read or parsed, so NOTHING could be
    * generated. Distinct from the per-command entries in `errors`, which are
    * partial-generation failures the build deliberately tolerates. A fatal
-   * result must fail the build: `apps/docs/lib/commands.ts` reads the same
-   * manifest at request time, and the docs layout is `force-dynamic`, so an
-   * unreadable manifest that slips past the build becomes a 500 for every
-   * visitor to /mcp instead of a red deploy.
+   * result must fail the build: this generator's contract is the MDX under
+   * `content/mcp`, and without the flag an unreadable manifest is a green
+   * build that silently ships zero command pages (the sitemap, the search
+   * index and every per-command URL go with them). The `/mcp` routes are not
+   * at stake here — `apps/docs/lib/commands.ts` imports the manifest
+   * statically, so for them a missing file is already a `next build` failure.
    */
   fatal?: boolean;
 }
@@ -325,10 +327,12 @@ if (isMainModule) {
 
   console.log(`Generated ${result.generatedCount} MCP command pages.`);
 
-  // The manifest was unreadable — this is the build-time gate. Without it the
-  // build goes green with zero pages and the failure resurfaces as a runtime
-  // 500 from `lib/commands.ts` on a `force-dynamic` route, i.e. in front of
-  // readers rather than in front of the deploy.
+  // The manifest was unreadable — this is the generator's build-time gate.
+  // Without it the build goes green having written zero MDX pages, and the
+  // per-command reference disappears from the live site with nothing red
+  // anywhere. (`lib/commands.ts` imports the manifest statically and fails
+  // `next build` on its own if the file is missing; this gate protects the
+  // MDX output, which that import does not cover.)
   if (result.fatal) {
     console.error(
       `Fatal: the MCP commands manifest at ${manifestPath} could not be read. ` +

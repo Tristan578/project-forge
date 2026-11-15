@@ -1,6 +1,7 @@
 // AI channel handler — proxies generation requests to API routes with progress polling.
 
 import type { AsyncHandler } from '../asyncChannelRouter';
+import { getCapabilityUnavailability, type ProviderCapability } from '@/lib/config/providers';
 
 export interface AiChannelDeps {
   fetchJson: (url: string, init?: RequestInit) => Promise<unknown>;
@@ -8,22 +9,42 @@ export interface AiChannelDeps {
 
 const POLL_INTERVAL_MS = 2000;
 
-// Hoisted to module scope to avoid reconstruction on every handler invocation
-const AI_ROUTE_MAP: Record<string, string> = {
-  generateTexture: '/api/generate/texture',
-  generateModel: '/api/generate/model',
-  generateSound: '/api/generate/sound',
-  generateVoice: '/api/generate/voice',
-  generateMusic: '/api/generate/music',
+/**
+ * Every `forge.ai.*` method with the route it posts to AND the capability it
+ * spends, in one table: a method cannot gain a route without declaring its
+ * capability, so the #9117 gate below can never be bypassed by drift.
+ * Every `route` must be a key of `ROUTE_CAPABILITY` with the same capability
+ * (pinned by aiChannel.test.ts) — that table is checked against the routes on
+ * disk, so an entry here cannot point at a route that does not exist.
+ * Hoisted to module scope to avoid reconstruction on every invocation.
+ *
+ * `sync` marks a route that returns the generated asset inline in its POST
+ * response with no provider job id to poll — the ElevenLabs audio capabilities
+ * (sfx, voice, and, since #9522, music). The rest enqueue a job and are polled.
+ */
+export const AI_METHODS: Readonly<Record<string, { route: string; capability: ProviderCapability; sync?: boolean }>> = {
+  generateTexture: { route: '/api/generate/texture', capability: 'texture' },
+  generateModel: { route: '/api/generate/model', capability: 'model3d' },
+  generateSound: { route: '/api/generate/sfx', capability: 'sfx', sync: true },
+  generateVoice: { route: '/api/generate/voice', capability: 'voice', sync: true },
+  generateMusic: { route: '/api/generate/music', capability: 'music', sync: true },
 };
 
 export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
   return async (method: string, args: Record<string, unknown>, reportProgress, signal: AbortSignal) => {
     reportProgress(0, 'Submitting request...');
 
-    const route = AI_ROUTE_MAP[method];
-    if (!route) {
+    const entry = AI_METHODS[method];
+    if (!entry) {
       throw new Error(`Unknown AI method: ${method}`);
+    }
+    const { route, capability } = entry;
+
+    // #9117: a capability declared unavailable in code is refused before the
+    // request leaves the worker, with the same reason the editor shows.
+    const unavailable = getCapabilityUnavailability(capability);
+    if (unavailable) {
+      throw new Error(unavailable.reason);
     }
 
     // Submit generation request
@@ -32,10 +53,25 @@ export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args),
       signal,
-    }) as { jobId?: string; error?: string };
+    }) as { jobId?: string; error?: string; [key: string]: unknown };
+
+    // A route that answered with an error produced no asset, sync or async.
+    if (submitResult.error) {
+      throw new Error(submitResult.error);
+    }
+
+    // Synchronous routes (the ElevenLabs audio capabilities) return the asset
+    // inline with no jobId — there is nothing to poll, so return the payload
+    // directly. Without this, generateMusic/generateSound/generateVoice threw
+    // "Failed to submit generation request" the moment their capability became
+    // available, because the poll-only path below demands a jobId (#9522).
+    if (entry.sync) {
+      reportProgress(100, 'Done');
+      return submitResult;
+    }
 
     if (!submitResult.jobId) {
-      throw new Error(submitResult.error ?? 'Failed to submit generation request');
+      throw new Error('Failed to submit generation request');
     }
 
     // Poll for completion

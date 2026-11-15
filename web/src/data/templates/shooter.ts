@@ -19,7 +19,6 @@ export const SHOOTER_TEMPLATE: GameTemplate = {
   },
   tags: ['3d', 'fps', 'shooter', 'projectile'],
 
-  inputPreset: 'fps',
 
   sceneData: {
     formatVersion: 3,
@@ -441,7 +440,7 @@ function onUpdate(dt) {
 
   // Shooting
   cooldown -= dt;
-  if (forge.input.justPressed("fire") && cooldown <= 0 && ammo > 0) {
+  if (forge.input.justPressed("action_primary") && cooldown <= 0 && ammo > 0) {
     const pos = forge.getTransform(entityId)?.position;
     if (pos) {
       // Spawn projectile forward (negative Z)

@@ -8,6 +8,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { toast } from 'sonner';
+import { captureException } from '@/lib/monitoring/sentry-client';
+vi.mock('sonner', () => ({ toast: { warning: vi.fn() } }));
 import { useGenerationStore, type GenerationJob } from '../generationStore';
 
 // Mock Sentry client so captureException calls are trackable in tests
@@ -50,6 +53,7 @@ describe('generationStore', () => {
     useGenerationStore.setState({
       jobs: {},
       hydrated: false,
+      durableCompletionEnabled: false,
     });
   });
 
@@ -162,6 +166,38 @@ describe('generationStore', () => {
       const state = useGenerationStore.getState();
       expect(state.jobs['client-123'].prompt).toBe('A blue cube');
       expect(state.jobs['client-123'].provider).toBe('meshy');
+    });
+
+    // #10306: GenerationJob's optional fields admit `undefined`, so a patch
+    // that forwards a maybe-undefined value type-checks. The merge must not let
+    // that key erase the stored value.
+    it('does not erase stored fields when a patch carries explicit undefined keys', () => {
+      const { addJob, updateJob } = useGenerationStore.getState();
+      addJob({
+        ...mockJob,
+        dbId: 'db-keep',
+        usageId: 'usage-keep',
+        resultUrl: 'https://example.test/keep.glb',
+        error: 'previous error',
+        metadata: { keep: true },
+      });
+
+      updateJob('client-123', {
+        status: 'processing',
+        dbId: undefined,
+        usageId: undefined,
+        resultUrl: undefined,
+        error: undefined,
+        metadata: undefined,
+      });
+
+      const job = useGenerationStore.getState().jobs['client-123'];
+      expect(job.status).toBe('processing');
+      expect(job.dbId).toBe('db-keep');
+      expect(job.usageId).toBe('usage-keep');
+      expect(job.resultUrl).toBe('https://example.test/keep.glb');
+      expect(job.error).toBe('previous error');
+      expect(job.metadata).toEqual({ keep: true });
     });
   });
 
@@ -573,6 +609,49 @@ describe('generationStore', () => {
       expect(state.hydrated).toBe(true);
     });
 
+    it('marks a webhook-finished terminal row for completion sync and records the durability flag (#8892)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          durableCompletionEnabled: true,
+          jobs: [
+            {
+              id: 'srv-done', providerJobId: 'prov-done', provider: 'meshy', type: 'model',
+              prompt: 'A tower', status: 'completed', progress: 100, imported: false,
+              parameters: { durable: true }, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:01:00Z',
+            },
+            {
+              id: 'srv-failed', providerJobId: 'prov-failed', provider: 'meshy', type: 'model',
+              prompt: 'A moat', status: 'failed', progress: 0, imported: false,
+              parameters: { durable: true }, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:01:00Z',
+            },
+            {
+              id: 'srv-live', providerJobId: 'prov-live', provider: 'meshy', type: 'model',
+              prompt: 'A gate', status: 'processing', progress: 40,
+              parameters: { durable: true }, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:01:00Z',
+            },
+          ],
+        }),
+      } as Response);
+
+      await useGenerationStore.getState().hydrateFromServer();
+
+      const state = useGenerationStore.getState();
+      expect(state.durableCompletionEnabled).toBe(true);
+      // Hydrated already 'downloading' — the state the completion sync puts it
+      // in — so the status indicator never flips completed -> downloading.
+      expect(state.jobs['hydrated_srv-done']).toEqual(expect.objectContaining({ status: 'downloading', needsCompletionSync: true, dbId: 'srv-done' }));
+      expect(state.jobs['hydrated_srv-failed']).toEqual(expect.objectContaining({ status: 'failed', needsCompletionSync: true }));
+      // A live job is polled, not synced: the key is absent, not false.
+      expect(state.jobs['hydrated_srv-live']).not.toHaveProperty('needsCompletionSync');
+    });
+
+    it('leaves durableCompletionEnabled false when the server omits it', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ jobs: [] }) } as Response);
+      await useGenerationStore.getState().hydrateFromServer();
+      expect(useGenerationStore.getState().durableCompletionEnabled).toBe(false);
+    });
+
     it('should set hydrated=true when no active jobs', async () => {
       vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
@@ -694,4 +773,43 @@ describe('generationStore', () => {
       });
     });
   });
+  describe('inline sprite persistence', () => {
+    const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
+    it('persists inline results and removal outcomes in the initial record', () => {
+      useGenerationStore.getState().addJob({ ...mockJob, jobId: 'dalle3-sync:usage-1', type: 'sprite', resultUrl, metadata: { backgroundRemoval: 'removed' } });
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+      expect(body.resultUrl).toBe(resultUrl);
+      expect(body.parameters.metadata).toEqual({ backgroundRemoval: 'removed' });
+    });
+    it.each(['pending', 'processing', 'downloading'])('restores %s synchronous results as pending imports', async (status) => {
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ jobs: [{ id: 'sync-db', providerJobId: 'dalle3-sync:usage-1', provider: 'dalle3', type: 'sprite', prompt: 'hero', status, progress: 0, createdAt: '2026-09-16T00:00:00Z', hasInlineResult: true, parameters: { metadata: { backgroundRemoval: 'removed' } } }] }) } as Response);
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ resultUrl }) } as Response);
+      await useGenerationStore.getState().hydrateFromServer();
+      expect(fetch).toHaveBeenCalledWith('/api/jobs/sync-db');
+      expect(useGenerationStore.getState().jobs['hydrated_sync-db']).toEqual(expect.objectContaining({ status: 'pending', resultUrl, metadata: { backgroundRemoval: 'removed' } }));
+    });
+    it('syncs completion that finishes before creation supplies the database id', async () => {
+      let finish!: (response: Response) => void;
+      vi.mocked(fetch).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+      useGenerationStore.getState().addJob({ ...mockJob, resultUrl });
+      useGenerationStore.getState().updateJob(mockJob.id, { status: 'completed', progress: 100, resultUrl });
+      finish({ ok: true, json: async () => ({ job: { id: 'late-db' } }) } as Response);
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/jobs/late-db', expect.objectContaining({ method: 'PATCH' })));
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual(expect.objectContaining({ status: 'completed', progress: 100, resultUrl, imported: true }));
+    });
+  });
+
+  it('resumes unrelated jobs when one saved inline artifact cannot be restored', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ jobs: [
+      { id: 'missing-image', providerJobId: 'dalle3-sync:missing', type: 'sprite', provider: 'dalle3', status: 'downloading', progress: 100, prompt: 'hero', createdAt: '2026-09-16T00:00:00Z', hasInlineResult: true },
+      { id: 'async', providerJobId: 'sdxl-prediction', type: 'sprite', provider: 'sdxl', status: 'processing', progress: 30, prompt: 'terrain', createdAt: '2026-09-16T00:00:00Z' },
+    ] }) } as Response);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 500 } as Response);
+    await useGenerationStore.getState().hydrateFromServer();
+    expect(useGenerationStore.getState().jobs['hydrated_async']).toEqual(expect.objectContaining({ status: 'processing', jobId: 'sdxl-prediction' }));
+    expect(useGenerationStore.getState().jobs['hydrated_missing-image']).toBeUndefined();
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('Refresh to retry'));
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), { context: 'generationStore.restoreArtifact', dbId: 'missing-image' });
+  });
+
 });

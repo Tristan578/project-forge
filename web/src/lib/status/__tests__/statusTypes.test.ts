@@ -125,6 +125,48 @@ describe('deriveOverallStatus', () => {
   });
 
   // -----------------------------------------------------------------------
+  // configurationOnly — #9727 review
+  // -----------------------------------------------------------------------
+  //
+  // AI Providers reports `degraded` whenever a generation capability has no
+  // platform key, and production has none by deliberate deferral
+  // (docs/guides/platform-keys.md). Left in this derivation that pins
+  // `/api/status`'s `overall` at `partial_outage` forever, which trains every
+  // reader to ignore the field (lesson 13). The service entry keeps saying
+  // `degraded`; only the top-level signal is exempted.
+  describe('configurationOnly degradations', () => {
+    it('does not raise the overall status to partial_outage', () => {
+      const services = [
+        makeEntry('database', 'operational'),
+        { ...makeEntry('ai', 'degraded'), configurationOnly: true },
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('operational');
+    });
+
+    it('leaves an ordinary degradation alongside it still driving partial_outage', () => {
+      const services = [
+        { ...makeEntry('ai', 'degraded'), configurationOnly: true },
+        makeEntry('payments', 'degraded'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('partial_outage');
+    });
+
+    // The marker exempts a degradation, never an outage.
+    it('never suppresses an outage on the same entry', () => {
+      const services = [{ ...makeEntry('ai', 'outage'), configurationOnly: true }];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('partial_outage');
+    });
+
+    it('still reports maintenance when the only other entry is configuration-only', () => {
+      const services = [
+        { ...makeEntry('ai', 'degraded'), configurationOnly: true },
+        makeEntry('payments', 'maintenance'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('maintenance');
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // With criticalServiceIds — PF-740 fix
   // -----------------------------------------------------------------------
   describe('with criticalServiceIds', () => {

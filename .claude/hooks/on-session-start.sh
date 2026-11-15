@@ -2,6 +2,7 @@
 # ============================================================================
 # on-session-start.sh — SessionStart hook (all AI tools)
 # ============================================================================
+# 0. Verify tracked symlinks are real links (scripts/check-symlinks.sh)
 # 1. Verify taskboard is installed
 # 2. Auto-start taskboard if not running
 # 3. Pull remote changes from GitHub Project
@@ -9,7 +10,27 @@
 # 5. Enforce planning-before-development workflow
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091  # dynamic $SCRIPT_DIR path; taskboard-state.sh is linted on its own by the whole-tree glob
 source "$SCRIPT_DIR/taskboard-state.sh"
+
+# ── Step 0: Symlinks ──────────────────────────────────────────────────────
+# Symlinks are required. Skills and references are shared by symlink, and a
+# checkout with core.symlinks=false writes each one as a text file holding its
+# target, so those skills silently do not load. Runs first because Step 1 can
+# exit early. Never changes the exit status: it reports, loudly.
+
+SYMLINK_CHECK="$SCRIPT_DIR/../../scripts/check-symlinks.sh"
+if [ -f "$SYMLINK_CHECK" ]; then
+    SYMLINK_REPORT="$(bash "$SYMLINK_CHECK" 2>&1)" && SYMLINK_OK=1 || SYMLINK_OK=0
+else
+    SYMLINK_REPORT="scripts/check-symlinks.sh is missing, so symlinks were not checked."
+    SYMLINK_OK=0
+fi
+if [ "$SYMLINK_OK" -eq 0 ]; then
+    echo "!! SYMLINKS ARE BROKEN — fix this before other work, and tell the user:"
+    echo "$SYMLINK_REPORT"
+    echo ""
+fi
 
 # ── Step 1: Check taskboard installation ──────────────────────────────────
 
@@ -20,13 +41,13 @@ if ! tb_check_installed; then
 ╠══════════════════════════════════════════════════════════════╣
 ║  The taskboard binary (tcarac/taskboard) is required.        ║
 ║                                                              ║
-║  Install:                                                    ║
-║    go install github.com/tcarac/taskboard@latest             ║
-║                                                              ║
-║  Or download the binary from:                                ║
+║  Install (`go install` does not work for this module):       ║
+║    brew tap tcarac/taskboard && brew install taskboard       ║
+║  Or download a release binary from:                          ║
 ║    https://github.com/tcarac/taskboard/releases              ║
+║  Or build from source: clone it, then `make build`.          ║
 ║                                                              ║
-║  Place it in one of:                                         ║
+║  Place it in one of (or set TASKBOARD_BIN to it):            ║
 ║    - ../taskboard/taskboard[.exe]  (sibling to project-forge)║
 ║    - ~/.local/bin/taskboard                                  ║
 ║    - /usr/local/bin/taskboard                                ║
@@ -54,9 +75,17 @@ if ! tb_api_available; then
 ╠══════════════════════════════════════════════════════════════╣
 ║  Could not auto-start the taskboard server.                  ║
 ║                                                              ║
-║  Start manually (NO --db flag — use OS default):             ║
+║  Start manually through the launcher. It resolves and        ║
+║  passes the shared database path itself; never start the     ║
+║  binary by hand:                                             ║
 ║    cd project-forge                                          ║
-║    taskboard start --port 3010                               ║
+║    node .claude/hooks/taskboard-launch.mjs start             ║
+║                                                              ║
+║  New machine with no taskboard database yet? Run init        ║
+║  once instead (the only command that creates it), then       ║
+║  pull the tickets from GitHub:                               ║
+║    node .claude/hooks/taskboard-launch.mjs init              ║
+║    python3 .claude/hooks/github_project_sync.py pull         ║
 ║                                                              ║
 ║  ALL work MUST be tracked. You CANNOT proceed without it.    ║
 ╚══════════════════════════════════════════════════════════════╝

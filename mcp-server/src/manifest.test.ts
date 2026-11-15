@@ -73,6 +73,7 @@ const EXPECTED_DESTRUCTIVE_COMMANDS = [
   'create_scene_from_description',
   'delete_asset',
   'delete_audio_bus',
+  'delete_checkpoint',
   'delete_cutscene',
   'delete_entities',
   'delete_leaderboard',
@@ -93,6 +94,7 @@ const EXPECTED_DESTRUCTIVE_COMMANDS = [
   'remove_tilemap_layer',
   'remove_ui_widget',
   'resize_tilemap',
+  'restore_checkpoint',
   'set_script',
   'setup_game_from_description',
   'start_from_idea',
@@ -101,6 +103,41 @@ const EXPECTED_DESTRUCTIVE_COMMANDS = [
 ];
 
 describe('command manifest', () => {
+  // Doc-truth (#9293): the README and the setup guide quoted 350, 351 and 322
+  // commands for a manifest of 351. Every "N commands" claim in either doc
+  // must equal the manifest, and the sweep must find at least one claim or it
+  // is vacuous.
+  it('every command count quoted in the docs equals the manifest', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    // Decode file URLs before resolving filesystem paths, including Windows drives.
+    const here = fileURLToPath(new URL('.', import.meta.url));
+    const docs = [resolve(here, '../README.md'), resolve(here, '../../docs/guides/mcp-server-setup.md')];
+    let claims = 0;
+    for (const file of docs) {
+      const text = readFileSync(file, 'utf8');
+      for (const m of text.matchAll(/\b(\d{2,4}) (?:SpawnForge editor )?commands\b/g)) {
+        claims += 1;
+        expect(Number(m[1]), `${file} says "${m[0]}"`).toBe(manifest.commands.length);
+      }
+    }
+    expect(claims).toBeGreaterThan(0);
+  });
+
+  it('converts a file URL to a portable, space-decoded path (fileURLToPath)', async () => {
+    const { fileURLToPath } = await import('node:url');
+
+    // Resolve from this module so the fixture has a drive on Windows.
+    const spaced = fileURLToPath(new URL('./my%20repo/', import.meta.url));
+    expect(spaced).toContain('my repo');
+    expect(spaced).not.toContain('%20');
+
+    const here = fileURLToPath(new URL('.', import.meta.url));
+    expect(here).not.toMatch(/^\/[A-Za-z]:/);
+    expect(here).toMatch(/mcp-server/);
+  });
+
   it('has a version field', () => {
     expect(manifest.version).toBe('1.0');
   });

@@ -29,6 +29,7 @@ type AnyWidget = {
   width: number;
   height: number;
   anchor: string;
+  constraints?: Record<string, unknown> | null;
   visible: boolean;
   interactable: boolean;
   parentWidgetId: null;
@@ -37,7 +38,20 @@ type AnyWidget = {
   config: Record<string, unknown>;
 };
 
-function makeWidget(type: string, configOverrides: Record<string, unknown> = {}): AnyWidget {
+const EMPTY = {
+  offsetX: 0,
+  offsetY: 0,
+  minWidth: null,
+  maxWidth: null,
+  minHeight: null,
+  maxHeight: null,
+} as const;
+
+function makeWidget(
+  type: string,
+  configOverrides: Record<string, unknown> = {},
+  widgetOverrides: Partial<AnyWidget> = {}
+): AnyWidget {
   const baseConfig: Record<string, Record<string, unknown>> = {
     text: { content: 'Hello', binding: null },
     image: { assetId: null, src: null, fit: 'contain', alt: '' },
@@ -74,6 +88,7 @@ function makeWidget(type: string, configOverrides: Record<string, unknown> = {})
     children: [],
     style: {},
     config: { ...(baseConfig[type] ?? {}), ...configOverrides },
+    ...widgetOverrides,
   };
 }
 
@@ -248,6 +263,101 @@ describe('WidgetPropertyPanel', () => {
       expect(interactableCheckbox.checked).toBe(true);
       fireEvent.click(interactableCheckbox);
       expect(mockUpdateWidget).toHaveBeenCalledWith('screen1', 'widget1', { interactable: false });
+    });
+  });
+
+  describe('layout constraints (ui.FR-1.OP-01)', () => {
+    it('renders offset and min/max size controls', () => {
+      setupStore(makeWidget('button'));
+      render(<WidgetPropertyPanel />);
+      expect(screen.getByText('Layout Constraints')).not.toBeNull();
+      expect(screen.getByText('Offset X (px)')).not.toBeNull();
+      expect(screen.getByText('Offset Y (px)')).not.toBeNull();
+      expect(screen.getByText('Min Width (px)')).not.toBeNull();
+      expect(screen.getByText('Max Width (px)')).not.toBeNull();
+      expect(screen.getByText('Min Height (px)')).not.toBeNull();
+      expect(screen.getByText('Max Height (px)')).not.toBeNull();
+    });
+
+    it('persists an Offset X change to the widget constraints', () => {
+      setupStore(makeWidget('button'));
+      render(<WidgetPropertyPanel />);
+      const offsetX = screen.getByText('Offset X (px)').parentElement!.querySelector('input')!;
+      fireEvent.change(offsetX, { target: { value: '16' } });
+      expect(mockUpdateWidget).toHaveBeenCalledWith(
+        'screen1',
+        'widget1',
+        { constraints: expect.objectContaining({ offsetX: 16 }) }
+      );
+    });
+
+    it('persists a Min Width bound and clamps negatives to 0', () => {
+      setupStore(makeWidget('button'));
+      render(<WidgetPropertyPanel />);
+      const minWidth = screen.getByText('Min Width (px)').parentElement!.querySelector('input')!;
+      fireEvent.change(minWidth, { target: { value: '-10' } });
+      expect(mockUpdateWidget).toHaveBeenCalledWith(
+        'screen1',
+        'widget1',
+        { constraints: expect.objectContaining({ minWidth: 0 }) }
+      );
+    });
+
+    it('clears a bound to null when the input is emptied', () => {
+      setupStore(makeWidget('button', {}, { constraints: { ...EMPTY, minWidth: 44 } }));
+      render(<WidgetPropertyPanel />);
+      const minWidth = screen.getByText('Min Width (px)').parentElement!.querySelector('input')!;
+      expect((minWidth as HTMLInputElement).value).toBe('44');
+      fireEvent.change(minWidth, { target: { value: '' } });
+      expect(mockUpdateWidget).toHaveBeenCalledWith(
+        'screen1',
+        'widget1',
+        { constraints: expect.objectContaining({ minWidth: null }) }
+      );
+    });
+
+    it('round-trips existing constraint values into the controls and preserves siblings on edit', () => {
+      setupStore(
+        makeWidget('button', {}, {
+          constraints: { offsetX: 8, offsetY: 12, minWidth: 44, maxWidth: 320, minHeight: 44, maxHeight: null },
+        })
+      );
+      render(<WidgetPropertyPanel />);
+      // Existing values are shown.
+      const offsetX = screen.getByText('Offset X (px)').parentElement!.querySelector('input')!;
+      const maxWidth = screen.getByText('Max Width (px)').parentElement!.querySelector('input')!;
+      expect((offsetX as HTMLInputElement).value).toBe('8');
+      expect((maxWidth as HTMLInputElement).value).toBe('320');
+      // Editing one bound preserves the others (merge, not replace).
+      fireEvent.change(maxWidth, { target: { value: '480' } });
+      expect(mockUpdateWidget).toHaveBeenCalledWith('screen1', 'widget1', {
+        constraints: {
+          offsetX: 8,
+          offsetY: 12,
+          minWidth: 44,
+          maxWidth: 480,
+          minHeight: 44,
+          maxHeight: null,
+        },
+      });
+    });
+
+    it('shows an actionable warning when Min Width exceeds Max Width', () => {
+      setupStore(
+        makeWidget('button', {}, { constraints: { ...EMPTY, minWidth: 300, maxWidth: 100 } })
+      );
+      render(<WidgetPropertyPanel />);
+      const alert = screen.getByRole('alert');
+      expect(alert.textContent).toContain('Min Width');
+      expect(alert.textContent).toContain('exceeds Max Width');
+    });
+
+    it('does not warn for a valid Min/Max pair', () => {
+      setupStore(
+        makeWidget('button', {}, { constraints: { ...EMPTY, minWidth: 44, maxWidth: 300 } })
+      );
+      render(<WidgetPropertyPanel />);
+      expect(screen.queryByRole('alert')).toBeNull();
     });
   });
 

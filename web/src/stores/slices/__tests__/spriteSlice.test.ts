@@ -117,6 +117,34 @@ describe('spriteSlice', () => {
     });
   });
 
+  // #10227: the engine reports its `ProjectType` resource on every processed
+  // request (`PROJECT_TYPE_CHANGED`), including the one `load_scene` queues
+  // from the scene file's `metadata.projectType`. This is the state-only
+  // mirror the event handler writes through, so a reopened or published 2D
+  // project switches the store to 2D without an AI turn.
+  describe('applyProjectTypeFromEngine', () => {
+    it.each(['2d', '3d'] as const)('mirrors %s into the store', (type) => {
+      // Start on the OTHER type, so a no-op mirror cannot pass on the default.
+      store.setState({ projectType: type === '2d' ? '3d' : '2d' });
+      store.getState().applyProjectTypeFromEngine(type);
+      expect(store.getState().projectType).toBe(type);
+    });
+
+    it('never echoes set_project_type back at the engine that just reported it', () => {
+      store.getState().applyProjectTypeFromEngine('2d');
+      store.getState().applyProjectTypeFromEngine('3d');
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('overrides a store that drifted from the engine', () => {
+      // A `setProjectType` dispatched before the engine attached is refused,
+      // leaving the store ahead of the resource. The next load's report wins.
+      store.getState().setProjectType('2d');
+      store.getState().applyProjectTypeFromEngine('3d');
+      expect(store.getState().projectType).toBe('3d');
+    });
+  });
+
   describe('setSpriteData', () => {
     it('should add sprite data and dispatch', () => {
       const data: SpriteData = {
@@ -734,6 +762,100 @@ describe('spriteSlice', () => {
 
         expect(store.getState().tilemaps.entity1).toEqual(data1);
         expect(store.getState().tilemaps.entity2).toEqual(data2);
+      });
+    });
+
+    describe('setTileCollisionShape', () => {
+      const seed = (): TilemapData => ({
+        tilesetAssetId: 'ts',
+        tileSize: [16, 16],
+        mapSize: [4, 1],
+        layers: [{ name: 'Ground', tiles: [null, null, null, null], visible: true, opacity: 1, isCollision: true }],
+        origin: 'TopLeft',
+      });
+
+      it('queues a request and updates the mirror only after an engine event', () => {
+        const previous = seed();
+        store.getState().applyTilemapFromEngine('e1', previous);
+        mockDispatch.mockReturnValue({ success: true });
+
+        expect(store.getState().setTileCollisionShape('e1', 0, 2, 0, 'halfTop')).toBe('queued');
+
+        expect(store.getState().tilemaps.e1).toBe(previous);
+        expect(mockDispatch).toHaveBeenCalledWith('set_tile_collision_shape', {
+          entityId: 'e1', layer: 0, x: 2, y: 0, shape: 'halfTop',
+        });
+        const confirmed: TilemapData = {
+          ...previous,
+          layers: [{ ...previous.layers[0], collisionShapes: ['none', 'none', 'halfTop', 'none'] }],
+        };
+        store.getState().applyTilemapFromEngine('e1', confirmed);
+        expect(store.getState().tilemaps.e1).toBe(confirmed);
+        expect(mockDispatch).toHaveBeenCalledTimes(1);
+      });
+
+      it('preserves metadata when dispatch explicitly rejects the edit', () => {
+        const previous = seed();
+        store.getState().applyTilemapFromEngine('e1', previous);
+        mockDispatch.mockReturnValue({ success: false, error: 'Engine unavailable' });
+
+        expect(() => store.getState().setTileCollisionShape('e1', 0, 2, 0, 'full')).toThrow(/Engine unavailable/);
+        expect(store.getState().tilemaps.e1).toBe(previous);
+      });
+
+      it('treats an undefined dispatch response as success, per the dispatcher contract', () => {
+        // Only an explicit `success: false` is a rejection (editorStore.ts).
+        // `undefined` is what every mock dispatcher, and any dispatcher that
+        // doesn't report per-command status, returns — it must queue, not throw.
+        const previous = seed();
+        store.getState().applyTilemapFromEngine('e1', previous);
+        mockDispatch.mockReturnValue(undefined);
+
+        expect(store.getState().setTileCollisionShape('e1', 0, 2, 0, 'full')).toBe('queued');
+        expect(store.getState().tilemaps.e1).toBe(previous);
+      });
+
+      it('rejects an edit while the engine dispatcher is missing', () => {
+        const previous = seed();
+        store.getState().applyTilemapFromEngine('e1', previous);
+        setSpriteDispatcher(null);
+
+        expect(() => store.getState().setTileCollisionShape('e1', 0, 0, 0, 'full')).toThrow(/engine is not ready/);
+        expect(store.getState().tilemaps.e1).toBe(previous);
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+
+      it('preserves metadata when dispatch throws', () => {
+        const previous = seed();
+        store.getState().applyTilemapFromEngine('e1', previous);
+        mockDispatch.mockImplementation(() => { throw new Error('Engine stopped'); });
+
+        expect(() => store.getState().setTileCollisionShape('e1', 0, 0, 0, 'full')).toThrow('Engine stopped');
+        expect(store.getState().tilemaps.e1).toBe(previous);
+      });
+
+      it('rejects a missing entity or invalid cell without dispatch', () => {
+        store.getState().applyTilemapFromEngine('e1', seed());
+
+        expect(() => store.getState().setTileCollisionShape('missing', 0, 0, 0, 'full')).toThrow(/No tilemap/);
+        expect(() => store.getState().setTileCollisionShape('__proto__', 0, 0, 0, 'full')).toThrow(/No tilemap/);
+        expect(() => store.getState().setTileCollisionShape('e1', 0, 9, 0, 'full')).toThrow(/outside/);
+        expect(store.getState().tilemaps.e1.layers[0].collisionShapes).toBeUndefined();
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+
+      it('does not drop a second queued edit that matches the stale mirror', () => {
+        store.getState().applyTilemapFromEngine('e1', seed());
+        mockDispatch.mockReturnValue({ success: true });
+
+        store.getState().setTileCollisionShape('e1', 0, 0, 0, 'full');
+        store.getState().setTileCollisionShape('e1', 0, 0, 0, 'none');
+
+        expect(mockDispatch.mock.calls).toEqual([
+          ['set_tile_collision_shape', { entityId: 'e1', layer: 0, x: 0, y: 0, shape: 'full' }],
+          ['set_tile_collision_shape', { entityId: 'e1', layer: 0, x: 0, y: 0, shape: 'none' }],
+        ]);
+        expect(store.getState().tilemaps.e1.layers[0].collisionShapes).toBeUndefined();
       });
     });
 

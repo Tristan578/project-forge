@@ -13,10 +13,13 @@
  * deliberately absent below rather than left as stubs that lie about being
  * handled. `__tests__/spriteEvents.test.ts` pins each one as unhandled:
  *   SPRITE_SHEET_UPDATED, SPRITE_ANIMATOR_UPDATED, ANIMATION_STATE_MACHINE_UPDATED,
- *   PROJECT_TYPE_CHANGED, TILEMAP_REMOVED, TILESET_LOADED
- * Sprite sheets, sprite animators, animation state machines, project type and
- * tilesets therefore have no engine→store path at all; that is an engine-side
- * emitter gap, tracked separately from this file.
+ *   TILEMAP_REMOVED, TILESET_LOADED
+ * Sprite sheets, sprite animators, animation state machines and tilesets
+ * therefore have no engine→store path at all; that is an engine-side emitter
+ * gap, tracked separately from this file. `PROJECT_TYPE_CHANGED` left that
+ * list in #10227: `apply_project_type_changes` now emits it for every request
+ * it processes, and the arm below is what lets a reopened 2D project come back
+ * as 2D without an AI turn.
  */
 
 import { useEditorStore } from '@/stores/editorStore';
@@ -25,6 +28,7 @@ import {
   parseCamera2dWire,
   parseTilemapWire,
 } from '@/lib/sprite/sprite2dPayload';
+import { isSceneProjectType } from '@/lib/scenes/sceneProjectType';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 export function handleSpriteEvent(
@@ -60,6 +64,19 @@ export function handleSpriteEvent(
       const camera = parseCamera2dWire(data);
       if (!camera) return true;
       useEditorStore.getState().applyCamera2dFromEngine(camera);
+      return true;
+    }
+
+    // Flat `{ projectType: "2d" | "3d" }` — the project type is a resource, so
+    // there is no entityId. Emitted for every request the engine processes,
+    // including the one `load_scene` queues from `metadata.projectType`
+    // (#10227). A spelling outside the vocabulary is dropped rather than
+    // written: the store's type is a two-member union and every 2D panel
+    // gates on `=== '2d'`.
+    case 'PROJECT_TYPE_CHANGED': {
+      const payload = castPayload<{ projectType: unknown }>(data);
+      if (!isSceneProjectType(payload.projectType)) return true;
+      useEditorStore.getState().applyProjectTypeFromEngine(payload.projectType);
       return true;
     }
 

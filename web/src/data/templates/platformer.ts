@@ -20,7 +20,6 @@ export const PLATFORMER_TEMPLATE: GameTemplate = {
   },
   tags: ['3d', 'platformer', 'physics', 'collectibles'],
 
-  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,

@@ -6,7 +6,7 @@ Conventions for Next.js 16.x (App Router) in `web/src/`.
 
 | File | Purpose |
 |------|---------|
-| `app/layout.tsx` | Root layout — `force-dynamic` export required for CI |
+| `app/layout.tsx` | Root layout (statically renderable — skips `ClerkProvider` when no valid Clerk key) |
 | `app/page.tsx` | Route page (Server Component by default) |
 | `app/error.tsx` | Error boundary for the route segment |
 | `app/loading.tsx` | Suspense skeleton for the route segment |
@@ -33,21 +33,6 @@ Files in `app/` are Server Components unless explicitly marked `'use client'`. P
 app/editor/page.tsx           — Server Component (fetches session, passes data)
   └─ components/editor/EditorLayout.tsx   — 'use client' boundary (needs Zustand)
        └─ components/editor/InspectorPanel.tsx  — 'use client' (uses hooks)
-```
-
-## Server Actions for Mutations
-
-Use Server Actions (not API routes) for form submissions and mutations from Server
-Components:
-
-```ts
-// app/actions/createProject.ts
-'use server';
-import { auth } from '@clerk/nextjs/server';
-export async function createProject(formData: FormData) {
-  const { userId } = await auth();
-  ...
-}
 ```
 
 ## Async Request APIs (Next.js 15+)
@@ -99,14 +84,15 @@ or `../../packages` in page/component files.
 
 Exception: `@spawnforge/ui` is allowed via `transpilePackages` in `next.config.ts`.
 
-## MCP Manifest Dual Location
+## MCP Manifest Locations
 
 ```
 mcp-server/manifest/commands.json   ← source of truth
 web/src/data/commands.json          ← COPY — must be kept in sync
+apps/docs/data/commands.json        ← COPY — must be kept in sync
 ```
 
-When adding or editing commands, update BOTH files. Run `bash .claude/tools/validate-mcp.sh sync`
+When adding or editing commands, update all three files. Run `bash .claude/tools/validate-mcp.sh sync`
 to verify they match.
 
 ## Turbopack vs Webpack
@@ -119,29 +105,31 @@ to verify they match.
 
 Do not add webpack-only plugins that are incompatible with Turbopack.
 
-## Root Layout force-dynamic
-
-`web/src/app/layout.tsx` exports:
-
-```ts
-export const dynamic = 'force-dynamic';
-```
-
-This prevents prerender failures when Clerk keys are absent (CI/E2E environments). Do not
-remove this export.
-
 ## Route Handlers
 
 - File: `app/api/my-route/route.ts`
-- Export named functions: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`
+- Exports are named for the HTTP method: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`
+- **Every exported method must be a `withEgressGuard(...)` call** (#9736). Write the
+  handler as a local function and export the wrapped binding — a bare
+  `export async function GET(...)` sits outside the redaction chokepoint and is named
+  as a failure by `src/app/api/__tests__/egressGuardCoverage.test.ts`
 - No `page.tsx` in the same directory as `route.ts` — they conflict
 - No React DOM available — route handlers run in the Edge/Node runtime
 
 ```ts
 // app/api/example/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export async function GET(_req: NextRequest) {
+async function handleGET(_req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withEgressGuard(handleGET);
 ```
+
+`withEgressGuard` redacts the body, every header value, every `Set-Cookie`, the
+`Location` and the reason phrase before the response is returned, so upstream text
+cannot carry a credential to a client however the response was assembled. The exported
+name has to RESOLVE to the import from `@/lib/security/egressGuard` — a local function
+or alias of the same name is rejected by the coverage test on purpose.

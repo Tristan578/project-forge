@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
-import { engineEntityId, waitForEngineFrame, sendCommands } from './engineDispatch';
+import {
+  engineEntityId,
+  waitForEngineFrame,
+  sendCommands,
+  observeTransformEffect,
+  SPAWN_TRANSFORM_OPERATION,
+} from './engineDispatch';
 import { SPAWNABLE_SHAPES } from '../entityShape';
 
 /**
@@ -109,19 +115,34 @@ export const worldBuildExecutor: ExecutorDefinition = {
     // has no scale field, so sizing always costs a second command — and that
     // second command CANNOT ride in the same frame as the spawn it resizes.
     // See `waitForEngineFrame` in ./engineDispatch for why.
+    // Captured once for the retry guard below; a context wired before #9899 (and
+    // every unit test that supplies none) leaves it undefined and keeps the
+    // legacy spawn-every-time behaviour.
+    const observe = ctx.observeEntity;
+
     const spawnCommands: Array<{ command: string; payload: unknown }> = [];
     const sizeCommands: Array<{ command: string; payload: unknown }> = [];
     for (let i = 0; i < entities.length; i += 1) {
       const entity = entities[i];
-      spawnCommands.push({
-        command: 'spawn_entity',
-        payload: {
-          entityType: entity.entityType,
-          name: entity.name,
-          position: [entity.position[0], entity.position[1], entity.position[2]],
-          id: entity.entityId,
-        },
-      });
+
+      // Reuse an entity positively identified by the observation cache when this
+      // executor is invoked again. The engine accepts duplicate caller-supplied
+      // ids, so an observed entity must not be spawned a second time.
+      // A cache miss cannot prove that an earlier spawn failed: confirmation
+      // timeouts below remain terminal because accepted commands may apply late.
+      // Always queue the absolute scale so an observed entity can be resized.
+      const alreadySpawned = observe ? observe(entity.entityId) !== undefined : false;
+      if (!alreadySpawned) {
+        spawnCommands.push({
+          command: 'spawn_entity',
+          payload: {
+            entityType: entity.entityType,
+            name: entity.name,
+            position: [entity.position[0], entity.position[1], entity.position[2]],
+            id: entity.entityId,
+          },
+        });
+      }
       sizeCommands.push({
         command: 'update_transform',
         payload: {
@@ -161,6 +182,59 @@ export const worldBuildExecutor: ExecutorDefinition = {
       );
     }
 
+    // CONFIRMED path (#9899): each `update_transform` above is a deferred scale,
+    // and an accepted dispatch is NOT an applied transform — `dispatchCommand`
+    // reports only that the engine took the command, while the resize lands a
+    // frame later inside `apply_pending_transforms`, which drops any update
+    // matching no entity yet and never retries it (see `waitForEngineFrame`).
+    // When the context can query the engine, prove every piece of geometry
+    // reached its requested scale by READING the engine's real state, rather
+    // than trusting acceptance plus a frame wait — exactly the transform half of
+    // the contract that spawn confirmation established for existence. A resize
+    // that never lands is a floor with a 1x1x1 collider the player falls
+    // through (PF-1138), so it must fail the step, never report a built world.
+    if (ctx.observeEntity) {
+      const observe = ctx.observeEntity;
+      for (let i = 0; i < entities.length; i += 1) {
+        const entity = entities[i];
+        const effect = await observeTransformEffect({
+          operationId: SPAWN_TRANSFORM_OPERATION,
+          entityId: entity.entityId,
+          field: 'scale',
+          expected: entity.scale,
+          observe,
+          signal: ctx.signal,
+        });
+
+        if (effect.status !== 'applied') {
+          return failResult(
+            makeStepError(
+              effect.status === 'cancelled' ? 'ABORTED' : 'EFFECT_TIMED_OUT',
+              effect.status === 'cancelled'
+                ? 'World geometry resize cancelled before the engine confirmed it'
+                : `World geometry entity ${entity.entityId} was not confirmed at its requested scale `
+                  + `(operation ${effect.operationId})`,
+              this.userFacingErrorMessage,
+              false, // Accepted spawns may still apply; replaying would create duplicates.
+              { effect },
+            ),
+          );
+        }
+      }
+
+      return successResult({
+        spawned: entities.length,
+        worldType: worldType ?? null,
+        confirmed: entities.length,
+        operationId: SPAWN_TRANSFORM_OPERATION,
+      });
+    }
+
+    // LEGACY path: no query capability (every context wired before #9899, and
+    // every unit test that supplies no `observeEntity`). The frame wait between
+    // spawn and size above is the only guard, so the next pipeline step does not
+    // observe an unsized floor merely because rendering is slower than the JS
+    // pipeline.
     return successResult({
       spawned: entities.length,
       worldType: worldType ?? null,

@@ -35,6 +35,8 @@ export interface TextNode extends BaseNode {
 
 export interface ChoiceNode extends BaseNode {
   type: 'choice';
+  // Exact on purpose (#10306): `updateNode` merges with a bare spread, so
+  // admitting `undefined` here would let a patch erase the speaker or prompt.
   speaker?: string;
   text?: string;
   choices: DialogueChoice[];
@@ -700,6 +702,7 @@ export const useDialogueStore = create<DialogueStore>((set, get) => ({
       id: startNodeId,
       type: 'text',
       speaker: 'Narrator',
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank start-node text is unset; falls back to placeholder dialogue text
       text: startNodeText || 'Welcome to the dialogue.',
       next: null,
       position: { x: 100, y: 100 },

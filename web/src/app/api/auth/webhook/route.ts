@@ -2,7 +2,8 @@
  * POST /api/auth/webhook — Clerk webhook handler.
  *
  * Processes user.created, user.updated, and user.deleted events.
- * On user.created/updated, upserts the user row in the database.
+ * On user.created, upserts the user row and grants the one-time trial tokens.
+ * On user.updated, upserts the user row only.
  * On user.deleted, removes user data and cancels any active subscriptions.
  *
  * Signature verification is Clerk's own `verifyWebhook()` (#9629): it reads
@@ -23,6 +24,9 @@ import {
   processRetryQueue,
 } from '@/lib/auth/webhookRetry';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { grantTrialTokens } from '@/lib/billing/trial-grant';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /** Process a verified webhook event. Extracted so it can be used by the retry queue. */
 async function handleWebhookEvent(
@@ -30,8 +34,24 @@ async function handleWebhookEvent(
   data: Record<string, unknown>,
 ): Promise<void> {
   switch (eventType) {
-    case 'user.created':
+    case 'user.created': {
+      const user = await syncUserFromClerk(data as Parameters<typeof syncUserFromClerk>[0]);
+      // The one-time trial grant (#7715) keys on the INTERNAL users.id that
+      // syncUserFromClerk returns, never the raw Clerk id. It is idempotent at
+      // the database (a `trial_grant` audit row is the arbiter), so a Clerk
+      // redelivery or a retry-queue replay of this event grants nothing twice.
+      try {
+        await grantTrialTokens(user.id);
+      } catch (err) {
+        captureException(err, { context: 'trial-token-grant-failure', userId: user.id });
+        // Rethrow so the caller's isTransientError / enqueueRetry path decides.
+        throw err;
+      }
+      break;
+    }
     case 'user.updated': {
+      // A profile edit never grants: the user was granted on creation, and a
+      // user who has spent the trial down must not be topped up by renaming.
       await syncUserFromClerk(data as Parameters<typeof syncUserFromClerk>[0]);
       break;
     }
@@ -56,7 +76,7 @@ async function handleWebhookEvent(
   }
 }
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   // Passed explicitly: verifyWebhook's own env fallback is
   // CLERK_WEBHOOK_SIGNING_SECRET, while this deployment's variable is
   // CLERK_WEBHOOK_SECRET (web/.env.example). Relying on the fallback would
@@ -79,22 +99,33 @@ export async function POST(req: NextRequest) {
     const verified = await verifyWebhook(req, { signingSecret });
     event = { type: verified.type, data: verified.data as unknown as Record<string, unknown> };
   } catch {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+    return redactedJson({ error: 'Invalid signature' }, { status: 400 });
   }
 
   try {
     await handleWebhookEvent(event.type, event.data);
   } catch (error) {
     if (isTransientError(error)) {
+      // The caught error is STORED, not sent: `enqueueRetry` keeps
+      // `error.message` on an in-memory RetryEntry (lib/auth/webhookRetry.ts)
+      // that `processRetryQueue` replays, and no route reads that queue back
+      // out to a client. The response two lines down carries two fixed
+      // booleans. Re-check this if a retry-queue inspection endpoint is ever
+      // added — the rule is right that this is a store-and-forward channel.
+      // eslint-disable-next-line spawnforge/no-raw-response-in-catch -- stored for replay, never sent to a client (#9736)
       enqueueRetry(event.type, event.data, error);
       // Return 200 so Clerk doesn't retry its own delivery (we handle retries internally)
-      return NextResponse.json({ received: true, queued: true });
+      return redactedJson({ received: true, queued: true });
     }
     // Permanent error — log, capture in Sentry, and return error status
     console.error('[Webhook] Permanent error processing event:', event.type, error);
     captureException(error, { context: 'clerk webhook permanent error', eventType: event.type });
-    return NextResponse.json({ error: 'Failed to process event' }, { status: 500 });
+    return redactedJson({ error: 'Failed to process event' }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

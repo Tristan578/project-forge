@@ -48,10 +48,13 @@ const PINNED_CATEGORIES = [
 
 /** Exact command count per pinned category, so shrinking one silently fails loudly. */
 const PINNED_CATEGORY_COUNTS: Record<(typeof PINNED_CATEGORIES)[number], number> = {
-  tilemap: 10,
+  // 10 -> 11: set_tile_collision_shape, per-tile collision shape authoring (#9814).
+  tilemap: 11,
   sprite: 8,
   sprite_animation: 6,
-  physics2d: 8,
+  // 8 -> 10: get_joint_2d and list_joints_2d, the engine reads that had
+  // no TypeScript producer at all until #9351.
+  physics2d: 10,
   scripting: 15,
 };
 
@@ -381,8 +384,24 @@ describe('parse coverage', () => {
     const inCategory = commands.filter((c) => c.category === category);
     expect(inCategory.length).toBeGreaterThan(0);
     // Every pinned command must resolve to a handler, or the pin below skips it.
+    //
+    // A command the manifest declares with NO parameters is checked for a
+    // REGISTRATION rather than a schema. Requiring a Zod schema there asks for
+    // a schema of nothing: `z.object({})` produces an empty body, which the
+    // extractor reads as "no schema found", so a zero-argument command could
+    // never satisfy this however it was written. Registration is the property
+    // that actually matters for those — the command must reach a handler — and
+    // it is still an assertion, not a skip.
     for (const cmd of inCategory) {
-      expect(schemas.has(cmd.name), `no handler schema found for ${cmd.name}`).toBe(true);
+      const takesArgs = Object.keys(cmd.parameters?.properties ?? {}).length > 0;
+      if (takesArgs) {
+        expect(schemas.has(cmd.name), `no handler schema found for ${cmd.name}`).toBe(true);
+      } else {
+        expect(
+          registrations.has(cmd.name),
+          `${cmd.name} declares no parameters and is registered by no handler`,
+        ).toBe(true);
+      }
     }
   });
 
@@ -457,4 +476,51 @@ describe('handler registration uniqueness', () => {
     // the prototype-safe `ownEntry` implementation in handlers2d.ts.
     expect(registrations.get('get_tilemap')).toEqual(['handlers2d.ts']);
   });
+});
+
+// ---------------------------------------------------------------------------
+// UI widget layout-constraint commands (ui.FR-1.OP-01, #9868)
+// ---------------------------------------------------------------------------
+//
+// Scoped to the two commands that carry the `constraints` object rather than
+// the whole `ui` category (which still has the pre-existing drift the SCOPE
+// note above describes). These two shipped a handler-validated `constraints`
+// field that the manifest never declared, so `getChatTools()` built an
+// `input_schema` without it and the in-app AI could neither see nor set the
+// parameter — invisible to the model, not merely undocumented. This pins the
+// two sources together so that class of drift fails in CI instead of silently.
+describe('ui widget layout-constraint commands match their handler schema', () => {
+  const UI_CONSTRAINT_COMMANDS = ['add_ui_widget', 'update_ui_widget'] as const;
+
+  it.each(UI_CONSTRAINT_COMMANDS)('%s declares a constraints property', (name) => {
+    const cmd = commands.find((c) => c.name === name);
+    expect(cmd, `${name} missing from manifest`).toBeDefined();
+    expect(Object.keys(cmd!.parameters?.properties ?? {})).toContain('constraints');
+  });
+
+  it.each(UI_CONSTRAINT_COMMANDS)(
+    '%s declares exactly the properties its handler validates',
+    (name) => {
+      const cmd = commands.find((c) => c.name === name);
+      const schema = schemas.get(name);
+      expect(schema, `no handler schema found for ${name}`).toBeDefined();
+      const declared = Object.keys(cmd!.parameters?.properties ?? {}).sort();
+      const validated = [...(schema as ParsedHandler).props.keys()].sort();
+      expect(declared).toEqual(validated);
+    },
+  );
+
+  it.each(UI_CONSTRAINT_COMMANDS)(
+    '%s marks exactly the non-optional schema fields as required',
+    (name) => {
+      const cmd = commands.find((c) => c.name === name);
+      const schema = schemas.get(name) as ParsedHandler;
+      const declared = [...(cmd!.parameters?.required ?? [])].sort();
+      const validated = [...schema.props.entries()]
+        .filter(([, required]) => required)
+        .map(([propName]) => propName)
+        .sort();
+      expect(declared).toEqual(validated);
+    },
+  );
 });

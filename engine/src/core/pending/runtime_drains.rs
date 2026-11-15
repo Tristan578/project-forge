@@ -65,6 +65,7 @@ pub(super) mod scan {
         ("core/entity_factory.rs", include_str!("../entity_factory.rs")),
         ("core/game_camera.rs", include_str!("../game_camera.rs")),
         ("core/reparent.rs", include_str!("../reparent.rs")),
+        ("core/simulation_clock.rs", include_str!("../simulation_clock.rs")),
     ];
 
     /// Where systems are registered. `bridge/mod.rs` carries almost all of
@@ -77,6 +78,9 @@ pub(super) mod scan {
         ("core/snap.rs", include_str!("../snap.rs")),
         ("core/physics.rs", include_str!("../physics.rs")),
         ("core/physics_2d_sim.rs", include_str!("../physics_2d_sim.rs")),
+        // `SimulationClockPlugin` (#10007) registers its own drain in `First`;
+        // `bridge/mod.rs` adds the plugin unconditionally, in both builds.
+        ("core/simulation_clock.rs", include_str!("../simulation_clock.rs")),
     ];
 
     pub const BRIDGE_MOD: &str = include_str!("../../bridge/mod.rs");
@@ -417,6 +421,31 @@ pub(super) mod scan {
         out
     }
 
+    /// The `PendingCommands` queue fields `body` pushes onto through a
+    /// `pending` binding (`pending.<field>.push(`). Command dispatch fills
+    /// queues through `self.<field>.push(` helpers instead; those are
+    /// feature-blind by design and are what `RUNTIME_UNDRAINED` accounts for.
+    pub fn pushed_fields(body: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (idx, _) in body.match_indices("pending.") {
+            if idx > 0 && is_ident_byte(body.as_bytes()[idx - 1]) {
+                continue;
+            }
+            let rest = &body[idx + "pending.".len()..];
+            let field: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if field.is_empty() {
+                continue;
+            }
+            if rest[field.len()..].starts_with(".push(") && !out.contains(&field) {
+                out.push(field);
+            }
+        }
+        out
+    }
+
     /// Every field of `PendingCommands`, in declaration order.
     pub fn pending_fields() -> Vec<String> {
         let start = PENDING_MOD
@@ -458,7 +487,6 @@ mod tests {
     ///   the follow-up ticket is named on each so the reason cannot go stale
     ///   without someone noticing.
     const RUNTIME_UNDRAINED: &[(&str, &str)] = &[
-        ("transform_updates", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.transform.setPosition/Rotation/Scale -> update_transform"),
         ("rename_requests", "editor-authoring: rename_entity"),
         ("duplicate_requests", "editor-authoring: duplicate_entity"),
         ("reparent_requests", "editor-authoring: reparent_entity"),
@@ -466,10 +494,8 @@ mod tests {
         ("grid_toggles", "editor-authoring: toggle_grid"),
         ("coordinate_mode_update", "editor-authoring: set_coordinate_mode (gizmo)"),
         ("selection_requests", "editor-authoring: select_entity/select_entities"),
-        ("visibility_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.entity.setVisible -> set_visibility"),
         ("clear_selection_requests", "editor-authoring: clear_selection"),
         ("gizmo_mode_requests", "editor-authoring: set_gizmo_mode"),
-        ("material_updates", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.material.* -> update_material"),
         ("light_updates", "editor-authoring: update_light"),
         ("ambient_light_updates", "editor-authoring: set_ambient_light"),
         ("environment_updates", "editor-authoring: set_environment"),
@@ -480,20 +506,13 @@ mod tests {
         ("remove_skybox_requests", "editor-authoring: remove_skybox"),
         ("update_skybox_requests", "editor-authoring: update_skybox"),
         ("custom_skybox_requests", "editor-authoring: set_custom_skybox"),
-        ("custom_wgsl_source_updates", "editor-authoring: set_custom_wgsl_source"),
         ("register_custom_shader_requests", "editor-authoring: register_custom_shader"),
         ("apply_custom_shader_requests", "editor-authoring: apply_custom_shader"),
         ("remove_custom_shader_requests", "editor-authoring: remove_custom_shader_slot"),
-        ("create_skeleton2d_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.skeleton2d -> create_skeleton2d"),
         ("remove_skeleton2d_requests", "editor-authoring: remove_skeleton2d"),
-        ("add_bone2d_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.skeleton2d -> add_bone2d"),
-        ("remove_bone2d_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.skeleton2d -> remove_bone2d"),
-        ("update_bone2d_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.skeleton2d -> update_bone2d"),
         ("create_skeletal_animation2d_requests", "editor-authoring: create_skeletal_animation2d"),
         ("add_keyframe2d_requests", "editor-authoring: add_keyframe2d"),
-        ("play_skeletal_animation2d_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.skeleton2d -> play_skeletal_animation2d / stop_skeletal_animation2d"),
-        ("set_skeleton2d_skin_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.skeleton2d -> set_skeleton2d_skin"),
-        ("create_ik_chain2d_requests", "editor-authoring: create_ik_chain2d (set_ik_target2d is allowlisted but targets an existing chain)"),
+        ("create_ik_chain2d_requests", "editor-authoring: create_ik_chain2d (no script path at all since set_ik_target2d left the allowlist)"),
         ("auto_weight_skeleton2d_requests", "editor-authoring: auto_weight_skeleton2d"),
         ("skeleton2d_resyncs", "editor-authoring: undo/redo mirror resync, editor-only by construction"),
         ("csg_requests", "editor-authoring: csg_boolean"),
@@ -507,12 +526,8 @@ mod tests {
         ("game_component_adds", "editor-authoring: add_game_component (exported scenes carry their components in scene data)"),
         ("game_component_updates", "editor-authoring: update_game_component"),
         ("game_component_removals", "editor-authoring: remove_game_component"),
-        ("set_game_camera_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.camera.follow/lookAt/setPosition -> set_game_camera"),
-        ("set_active_game_camera_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.camera.* -> set_active_game_camera"),
-        ("camera_shake_requests", "SCRIPT-REACHABLE, dropped in exported games; #9668: forge.camera / vibrate -> camera_shake"),
         ("add_mesh_attachment2d_requests", "editor-authoring: add_skeleton2d_mesh_attachment"),
         ("scene_export_requests", "editor-authoring: export_scene"),
-        ("scene_load_requests", "editor-authoring: load_scene (an exported game boots from embedded scene data)"),
         ("new_scene_requests", "editor-authoring: new_scene"),
         ("gltf_import_requests", "editor-authoring: import_gltf"),
         ("texture_load_requests", "editor-authoring: load_texture"),
@@ -535,6 +550,18 @@ mod tests {
         ("set_lod_distances_requests", "runtime-gated dispatch: core/commands/performance.rs answers this under the runtime feature and queues nothing"),
         ("set_simplification_backend_requests", "runtime-gated dispatch: core/commands/performance.rs answers this under the runtime feature and queues nothing"),
     ];
+
+    /// The queue #10195 un-gated: `load_scene` is the ONLY way an exported
+    /// game hands its scene to the runtime engine, and the old waiver claimed
+    /// a boot path ("embedded scene data") that never existed. Pinned like
+    /// `FIXED_BY_9550` so the waiver list cannot re-absorb it.
+    ///
+    /// `custom_wgsl_source_updates` joined it when `apply_scene_load` became
+    /// runtime-reachable: the loader queues a hot-swap for a scene that carries
+    /// custom WGSL, and while the drain stayed editor-only an exported game
+    /// rendered those materials with the passthrough shader (Sentry review on
+    /// #10213).
+    const FIXED_BY_10195: &[&str] = &["scene_load_requests", "custom_wgsl_source_updates"];
 
     /// The queues #9550 un-gated. Named explicitly so the waiver list above
     /// cannot re-absorb them: these MUST be drained in a runtime build.
@@ -812,6 +839,16 @@ app.add_systems(Update, runtime_call);
                 "`{field}` was fixed by #9550 and must not be waived"
             );
         }
+        for field in FIXED_BY_10195 {
+            assert!(
+                runtime_drained.iter().any(|f| f == field),
+                "`{field}` is part of an exported game's scene boot but its drain is not reachable in a runtime build (#10195 regression)"
+            );
+            assert!(
+                !RUNTIME_UNDRAINED.iter().any(|(f, _)| f == field),
+                "`{field}` was fixed by #10195 and must not be waived"
+            );
+        }
         let waived: Vec<&str> = RUNTIME_UNDRAINED.iter().map(|(f, _)| *f).collect();
         let unwaived: Vec<&String> = editor_drained.iter().filter(|f| !waived.contains(&f.as_str())).collect();
         assert!(
@@ -830,5 +867,52 @@ app.add_systems(Update, runtime_call);
                 "waiver for `{field}` needs a real reason, got {reason:?}"
             );
         }
+    }
+
+    /// A system a `runtime` build runs must never fill a queue that only the
+    /// editor drains. `RUNTIME_UNDRAINED` waives queues that COMMAND DISPATCH
+    /// fills, on the ground that an exported game does not author; it says
+    /// nothing about a runtime system pushing work for a drain that is not
+    /// there. That is how `apply_scene_load`, made runtime-reachable by #10195,
+    /// queued a custom-WGSL hot-swap no runtime system would ever apply.
+    #[test]
+    fn no_runtime_system_fills_a_queue_only_the_editor_drains() {
+        let gated_modules = gated_modules();
+        let fns = all_functions();
+        let runtime_fns: Vec<&Func> = fns.iter().filter(|f| runtime_reachable(f, &gated_modules)).collect();
+        let runtime_drained: Vec<String> = runtime_fns
+            .iter()
+            .flat_map(|f| drained_fields(&f.runtime_body))
+            .collect();
+        let mut pushes: Vec<(String, String)> = Vec::new();
+        for f in &runtime_fns {
+            for field in pushed_fields(&f.runtime_body) {
+                pushes.push((f.name.clone(), field));
+            }
+        }
+        // Vacuity floor: the scene loader's WGSL push is a known runtime
+        // producer. If the scan stops seeing it, it is seeing nothing.
+        assert!(
+            pushes.iter().any(|(f, q)| f == "apply_scene_load" && q == "custom_wgsl_source_updates"),
+            "the scan no longer sees apply_scene_load push custom_wgsl_source_updates — the producer model is broken: {pushes:?}"
+        );
+        // #10227: the loader also hands the scene file's `metadata.projectType`
+        // to the project-type queue, through the same direct `.push(` shape so
+        // this scan sees it; a `pending.queue_*(..)` helper call is invisible
+        // to `pushed_fields` and would hide the producer from the orphan check
+        // below. The drain (`apply_project_type_changes`) is always-active, so
+        // the pair must be seen AND must not be orphaned.
+        assert!(
+            pushes.iter().any(|(f, q)| f == "apply_scene_load" && q == "set_project_type_requests"),
+            "the scan no longer sees apply_scene_load push set_project_type_requests (#10227) — a helper call hides the producer: {pushes:?}"
+        );
+        let orphaned: Vec<&(String, String)> = pushes
+            .iter()
+            .filter(|(_, q)| !runtime_drained.iter().any(|d| d == q))
+            .collect();
+        assert!(
+            orphaned.is_empty(),
+            "runtime-reachable systems push onto queues no runtime system drains (the work is queued and never applied in an exported game): {orphaned:?}"
+        );
     }
 }

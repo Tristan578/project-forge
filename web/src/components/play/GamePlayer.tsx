@@ -5,9 +5,19 @@ import Link from 'next/link';
 import { ArrowLeft, Maximize, Minimize, Loader2, RotateCw } from 'lucide-react';
 import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
+import { ReportGameDialog } from './ReportGameDialog';
+import { PlayRenderErrorNotice } from './PlayRenderErrorNotice';
 import { withTimeout } from '@/lib/async/withTimeout';
-import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
-import { captureException } from '@/lib/monitoring/sentry-client';
+import { describeOrigin, isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
+import { loadSceneWhenReady, refusalOf, settleDelay, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
+import { readProjectTypeFromSceneData } from '@/lib/scenes/sceneProjectType';
+import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
+import {
+  RENDER_ERROR_CLASS_LABEL,
+  RENDER_ERROR_EVENT,
+  parseRenderErrorReport,
+  type RenderErrorReport,
+} from '@/lib/engine/renderErrorWire';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
   PLAY_GAME_FETCH_TIMEOUT_MS,
@@ -54,6 +64,13 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // Only offered when the failure happened BEFORE init_engine ran. Re-entering
   // init_engine on an already-initialized Bevy app is not a supported restart.
   const [canRetry, setCanRetry] = useState(false);
+  // Engine render errors (#8887). Same rules as the editor's store: a
+  // `stopped` notice is sticky and a later `continued` cannot replace it, and
+  // repeated skips are counted in one note rather than stacked.
+  const [renderError, setRenderError] = useState<{ notice: RenderErrorReport | null; skippedCount: number }>({
+    notice: null,
+    skippedCount: 0,
+  });
   // shareUrl must come from the browser — window.location.href is undefined
   // during SSR, so reading it at render time causes a hydration mismatch
   // (server: '', client: actual URL). An empty string also throws in addUtm's
@@ -73,7 +90,17 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // app owns it and a retry would double-initialize.
   const engineOwnsCanvasRef = useRef(false);
   const cancelledRef = useRef(false);
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Aborts every wait inside initEngine on unmount: `loadSceneWhenReady`
+  // retries an engine that is still initialising every 50 ms for up to ten
+  // seconds, and `cancelledRef` alone was only read once that wait had ended,
+  // so a visitor who left mid-boot kept a dead component dispatching
+  // `load_scene`. The settle delay before `play` rides the same signal, so an
+  // unmount during it RESOLVES the wait (and `cancelledRef` then returns)
+  // instead of leaving initEngine suspended with the runtime in its closure.
+  const initAbortRef = useRef<AbortController | null>(null);
+  // The backend of the build that loaded, for render-error reports. Derived
+  // from the engine-pkg path the loader used, which names it.
+  const engineBackendRef = useRef<'webgpu' | 'webgl2' | 'unknown'>('unknown');
 
   // Reset on mount, not just on unmount: StrictMode double-mounts in dev, and a
   // latch that only ever sets `true` would leave the second mount permanently
@@ -82,10 +109,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
     cancelledRef.current = false;
     return () => {
       cancelledRef.current = true;
-      if (settleTimerRef.current !== null) {
-        clearTimeout(settleTimerRef.current);
-        settleTimerRef.current = null;
-      }
+      initAbortRef.current?.abort();
     };
   }, []);
 
@@ -107,6 +131,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         );
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: 'Failed to load game' }));
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
           setError(data.error || 'Game not found');
           setLoading(false);
           return;
@@ -151,19 +176,87 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
     setClickToStart(false);
     setEngineState('loading');
 
+    // A GPU error the engine reported. It did not quit (see
+    // `engine/src/core/render_errors.rs`): it either skipped a frame or stopped
+    // drawing, and a player must be told either way — the frozen, unexplained
+    // canvas is what this replaces. The raw wgpu text goes to Sentry and the
+    // collapsed details, never the headline.
+    const handleRenderError = (data: unknown) => {
+      const report = parseRenderErrorReport(data);
+      if (!report) {
+        console.warn('[SpawnForge Play] RENDER_ERROR payload was unreadable; no notice shown.', data);
+        captureException(new Error('RENDER_ERROR payload was unreadable'), {
+          surface: 'play',
+          phase: 'render',
+          source: 'render_error_handler',
+          userId,
+          slug,
+        });
+        return;
+      }
+      captureException(
+        new Error(`Engine render error: ${RENDER_ERROR_CLASS_LABEL[report.errorClass]} (${report.outcome})`),
+        {
+          surface: 'play',
+          phase: 'render',
+          source: 'render_error_handler',
+          errorClass: report.errorClass,
+          outcome: report.outcome,
+          occurrence: report.occurrence,
+          detail: report.detail,
+          engineBackend: engineBackendRef.current,
+          userId,
+          slug,
+        },
+      );
+      if (cancelledRef.current) return;
+      setRenderError((prev) => {
+        if (report.outcome === 'stopped') return { ...prev, notice: report };
+        if (prev.notice?.outcome === 'stopped') return prev;
+        return { notice: report, skippedCount: prev.skippedCount + 1 };
+      });
+    };
+
     try {
       // ONE deadline across the whole sequence. Bounding each await separately
       // would let a slow-but-not-hung load spend the full budget twice over and
       // leave "Starting engine..." on screen for double the intended time.
       const runtime: PlayEngineRuntime = await withTimeout(
-        loadPlayEngine(),
+        loadPlayEngine({
+          // A CDN that fails or stalls falls back to same-origin and the player
+          // never notices — which is the point, and also why it must be
+          // reported: a broken CDN prefix would otherwise route every player
+          // through the slower origin with nothing in Sentry to show for it.
+          // Same signals the editor emits (`wasm.source`, breadcrumb, #8250).
+          onOriginSkipped: (basePath, err) => {
+            // Browser import errors quote the full URL, which carries the
+            // build SHA; the loader's own messages use the host, and this
+            // scrub makes the breadcrumb host-only whichever produced it.
+            const reason = (err instanceof Error ? err.message : String(err))
+              .replace(/https?:\/\/\S+/g, '<url>');
+            addBreadcrumb({
+              category: 'wasm',
+              message: `Play engine load skipped ${describeOrigin(basePath)}: ${reason}`,
+              level: 'warning',
+            });
+            captureMessage('Play engine origin skipped, falling back', 'warning');
+          },
+          onOriginUsed: (basePath) => {
+            setTag('wasm.source', isCdnOrigin(basePath) ? 'cdn' : 'same-origin');
+            engineBackendRef.current = basePath.includes('engine-pkg-webgpu')
+              ? 'webgpu'
+              : basePath.includes('engine-pkg-webgl2')
+                ? 'webgl2'
+                : 'unknown';
+          },
+        }),
         ENGINE_GLOBAL_TIMEOUT_MS,
         'Game engine load',
       );
 
       if (cancelledRef.current) return;
 
-      // Set up event callback for input state tracking
+      // Engine events: input state for scripts, and render errors (#8887).
       runtime.set_event_callback(function (eventPayload: unknown) {
         try {
           const payload =
@@ -174,6 +267,8 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
           if (payload?.type === 'INPUT_STATE_CHANGED') {
             (window as unknown as Record<string, unknown>).__forgeInputState =
               payload.data ?? payload;
+          } else if (payload?.type === RENDER_ERROR_EVENT) {
+            handleRenderError(payload.payload);
           }
         } catch {
           // ignore parse errors
@@ -185,9 +280,49 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       engineOwnsCanvasRef.current = true;
       runtime.init_engine(CANVAS_ID);
 
-      // Load scene data
-      const sceneJson = JSON.stringify(gameData.sceneData);
-      runtime.handle_command('load_scene', sceneJson);
+      // A refused command used to be silent here: the response was never
+      // read, so a game that failed to load played the engine's default scene
+      // with nothing reporting it (#10196). Anything the engine refuses after
+      // the scene is in is reported — the game is still playable, so it is
+      // not an error screen — and the scene load itself throws below.
+      const sendReported = (command: string, payload: unknown) => {
+        const refusal = refusalOf(runtime.handle_command(command, payload));
+        if (refusal === null) return;
+        const refused = new Error(`Engine refused ${command}: ${refusal}`);
+        console.error('[SpawnForge Play]', refused.message);
+        captureException(refused, { surface: 'play', phase: 'command', command, userId, slug });
+      };
+
+      // Load scene data. The payload is an OBJECT carrying the scene JSON —
+      // the engine deserialises whatever JS value it is handed, so a JSON
+      // string has no `json` field and is refused — and the engine only
+      // accepts commands once its first frame has run, so this waits for that
+      // within a bound (#10196).
+      const abort = new AbortController();
+      initAbortRef.current = abort;
+      await loadSceneWhenReady(
+        (command, payload) => runtime.handle_command(command, payload),
+        gameData.sceneData,
+        { signal: abort.signal },
+      );
+
+      if (cancelledRef.current) return;
+
+      // A 2D game's sprites render only through the engine's 2D camera, which
+      // exists only in 2D mode — and `/play` never asked for it, so every
+      // published 2D game loaded in the default 3D mode, reached "ready", and
+      // showed nothing (#10227). The scene file carries the type now and the
+      // engine queues it on `load_scene`; it is ALSO sent here, after the scene
+      // is accepted and before `play`, so the step is observable without an
+      // engine and a refusal is a failed start, like `play`'s, rather than a
+      // blank canvas. A 3D or legacy scene (no key) needs nothing: 3D is the
+      // engine's default.
+      if (readProjectTypeFromSceneData(gameData.sceneData) === '2d') {
+        const refusal = refusalOf(runtime.handle_command('set_project_type', { projectType: '2d' }));
+        if (refusal !== null) {
+          throw new Error(`The game could not start: 2D mode was refused: ${refusal}`);
+        }
+      }
 
       // Auto-reduce quality on mobile
       const isMobile =
@@ -195,21 +330,25 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         'ontouchstart' in window ||
         navigator.maxTouchPoints > 0;
       if (isMobile) {
-        runtime.handle_command(
-          'set_quality',
-          JSON.stringify({ preset: 'low' })
-        );
+        sendReported('set_quality', { preset: 'low' });
       }
 
-      // Start play mode after a short delay for the engine to settle
-      settleTimerRef.current = setTimeout(() => {
-        settleTimerRef.current = null;
-        if (cancelledRef.current) return;
-        runtime.handle_command('play', '{}');
-        setEngineState('ready');
-      }, PLAY_ENGINE_SETTLE_MS);
-    } catch (err) {
+      // Start play mode after a short delay for the engine to settle. An
+      // unmount aborts the delay so this function finishes instead of hanging.
+      await settleDelay(PLAY_ENGINE_SETTLE_MS, abort.signal);
       if (cancelledRef.current) return;
+
+      // `play` is the game starting, not a tune-up like `set_quality`: the
+      // engine can refuse it (no camera, mode queue not ready), and a refusal
+      // used to be logged while the overlay came down over a canvas that was
+      // never going to play. It is a failed start, reported like one.
+      const playRefusal = refusalOf(runtime.handle_command('play', {}));
+      if (playRefusal !== null) {
+        throw new Error(`The game could not start: ${playRefusal}`);
+      }
+      setEngineState('ready');
+    } catch (err) {
+      if (cancelledRef.current || err instanceof SceneLoadCancelled) return;
 
       const failure = err instanceof Error ? err : new Error(String(err));
       // Kept alongside captureException: the Sentry client no-ops silently when
@@ -235,6 +374,10 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       );
     }
   }, [gameData, userId, slug]);
+
+  const dismissRenderError = useCallback(() => {
+    setRenderError((prev) => (prev.notice?.outcome === 'stopped' ? prev : { ...prev, notice: null }));
+  }, []);
 
   const retryEngine = useCallback(() => {
     initStartedRef.current = false;
@@ -359,6 +502,17 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
               gameUrl={shareUrl}
             />
           )}
+          {/* gameData.id is the published_games row id, which is what the
+              report route keys off. userId/slug are only for the sign-in
+              return URL when the viewer is signed out. */}
+          {gameData && (
+            <ReportGameDialog
+              gameId={gameData.id}
+              userId={userId}
+              slug={slug}
+              isAuthenticated={isAuthenticated}
+            />
+          )}
           <button
             onClick={toggleFullscreen}
             className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
@@ -392,6 +546,14 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
             <Loader2 aria-hidden="true" size={32} className="mb-3 animate-spin text-zinc-400" />
             <p className="text-sm text-zinc-400">Starting engine...</p>
           </div>
+        )}
+
+        {renderError.notice && (
+          <PlayRenderErrorNotice
+            notice={renderError.notice}
+            skippedCount={renderError.skippedCount}
+            onDismiss={dismissRenderError}
+          />
         )}
       </div>
     </div>

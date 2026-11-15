@@ -112,6 +112,43 @@ else
   fail "scripts/check-agentic-sync.sh missing"
 fi
 
+# The Codex CLI surface (.agents/skills/, .codex/agents/, .codex/hooks.json) is
+# generated from .claude/ by a SECOND generator, tools/agentic-sync/port.mjs.
+# Delegated for the same reason as above — and because without it this audit
+# printed "PASSED" over a stale skill mirror that then went red in CI (#9745).
+CODEX_GATE="$PROJECT_ROOT/scripts/check-codex-port.sh"
+if [ -f "$CODEX_GATE" ]; then
+  if command -v node > /dev/null 2>&1; then
+    if bash "$CODEX_GATE" > /dev/null 2>&1; then
+      pass "Codex CLI surface in sync with .claude/"
+    else
+      fail "Codex CLI surface DRIFTED or invalid — run: bash scripts/check-codex-port.sh (it names each problem and its fix)"
+    fi
+  else
+    warn "node not found — cannot verify the Codex CLI surface"
+  fi
+else
+  fail "scripts/check-codex-port.sh missing"
+fi
+
+# The Copilot hook files (.github/hooks/*.json) are the third gate in CI's
+# Agentic Config Sync job: events, end-of-turn scripts, script paths, and
+# scripts that .claude/settings.json also wires (Copilot CLI reads both).
+COPILOT_GATE="$PROJECT_ROOT/scripts/check-copilot-hooks.sh"
+if [ -f "$COPILOT_GATE" ]; then
+  if command -v node > /dev/null 2>&1; then
+    if bash "$COPILOT_GATE" > /dev/null 2>&1; then
+      pass "Copilot hook files valid (.github/hooks, cross-checked with .claude/settings.json)"
+    else
+      fail "Copilot hook files invalid — run: bash scripts/check-copilot-hooks.sh (it names each problem)"
+    fi
+  else
+    warn "node not found — cannot verify the Copilot hook files"
+  fi
+else
+  fail "scripts/check-copilot-hooks.sh missing"
+fi
+
 # ============================================
 # 2. Validation Script Health
 # ============================================
@@ -138,7 +175,8 @@ fi
 section "Agent Profiles"
 
 AGENTS_DIR="$PROJECT_ROOT/.claude/agents"
-SKILLS_ROOT="$PROJECT_ROOT/.claude/skills"
+# Shared provider resolver requires actual SKILL.md files, not just directories.
+source "$PROJECT_ROOT/.claude/tools/resolve-skill-path.sh"
 # Accept the Agent SDK short aliases AND the canonical full IDs currently in
 # use. When a new model ships, add the full ID here so this audit catches
 # drift instead of giving every agent a green pass on any unknown string.
@@ -165,8 +203,8 @@ if [ -d "$AGENTS_DIR" ]; then
       warn "$name agent: no model specified"
     fi
 
-    # Check skills reference existing dirs.
-    # This asserts the SKILL DIRECTORY RESOLVES — not merely that a `skills:`
+    # Check that skill references resolve to actual SKILL.md files.
+    # This asserts the SKILL FILE RESOLVES — not merely that a `skills:`
     # line is present. The weaker check passed dx-guardian and ux-reviewer for
     # their whole life while 8 of their skills were dangling, and the agents
     # were being told to run audit scripts that do not exist (#9605 family,
@@ -188,7 +226,7 @@ if [ -d "$AGENTS_DIR" ]; then
       for s in ${skill_names[@]+"${skill_names[@]}"}; do
         [ -z "$s" ] && continue
         checked=$((checked + 1))
-        if [ ! -d "$SKILLS_ROOT/$s" ] && [ ! -d "$HOME/.claude/skills/$s" ]; then
+        if ! resolve_skill_path "$s" "$PROJECT_ROOT" >/dev/null; then
           missing_skills="$missing_skills $s"
         fi
       done
@@ -214,10 +252,8 @@ fi
 # ============================================
 section "Domain Skills"
 
-SKILLS_DIR="$PROJECT_ROOT/.claude/skills"
 for skill in rust-engine frontend mcp-commands testing docs design developer-experience; do
-  skill_file="$SKILLS_DIR/$skill/SKILL.md"
-  if [ -f "$skill_file" ]; then
+  if skill_file=$(resolve_skill_path "$skill" "$PROJECT_ROOT"); then
     pass "$skill skill exists"
     # Check for validation tool references
     if grep -q "validate-\|\.claude/tools/" "$skill_file" 2>/dev/null; then
@@ -349,7 +385,7 @@ if [ "$MODE" = "onboard" ]; then
   if curl -s http://localhost:3010/api/health > /dev/null 2>&1; then
     pass "Taskboard server running at :3010"
   else
-    warn "Taskboard not running (run: taskboard start --port 3010)"
+    warn "Taskboard not running (run: node .claude/hooks/taskboard-launch.mjs start)"
   fi
 fi
 

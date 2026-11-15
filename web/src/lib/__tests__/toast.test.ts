@@ -36,7 +36,20 @@ describe('toast', () => {
 
     expect(mocks.error).toHaveBeenCalledWith(
       'Turn on Physics for Player, then press Play again.',
-      { duration: Infinity, closeButton: true },
+      { duration: Infinity, closeButton: true, id: undefined },
+    );
+  });
+
+  it('forwards the dedupe id, which is what stops N failures stacking N toasts', () => {
+    // sonner keys toasts by id, so dropping `id` would silently restore the
+    // stacked-toast bug this function was changed to fix — and nothing would
+    // fail, because `toHaveBeenCalledWith` ignores a property whose value is
+    // `undefined`. Asserting a real id is what makes that regression reachable.
+    showPersistentError('That generation could not be finished.', { id: 'generation-failed-1' });
+
+    expect(mocks.error).toHaveBeenCalledWith(
+      'That generation could not be finished.',
+      { duration: Infinity, closeButton: true, id: 'generation-failed-1' },
     );
   });
 

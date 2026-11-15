@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import vm from 'node:vm';
 import { describe, it, expect } from 'vitest';
 import { revokeNetworkGlobals, revokeNetworkGlobalsIfWorker } from '../revokeNetworkGlobals';
@@ -228,5 +230,58 @@ describe('revokeNetworkGlobalsIfWorker', () => {
     // The binding must remain configurable/deletable (the property the teardown crash needed).
     expect(() => delete testScope.fetch).not.toThrow();
     expect(testScope.fetch).toBeUndefined();
+  });
+});
+
+/**
+ * #8700 adds a sandboxed-origin transport (NEXT_PUBLIC_SCRIPT_ISOLATION=
+ * 'sandboxed-origin'): the same worker, booted as a blob: Worker inside a
+ * null-origin iframe whose CSP is connect-src 'none'. There the FRAME is the
+ * control and revocation becomes belt-and-braces — which is exactly why it must
+ * not quietly disappear, and must not become unconditional either.
+ */
+describe('revocation stays belt-and-braces under the sandboxed-origin transport (#8700)', () => {
+  const workerSource = readFileSync(join(process.cwd(), 'src/lib/scripting/scriptWorker.ts'), 'utf8');
+
+  it('still no-ops in a WINDOW realm — the sandbox frame itself runs no revocation', () => {
+    // The frame's bootstrap realm is a Window, not a worker. If revocation ever
+    // ran there it would lock the frame's own globals; if it ran in the editor
+    // window it would take fetch away from the AI/asset channels.
+    class Window {}
+    const frameScope: Record<string, unknown> = Object.create(Window.prototype);
+    frameScope.Window = Window;
+    frameScope.fetch = () => 'live';
+
+    expect(revokeNetworkGlobalsIfWorker(frameScope as unknown as typeof globalThis)).toBe(false);
+    expect(typeof frameScope.fetch).toBe('function');
+  });
+
+  it('still no-ops when WorkerGlobalScope exists but the scope is not an instance of it', () => {
+    // A polyfilled or leaked constructor must not be enough: the check is
+    // instanceof, not "the name is defined".
+    class WorkerGlobalScope {}
+    const notAWorker: Record<string, unknown> = { WorkerGlobalScope, fetch: () => 'live' };
+
+    expect(revokeNetworkGlobalsIfWorker(notAWorker as unknown as typeof globalThis)).toBe(false);
+    expect(typeof notAWorker.fetch).toBe('function');
+    expect(() => delete notAWorker.fetch).not.toThrow();
+  });
+
+  it('the worker still calls the CONDITIONAL variant once, unconditionally, at module top level', () => {
+    // Top level (column 0, not inside an if/function) and executable (not a
+    // comment): the call must run in every transport, before any script is
+    // compiled. The unconditional revokeNetworkGlobals() must never be called
+    // from the worker module — under jsdom that crashes environment teardown.
+    const topLevelCalls = workerSource.match(/^revokeNetworkGlobalsIfWorker\(\);$/gm) ?? [];
+    expect(topLevelCalls).toHaveLength(1);
+    expect(workerSource).not.toMatch(/^[^/\n]*\brevokeNetworkGlobals\(/m);
+    const callAt = workerSource.search(/^revokeNetworkGlobalsIfWorker\(\);$/m);
+    const firstCompile = workerSource.indexOf('function compileScript(');
+    expect(firstCompile).toBeGreaterThan(0);
+    expect(callAt).toBeLessThan(firstCompile);
+  });
+
+  it('the worker knows nothing about the isolation mode — revocation cannot be switched off by it', () => {
+    expect(workerSource).not.toMatch(/sandboxConfig|getScriptIsolationMode|NEXT_PUBLIC_SCRIPT_ISOLATION/);
   });
 });

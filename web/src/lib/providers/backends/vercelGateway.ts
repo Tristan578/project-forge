@@ -8,7 +8,7 @@
 
 import type { ProviderBackend, ProviderCapability } from '../types';
 import { AI_MODELS } from '@/lib/ai/models';
-import { isVercelRuntime } from '@/lib/config/providers';
+import { isVercelRuntime, GATEWAY_CAPABILITIES } from '@/lib/config/providers';
 
 const ENDPOINT = 'https://ai-gateway.vercel.sh/v1';
 
@@ -50,7 +50,7 @@ const MODEL_MAP: Record<string, string> = {
 export const vercelGatewayBackend: ProviderBackend = {
   id: 'vercel-gateway',
   name: 'Vercel AI Gateway',
-  capabilities: ['chat', 'embedding', 'image'] as ReadonlyArray<ProviderCapability>,
+  capabilities: GATEWAY_CAPABILITIES as ReadonlyArray<ProviderCapability>,
 
   isConfigured(): boolean {
     // Configured if either an explicit key is present or we're on a Vercel deployment

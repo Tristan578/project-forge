@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 /**
- * `/health` is public (PF-1038), so an anonymous visitor drives five outbound
+ * `/health` is public (PF-1038), so an anonymous visitor drives six outbound
  * probes per cold render — see `getCachedHealthReport()`. The bound is the
  * shared fan-out budget (`checkHealthFanoutBudget`, Upstash-backed and callable
  * from a Server Component); the cache is the fast path in FRONT of it, so a
@@ -80,6 +80,11 @@ describe('/health page', () => {
     vi.resetModules();
   });
 
+  it('executes server page checks without browser globals', () => {
+    expect(typeof window).toBe('undefined');
+    expect(typeof document).toBe('undefined');
+  });
+
   it('reads the health report through the shared cache', async () => {
     const { default: HealthPage } = await import('../health/page');
     await HealthPage();
@@ -89,7 +94,7 @@ describe('/health page', () => {
   it('never triggers a raw fan-out', async () => {
     const { default: HealthPage } = await import('../health/page');
     await HealthPage();
-    // The whole point of the cache: one inbound request must not become five
+    // The whole point of the cache: one inbound request must not become six
     // outbound service probes.
     expect(runAllHealthChecks).not.toHaveBeenCalled();
   });
