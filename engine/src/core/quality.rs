@@ -24,7 +24,7 @@ impl Default for QualityPreset {
 }
 
 /// Global rendering quality settings.
-#[derive(Resource, Clone, Debug, Serialize, Deserialize)]
+#[derive(Resource, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct QualitySettings {
     pub preset: QualityPreset,

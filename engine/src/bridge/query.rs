@@ -457,7 +457,7 @@ pub(super) fn apply_quality_presets(
             let new_settings = crate::core::quality::QualitySettings::from_preset(preset);
             // Skip a no-op re-selection of the current preset: it would leave a
             // phantom undo step that reverts nothing.
-            if new_settings.preset == quality.preset {
+            if new_settings == *quality {
                 continue;
             }
             let old_settings = quality.clone();
