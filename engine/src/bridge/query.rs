@@ -14,6 +14,7 @@ use crate::core::{
     particles::{ParticleData, ParticleEnabled},
     terrain::TerrainData,
     quality::QualitySettings,
+    history::{HistoryStack, UndoableAction},
     selection::Selection,
     pending_commands::PendingCommands,
     engine_mode::EngineMode,
@@ -423,15 +424,45 @@ pub(super) fn process_quality_queries(
     }
 }
 
+/// Re-report the quality profile whenever the `QualitySettings` resource changes.
+///
+/// The per-command emit was removed from `apply_quality_presets`; this single
+/// change-detection emitter now covers EVERY writer of the resource — preset
+/// commands, undo/redo (whose arms live in `core/` and cannot emit) and scene
+/// load/reset — so the browser's `qualityPreset` mirror never lags the engine.
+/// Unlike a re-queried resync it reads the live resource, which is safe because
+/// resource writes (via `ResMut`) are immediate, not deferred like `Commands`.
+/// `is_changed()` is also true the first frame the resource is added, which
+/// harmlessly re-affirms the default profile the store already holds.
+pub(super) fn emit_quality_on_change(quality: Res<QualitySettings>) {
+    if quality.is_changed() {
+        events::emit_quality_changed(&quality);
+    }
+}
+
 /// System that applies quality preset requests.
+///
+/// Records an undo entry so a preset change (manual UI or in-app AI — both
+/// arrive here through the one `set_quality_preset` command) can be reverted,
+/// and does NOT emit here: the mirror re-report is `emit_quality_on_change`,
+/// which watches `Changed<QualitySettings>` and so covers this write, the
+/// undo/redo arms and scene load/reset with one emitter.
 pub(super) fn apply_quality_presets(
     mut pending: ResMut<PendingCommands>,
     mut quality: ResMut<QualitySettings>,
+    mut history: ResMut<HistoryStack>,
 ) {
     for request in pending.quality_preset_requests.drain(..) {
         if let Some(preset) = crate::core::quality::QualitySettings::parse_preset(&request.preset) {
-            *quality = crate::core::quality::QualitySettings::from_preset(preset);
-            events::emit_quality_changed(&quality);
+            let new_settings = crate::core::quality::QualitySettings::from_preset(preset);
+            // Skip a no-op re-selection of the current preset: it would leave a
+            // phantom undo step that reverts nothing.
+            if new_settings == *quality {
+                continue;
+            }
+            let old_settings = quality.clone();
+            *quality = new_settings.clone();
+            history.push(UndoableAction::QualityChange { old_settings, new_settings });
             tracing::info!("Applied quality preset: {}", request.preset);
         }
     }

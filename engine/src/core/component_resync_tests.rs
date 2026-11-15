@@ -33,6 +33,7 @@ use crate::core::lighting::LightData;
 use crate::core::material::MaterialData;
 use crate::core::particles::{ParticleData, ParticleEnabled};
 use crate::core::physics::{JointData, PhysicsData, PhysicsEnabled};
+use crate::core::quality::QualitySettings;
 use crate::core::physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 use crate::core::scripting::ScriptData;
 use crate::core::shader_effects::ShaderEffectData;
@@ -77,6 +78,9 @@ fn loaded_world() -> World {
     world.insert_resource(HistoryStack::default());
     world.insert_resource(Assets::<Mesh>::default());
     world.insert_resource(Assets::<StandardMaterial>::default());
+    // The undo/redo arms now read `ResMut<QualitySettings>` to service a
+    // `QualityChange`; a schedule that fetches a missing resource panics.
+    world.insert_resource(QualitySettings::default());
     world.spawn((
         EntityId(ENTITY.to_string()),
         EntityName(ENTITY.to_string()),
@@ -638,7 +642,11 @@ const OWN_QUEUE_ARMS: [(&str, &str); 2] = [
 ///   `spawn_from_snapshot` moves the whole entity, and the scene-graph event
 ///   plus `resyncs_for_snapshot` cover it — the latter pinned by
 ///   [`spawn_from_snapshot_queues_re_reports`] below.
-const EXEMPT_ARMS: [(&str, &str); 11] = [
+const EXEMPT_ARMS: [(&str, &str); 12] = [
+    (
+        "QualityChange",
+        "apply_undo_requests/apply_redo_requests write the global QualitySettings resource; bridge::query::emit_quality_on_change uses resource change detection without a selection gate",
+    ),
     (
         "Rename",
         "writes EntityName; scene_graph::detect_name_changed is Query<&EntityId, Changed<EntityName>>",
