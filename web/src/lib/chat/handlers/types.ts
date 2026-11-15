@@ -4,11 +4,12 @@
 
 import { z } from 'zod';
 import type { EditorState } from '@/stores/editorStore';
+import { type EngineDispatchThrewError, engineThrewMessage } from '@/lib/scenes/engineDispatchThrew';
 
 export interface ToolCallContext {
   store: EditorState;
   dispatchCommand: (command: string, payload: unknown) => void;
-  dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
+  dispatchCommandBatch?: ((commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult) | undefined;
 }
 
 export type ToolHandler = (
@@ -20,7 +21,7 @@ export interface ExecutionResult {
   success: boolean;
   result?: unknown;
   message?: string;
-  error?: string;
+  error?: string | undefined;
 }
 
 // Re-export common types that handlers need
@@ -120,4 +121,28 @@ export function parseArgs<T>(
  */
 export function ownEntry<T>(record: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/**
+ * The failure a scene tool returns when the store re-raised a dispatch the
+ * engine THREW on (`loadScene` / `newScene`, #10079, #10202).
+ *
+ * By the time this runs the store has set `sceneLoadError(ENGINE_LOAD_THREW)`
+ * and locked every save path, so the message says so and tells the user to
+ * reload — never that the scene is unchanged, and never to try again: the
+ * throw can have arrived after the engine queued the replacement
+ * (`handle_command` dispatches before it serializes its answer), so the
+ * viewport may be half-applied. Shared so the manual and AI paths say the
+ * same thing (`sceneSlice.switchScene` shows the same sentence as a toast).
+ *
+ * The parameter type is the narrowing (#10202 review, M3): the store throws
+ * `EngineDispatchThrewError` for an engine throw and a plain error for
+ * anything else (which sets no lockout), so a handler's `catch` must
+ * `instanceof` before calling this — and rethrow the rest to the executor's
+ * generic catch, which reports a plain failure with no lockout claim.
+ * @param lead What failed, as a clause: `'The scene could not be opened'`.
+ * @param error The engine throw the store re-raised; its message is relayed.
+ */
+export function sceneDispatchThrewResult(lead: string, error: EngineDispatchThrewError): ExecutionResult {
+  return { success: false, error: engineThrewMessage(lead, error) };
 }

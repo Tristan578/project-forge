@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { THEME_DEFINITIONS } from '../themes';
 
 /**
  * Regression guard for #8742 / the Sentry vendored-staleness finding.
@@ -19,7 +21,6 @@ import { resolve } from 'node:path';
 
 const REPO_ROOT = resolve(process.cwd(), '..', '..');
 const SOURCE_VALIDATOR = resolve(process.cwd(), 'src/utils/themeValidator.ts');
-const SOURCE_THEMES = resolve(process.cwd(), 'src/tokens/themes.ts');
 const VENDORED_VALIDATOR = resolve(
   REPO_ROOT,
   'apps/design/vendored/spawnforge-ui/utils/themeValidator.js',
@@ -48,25 +49,17 @@ describe('vendored @spawnforge/ui is in sync with source tokens', () => {
     ).toEqual([]);
   });
 
-  // A single-literal pin (previously just `--sf-accent-active`) passes
-  // vacuously on the NEXT token added to a theme — exactly how the eight
-  // `--sf-status-*` tokens (#9108) shipped to source while the vendored
-  // Storybook rendered every theme without them. Compare the whole `--sf-*`
-  // catalogue so no future token can drift in unguarded.
-  it('vendored themes.js carries every --sf-* token the source themes.ts defines', () => {
-    const sourceTokens = sfTokens(readFileSync(SOURCE_THEMES, 'utf8'));
-    const vendoredTokens = sfTokens(readFileSync(VENDORED_THEMES, 'utf8'));
-
-    // Non-vacuous: the source must define tokens, and the WCAG --sf-accent-active
-    // pin (#8742) must remain among them.
-    expect(sourceTokens.size).toBeGreaterThan(0);
-    expect(sourceTokens.has('--sf-accent-active')).toBe(true);
-
-    const missing = [...sourceTokens].filter((t) => !vendoredTokens.has(t));
-    expect(
-      missing,
-      `Vendored themes.js is STALE — missing tokens: ${missing.join(', ')}. ` +
-        'Re-run: bash apps/design/scripts/sync-vendored-ui.sh',
-    ).toEqual([]);
+  it('vendored exported themes match every actual source theme token and value', () => {
+    // Evaluate only this trusted generated repository artifact. Strip its static
+    // catalog import and export markers; its definitions remain executable so
+    // dropping STATUS_COLORS spreads or changing values fails the comparison.
+    const generated = readFileSync(VENDORED_THEMES, 'utf8')
+      .replace(/^import .*;$/gm, '')
+      .replace(/^export /gm, '');
+    const vendored = runInNewContext(generated + '\nTHEME_DEFINITIONS') as typeof THEME_DEFINITIONS;
+    expect(Object.keys(vendored).sort()).toEqual(Object.keys(THEME_DEFINITIONS).sort());
+    for (const [theme, tokens] of Object.entries(THEME_DEFINITIONS)) {
+      expect(vendored[theme as keyof typeof THEME_DEFINITIONS], theme).toEqual(tokens);
+    }
   });
 });

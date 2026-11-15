@@ -27,14 +27,18 @@ import { useGenerationGate } from '@/hooks/useGenerationGate';
 /** The default "nothing is blocked" gate result. */
 const OPEN = { blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false } as const;
 
+// `profileLoaded: true` so the tier decision goes through the mocked
+// `canAccessPanel` below rather than the pre-load branch
+// (`canAccessPanelBeforeProfileLoad`), which the trial suite covers for real.
 vi.mock('@/stores/userStore', () => ({
-  useUserStore: vi.fn((selector: (s: { tier: string }) => unknown) =>
-    selector({ tier: 'pro' }),
+  useUserStore: vi.fn((selector: (s: { tier: string; profileLoaded: boolean }) => unknown) =>
+    selector({ tier: 'pro', profileLoaded: true }),
   ),
 }));
 
 vi.mock('@/lib/ai/tierAccess', () => ({
   canAccessPanel: vi.fn(() => true),
+  effectiveTier: vi.fn((tier: string) => tier),
   getRequiredTier: vi.fn(() => null),
   TIER_LABELS: { free: 'Free', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' },
 }));
@@ -76,6 +80,7 @@ const mockDeleteAsset = vi.fn();
 function setupStore(overrides: {
   assets?: Record<string, { id: string; name: string; kind: string; fileSize: number }>;
   primaryId?: string | null;
+  sprites?: Record<string, unknown>;
 } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
@@ -87,6 +92,7 @@ function setupStore(overrides: {
       placeAsset: mockPlaceAsset,
       deleteAsset: mockDeleteAsset,
       primaryId: 'primaryId' in overrides ? overrides.primaryId : 'ent-1',
+      sprites: overrides.sprites ?? {},
     };
     return selector(state);
   });

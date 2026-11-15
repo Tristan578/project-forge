@@ -148,6 +148,23 @@ fn manage_physics2d_lifecycle(
               .insert(locked_axes)
               .insert(ActiveEvents::COLLISION_EVENTS);
 
+            // Rapier's DEFAULT `ActiveCollisionTypes` covers dynamic-vs-anything
+            // only. A kinematic body — the 2D player, in every fixture and in
+            // what the pipeline builds — therefore reports NO contact against the
+            // fixed sensors and kinematic bodies that collectibles, goals, zones
+            // and checkpoints are built on, so `CollisionEvent` (2D) never fires
+            // for them and the reader added for #10194 has nothing to read.
+            // Opted in explicitly, keeping the defaults so dynamic props keep
+            // their own contacts. Mirrors the 3D character lifecycle in
+            // `character_controller.rs`.
+            if matches!(physics_data.body_type, BodyType2d::Kinematic) {
+                ec.insert(
+                    ActiveCollisionTypes::default()
+                        | ActiveCollisionTypes::KINEMATIC_STATIC
+                        | ActiveCollisionTypes::KINEMATIC_KINEMATIC,
+                );
+            }
+
             if physics_data.is_sensor {
                 ec.insert(Sensor);
             }
@@ -178,9 +195,78 @@ fn manage_physics2d_lifecycle(
                 .remove::<ExternalForce>()
                 .remove::<ExternalImpulse>()
                 .remove::<ActiveEvents>()
+                .remove::<ActiveCollisionTypes>()
                 .remove::<ImpulseJoint>();
         }
         tracing::info!("Physics2D detached");
+    }
+}
+
+#[cfg(test)]
+mod kinematic_contact_types {
+    //! The Edit->Play transition must widen the collision PAIRS of a kinematic
+    //! 2D body, or Rapier computes no contact between it and fixed / kinematic
+    //! geometry and no `CollisionEvent` is ever written for the 2D player
+    //! (Devin review on #10212; the 3D precedent is `physics.rs`'s lifecycle
+    //! ordering test). Runs the real lifecycle system against a hand-spawned
+    //! entity; a Rapier step is not needed to observe what it configures.
+    use super::*;
+
+    fn enter_play_with(body_type: BodyType2d) -> (App, Entity) {
+        let mut app = App::new();
+        app.world_mut().insert_resource(EngineMode::Play);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Physics2dData { body_type, ..Default::default() },
+                Physics2dEnabled,
+                Transform::default(),
+            ))
+            .id();
+        app.add_systems(Update, manage_physics2d_lifecycle);
+        app.update();
+        (app, entity)
+    }
+
+    #[test]
+    fn a_kinematic_body_opts_into_the_static_and_kinematic_pairs_and_keeps_the_defaults() {
+        let (app, entity) = enter_play_with(BodyType2d::Kinematic);
+        let world = app.world();
+        assert!(
+            matches!(world.get::<RigidBody>(entity), Some(RigidBody::KinematicPositionBased)),
+            "the fixture's player is a kinematic body"
+        );
+        assert!(world.get::<ActiveEvents>(entity).is_some(), "collision events are enabled");
+        let types = world
+            .get::<ActiveCollisionTypes>(entity)
+            .copied()
+            .expect("a kinematic 2D body must widen its collision pairs");
+        assert!(types.contains(ActiveCollisionTypes::KINEMATIC_STATIC), "kinematic vs fixed sensor (a coin)");
+        assert!(types.contains(ActiveCollisionTypes::KINEMATIC_KINEMATIC), "kinematic vs kinematic (a moving platform)");
+        assert!(
+            types.contains(ActiveCollisionTypes::default()),
+            "the defaults survive, so dynamic props keep their contacts"
+        );
+    }
+
+    #[test]
+    fn a_dynamic_body_keeps_rapier_defaults() {
+        let (app, entity) = enter_play_with(BodyType2d::Dynamic);
+        assert!(
+            app.world().get::<ActiveCollisionTypes>(entity).is_none(),
+            "only kinematic bodies need the widened pairs"
+        );
+    }
+
+    #[test]
+    fn stop_removes_the_widened_pairs_with_the_rest_of_the_rapier_components() {
+        let (mut app, entity) = enter_play_with(BodyType2d::Kinematic);
+        app.world_mut().insert_resource(EngineMode::Edit);
+        app.update();
+        let world = app.world();
+        assert!(world.get::<RigidBody>(entity).is_none());
+        assert!(world.get::<ActiveEvents>(entity).is_none());
+        assert!(world.get::<ActiveCollisionTypes>(entity).is_none());
     }
 }
 

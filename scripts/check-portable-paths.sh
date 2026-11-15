@@ -260,6 +260,7 @@ ALLOW_ENTRIES=(
   '^docs/coverage/'
   '^docs/audits/'
   '^scripts/__tests__/check-portable-paths\.test\.sh$'
+  '^scripts/__tests__/check-codex-port\.test\.sh$'
   '^web/scripts/provision-billing-meter\.ts$'
   '^web/scripts/__tests__/provision-billing-meter\.test\.ts$'
   '^web/vitest\.mockOnceGuard\.ts$'
@@ -273,6 +274,7 @@ ALLOW_REASONS=(
   'dated coverage records; the numbers are a snapshot, not instructions'
   'dated audit records; one carries the reviewers own checkout path in a quoted transcript'
   "this gate's own suite, which builds the shapes it tests"
+  "MCP TOML decoding and launch-path tests; Windows paths are fixture values, never executable checkout locations"
   'code ABOUT path handling — the literal is the subject, not a path to follow'
   'that scripts test, which quotes real paths as fixtures'
   'test infrastructure ABOUT path handling — a comment on a path with a space in it'

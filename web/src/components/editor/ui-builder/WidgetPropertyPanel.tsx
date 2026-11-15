@@ -321,7 +321,7 @@ export function WidgetPropertyPanel() {
               <span className="text-zinc-400">Asset ID</span>
               <input
                 type="text"
-                value={widget.config.assetId || ''}
+                value={widget.config.assetId ?? ''}
                 onChange={(e) => handleConfigChange('assetId', e.target.value)}
                 className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
                 placeholder="asset_123"

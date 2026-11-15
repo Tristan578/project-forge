@@ -9,6 +9,7 @@ import {
   COMMAND_INDEX_FIELDS,
   COMMAND_INDEX_PATH,
   CANONICAL_MANIFEST_PATH,
+  MANIFEST_COPY_PATHS,
 } from '../check-manifest-sync.js';
 import { fileURLToPath } from 'url';
 
@@ -32,6 +33,13 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+describe('manifest copy registry', () => {
+  it('includes the manifest path Vercel uses to generate production docs', () => {
+    expect(MANIFEST_COPY_PATHS).toContain('apps/docs/data/commands.json');
+    expect(MANIFEST_COPY_PATHS).toContain('web/src/data/commands.json');
+  });
 });
 
 describe('checkSync', () => {

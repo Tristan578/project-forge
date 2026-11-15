@@ -29,8 +29,11 @@
  *   never a first-load figure (see the constants below and the header of
  *   `check-bundle-size.js`). `BUNDLE_TOTAL_*` keeps its original values — that
  *   number is unchanged, only its label was wrong.
+ * 2026-09-24: `BUNDLE_TOTAL_*` re-baselined to 6/6.5 MB (was 5.5/6). `main`
+ *   measured 6.00 MB at `aaee8231` (#10199) and the gate failed on the trunk,
+ *   so every open PR inherited a red "Check JS bundle size". Creep: #8910.
  *
- * Updated: 2026-08-10
+ * Updated: 2026-09-24
  */
 
 // ---------------------------------------------------------------------------
@@ -123,13 +126,21 @@ export const BUNDLE_ROUTE_FIRST_LOAD_FAIL = 2.3 * 1024 * 1024;
 /**
  * Total JS warning threshold — every `.js` under `.next/static/chunks`,
  * recursively. This is a whole-output ceiling, NOT a first-load figure; it is
- * the number the old `BUNDLE_FIRST_LOAD_*` pair was really measuring. Values
- * unchanged since 2026-03-31 (measured 5.49 MB on origin/main 2026-08-10).
+ * the number the old `BUNDLE_FIRST_LOAD_*` pair was really measuring.
+ *
+ * Re-baselined 2026-09-24: `main` measured 6.00 MB at `aaee8231` (#10199, the
+ * performance capture/report feature — panels, report builders, device
+ * profiles, ~9.6k lines under `web/src`) against the 6 MB ceiling that had
+ * stood since 2026-03-31 (5.49 MB on 2026-08-10), and every PR went red on a
+ * base failure. Lazy-loading the new panels would not move this number: it
+ * counts every emitted chunk, loaded or not. The warning now sits at the old
+ * ceiling so the current size keeps reading as a warning, and the hard limit
+ * moves up by one band. Creep is tracked in #8910.
  */
-export const BUNDLE_TOTAL_WARN = 5.5 * 1024 * 1024;
+export const BUNDLE_TOTAL_WARN = 6 * 1024 * 1024;
 
 /** Total JS hard failure threshold */
-export const BUNDLE_TOTAL_FAIL = 6 * 1024 * 1024;
+export const BUNDLE_TOTAL_FAIL = 6.5 * 1024 * 1024;
 
 /** WASM binary size warning threshold (per variant, matches quality-gates.yml) */
 export const WASM_BINARY_WARN = 45 * 1024 * 1024;

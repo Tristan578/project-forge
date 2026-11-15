@@ -1,3 +1,4 @@
+/** Validate imported custom theme metadata and allowlisted CSS token values. */
 import type { ThemeTokens } from '../tokens';
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -27,20 +28,16 @@ const FONT_ALLOWLIST = [
 ];
 
 const COLOR_TOKEN_KEYS = new Set<string>([
-  '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
-  '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
-  '--sf-border', '--sf-border-strong',
-  '--sf-accent', '--sf-accent-hover', '--sf-accent-active', '--sf-on-accent', '--sf-destructive', '--sf-success', '--sf-warning',
-  // Status-colour semantic (PF-1068 / #9108) — four healthy/degraded/down/unknown
-  // bg/fg pairs. Part of the v1 custom-theme contract (see V1_TOKEN_KEYS in
-  // tokenBackwardCompat.test.ts): they are ThemeColorTokens hex values, so they
-  // are accepted and hex-validated here rather than silently dropped. Like the
-  // --sf-accent/--sf-on-accent pair, an override only has to be a valid hex —
-  // built-in themes' AA pairing is guaranteed by themes.test.ts, not the validator.
   '--sf-status-healthy-bg', '--sf-status-healthy-fg',
   '--sf-status-degraded-bg', '--sf-status-degraded-fg',
   '--sf-status-down-bg', '--sf-status-down-fg',
   '--sf-status-unknown-bg', '--sf-status-unknown-fg',
+  '--sf-status-healthy-indicator', '--sf-status-degraded-indicator',
+  '--sf-status-down-indicator', '--sf-status-unknown-indicator',
+  '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
+  '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
+  '--sf-border', '--sf-border-strong',
+  '--sf-accent', '--sf-accent-hover', '--sf-accent-active', '--sf-on-accent', '--sf-destructive', '--sf-success', '--sf-warning',
 ]);
 
 const LENGTH_TOKEN_KEYS = new Set<string>([
@@ -51,10 +48,7 @@ const LENGTH_TOKEN_KEYS = new Set<string>([
 const FONT_TOKEN_KEYS = new Set<string>(['--sf-font-ui', '--sf-font-mono']);
 const DURATION_TOKEN_KEYS = new Set<string>(['--sf-transition']);
 
-// Exported for the token-catalog drift guard in tokenBackwardCompat.test.ts:
-// every key of THEME_DEFINITIONS must be present here, or validateCustomTheme
-// silently drops it from custom themes (the #8742 / PF-1068 class).
-export const ALL_VALID_KEYS: ReadonlySet<string> = new Set([
+const ALL_VALID_KEYS = new Set([
   ...COLOR_TOKEN_KEYS,
   ...LENGTH_TOKEN_KEYS,
   ...FONT_TOKEN_KEYS,

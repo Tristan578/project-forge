@@ -1,15 +1,21 @@
+/** Render published-game share cards from local fonts without external text requests. */
 import { ImageResponse } from 'next/og';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { BrandMark } from '@/lib/og/BrandMark';
 import { initialFor, stripEmoji, truncateChars } from '@/lib/og/text';
+import { isPlayCardTextCovered, loadPlayCardFonts } from '@/lib/og/play-card-fonts';
+import { renderPlayCardText } from '@/lib/og/play-card-text';
 
 export const alt = 'SpawnForge Game';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
+// Cache Components use the default Node.js runtime for traced local font files.
 
+/** Next image-route inputs identifying the published game owner and slug. */
 interface Props {
+  /** Asynchronous route parameters: Clerk user ID and published game slug. */
   params: Promise<{ userId: string; slug: string }>;
 }
 
@@ -28,7 +34,8 @@ function getGradient(slug: string): string {
   return `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 50%, ${colors[2]} 100%)`;
 }
 
-function renderFallback() {
+/** Render neutral ASCII through Next's bundled local fallback font. */
+function renderFallback(message = 'Game not found') {
   return new ImageResponse(
     (
       <div
@@ -43,14 +50,16 @@ function renderFallback() {
           padding: 60,
         }}
       >
-        <div style={{ fontSize: 64, fontWeight: 800, color: '#ffffff' }}>
+        <div style={{ fontSize: 64, fontWeight: 700, color: '#ffffff' }}>
           SpawnForge
         </div>
         <div style={{ fontSize: 24, color: 'rgba(255,255,255,0.6)', marginTop: 16 }}>
-          Game not found
+          {message}
         </div>
       </div>
     ),
+    // Do not pass `fonts: []`: Satori treats that as an invalid custom-font
+    // configuration. With the option absent it uses Next's local built-in font.
     { ...size }
   );
 }
@@ -62,14 +71,15 @@ interface CardData {
 }
 
 /**
- * Loads the card's text, or `null` when there is nothing to show.
+ * Load card text, null for missing/failed lookups, or text-unavailable when
+ * the local fonts cannot safely display the card.
  *
  * The try/catch stays around the query and nothing else: constructing JSX
  * inside one is misleading (React renders lazily, so a render error is never
  * caught there) and `react-hooks/error-boundaries` rejects it outright once the
  * tree contains a component rather than only host elements.
  */
-async function loadCard(clerkId: string, slug: string): Promise<CardData | null> {
+async function loadCard(clerkId: string, slug: string): Promise<CardData | 'text-unavailable' | null> {
   try {
     const [user] = await queryWithResilience(() =>
       getDb()
@@ -100,19 +110,8 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
 
     if (!game) return null;
 
-    // Every string here reaches satori, and satori resolves emoji through a
-    // third-party CDN. These three are the only user-supplied text on the card.
-    //
-    // Stripping emoji closes that fetch, but it is not the only one: any
-    // codepoint outside `@vercel/og`'s Latin-only bundled font is resolved
-    // through `https://fonts.googleapis.com/css2?family=<font>&text=<the text
-    // itself>`, so a CJK, Cyrillic, Arabic or Thai title is sent to Google in a
-    // query string on every render. That is pre-existing and unchanged here,
-    // and unlike the emoji path it fails open — the card still renders, with
-    // the uncovered glyphs blank — which is why nothing has ever reported it.
-    // Closing it means bundling a wider font set; tracked as PF-1153.
     const description = stripEmoji(game.description ?? '') || 'Play this game on SpawnForge';
-    return {
+    const card = {
       title: stripEmoji(game.title) || 'Untitled Game',
       creatorName: stripEmoji(user.displayName ?? '') || 'Unknown Creator',
       // Truncate after stripping — the emoji are gone by now, so the cut can no
@@ -121,16 +120,35 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
       // strip and would still be cut in half by `slice`).
       description: truncateChars(description, 120),
     };
+    // Satori otherwise falls back to a dynamic Google Fonts request for an
+    // uncovered glyph. Keep the unmodified multilingual card only when every
+    // visible character is represented by the checked-in local font assets.
+    return [card.title, card.creatorName, card.description, initialFor(card.creatorName)].every(isPlayCardTextCovered)
+      ? card
+      : 'text-unavailable';
   } catch {
     return null;
   }
 }
 
+/**
+ * Render a published game share card, or a generic card for missing or uncovered text.
+ * @param props.params Asynchronous Clerk user ID and published game slug route parameters.
+ * @returns A 1200 by 630 PNG ImageResponse using traced local font files; database
+ * lookup and custom-font read failures produce the ASCII-only generic card.
+ */
 export default async function Image({ params }: Props) {
   const { userId: clerkId, slug } = await params;
 
   const card = await loadCard(clerkId, slug);
+  if (card === 'text-unavailable') return renderFallback('Play on SpawnForge');
   if (!card) return renderFallback();
+
+  const fonts = await loadPlayCardFonts();
+  // A custom-font failure must never send user-controlled multilingual text to
+  // Satori's remote fallback resolver. The fallback has no `fonts` option and
+  // contains ASCII literals only, so Next renders it with its bundled font.
+  if (!fonts) return renderFallback('Play on SpawnForge');
 
   const { title, creatorName, description: truncatedDesc } = card;
 
@@ -145,32 +163,41 @@ export default async function Image({ params }: Props) {
           justifyContent: 'space-between',
           background: getGradient(slug),
           padding: 60,
+          // Latin must be first: CJK also covers ASCII but has no declared
+          // 700 face, which would silently turn the English title regular.
+          fontFamily: 'SpawnForge OG Latin, SpawnForge OG Arabic, SpawnForge OG CJK',
         }}
       >
         {/* Top: game info */}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div
             style={{
+              display: 'flex',
               fontSize: 56,
-              fontWeight: 800,
+              fontWeight: 700,
               color: '#ffffff',
               letterSpacing: -1,
               lineHeight: 1.1,
-              maxWidth: 900,
+              width: 900,
+              maxWidth: '100%',
+              minWidth: 0,
             }}
           >
-            {title}
+            {renderPlayCardText(title, 56)}
           </div>
           <div
             style={{
+              display: 'flex',
               fontSize: 24,
               color: 'rgba(255, 255, 255, 0.65)',
               marginTop: 20,
-              maxWidth: 800,
+              width: 800,
+              maxWidth: '100%',
+              minWidth: 0,
               lineHeight: 1.4,
             }}
           >
-            {truncatedDesc}
+            {renderPlayCardText(truncatedDesc, 24)}
           </div>
         </div>
 
@@ -187,6 +214,9 @@ export default async function Image({ params }: Props) {
               display: 'flex',
               alignItems: 'center',
               gap: 12,
+              width: 760,
+              minWidth: 0,
+              flexShrink: 1,
             }}
           >
             <div
@@ -204,7 +234,7 @@ export default async function Image({ params }: Props) {
             >
               {initialFor(creatorName)}
             </div>
-            <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>{creatorName}</div>
+            <div style={{ display: 'flex', width: 680, minWidth: 0, flexShrink: 1, fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>{renderPlayCardText(creatorName, 22)}</div>
           </div>
 
           <div
@@ -212,6 +242,7 @@ export default async function Image({ params }: Props) {
               display: 'flex',
               alignItems: 'center',
               gap: 8,
+              flexShrink: 0,
             }}
           >
             <div
@@ -232,6 +263,6 @@ export default async function Image({ params }: Props) {
         </div>
       </div>
     ),
-    { ...size }
+    { ...size, fonts }
   );
 }

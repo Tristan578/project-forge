@@ -26,7 +26,9 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "verifier script not found: $SCRIPT"; exit 1; }
 
@@ -84,15 +86,20 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      Defaults false so every fixture that does not touch apps/design or
 #      packages/ui keeps the design gate's success/skip as a legitimate
 #      path-filter skip; set true to exercise the design anti-tamper arm.
+#   $29 actionlint.result (default success) — the workflow linter (#8719).
+#      Mapped to needs-ci like actions-pin-check, so every fixture with
+#      needs-ci=true must keep this success; set skipped with $1=true to
+#      exercise its anti-tamper arm.
 #
 # `needs-mcp`, `needs-docs` and `needs-any-code` are hardcoded in the object below
 # rather than parameterised — they are constant for essentially every fixture, and
 # mk's positional list is already 26 long. Flip them with a jq post-filter (see the
 # docs-internal-gate and quality-gates cases) instead of adding a 27th arg.
-# `command-parity`, `build-nextjs`, `test-e2e-ui` and `test-e2e-api` are hardcoded to success for
-# the same reason and overridden with jq in the #9437 cases at the end.
+# `command-parity`, `build-nextjs`, `test-e2e-ui`, `test-e2e-api`, `test-e2e-auth` and
+# `test-e2e-engine-journeys` are hardcoded to success for the same reason and overridden
+# with jq in the #9437 cases at the end and in the 47a-47e engine-journeys cases.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}" alr="${29:-success}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
@@ -100,7 +107,7 @@ mk() {
     --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" \
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
     --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" \
-    --arg bvt "$bvt" --arg pp "$pp" '
+    --arg bvt "$bvt" --arg pp "$pp" --arg alr "$alr" '
     {
       "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true", "needs-observatory": "false" } },
       "quality-gates":        { result: $qg },
@@ -108,6 +115,7 @@ mk() {
       "observatory-tests":    { result: "success" },
       "build-nextjs":         { result: "success" },
       "docs-internal-gate":   { result: "success" },
+      "docs-e2e":             { result: "success" },
       "design-internal-gate": { result: $dig },
       "hook-tests":           { result: $ht },
       "hook-tests-windows":   { result: "success" },
@@ -120,10 +128,16 @@ mk() {
       "skills-lint":          { result: $sl },
       "openapi-route-sync":   { result: $ors },
       "actions-pin-check":    { result: $apc },
+      "actionlint":           { result: $alr },
       "test-e2e-ui":          { result: "success" },
       "test-e2e-api":         { result: "success" },
+      "test-e2e-auth":        { result: "success" },
       "test-e2e-journey":     { result: $te2ej },
       "test-e2e-engine-smoke": { result: $te2es },
+      # The DB-backed journeys gate (#10161) shares both arms of the smoke
+      # gate; constant success here, flipped with jq in cases 47a-47e. (No
+      # apostrophe in this comment: it sits inside a single-quoted jq program.)
+      "test-e2e-engine-journeys": { result: "success" },
       # Unconditional jobs. They have no ci-gate trigger, so every fixture
       # carries them as success and the dedicated cases below flip them —
       # otherwise `check_unconditional` would fire on every fixture and the
@@ -132,6 +146,7 @@ mk() {
       "portable-paths":       { result: $pp }
     }'
 }
+readonly -f mk
 
 # Run the verifier with a given NEEDS_JSON; echo "<exit>|<output>".
 run_verify() {
@@ -140,6 +155,7 @@ run_verify() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_verify
 
 echo "=== check-ci-success.sh tests ==="
 
@@ -479,6 +495,32 @@ res="$(run_verify "$(mk true true success success | jq -c '."test-e2e-api".resul
 rc="${res%%|*}"
 if [ "$rc" = "0" ]; then pass "API gate legit-skip (needs-web=false) passes (exit 0)"; else fail "API gate legit skip should exit 0, got $rc"; fi
 
+# --- 34d. TAMPER: test-e2e-auth skipped while needs-web=true → exit 1 ----------
+# The Clerk-keyed auth journey (#8632) is the ONLY per-PR run of sign-in against
+# a real Clerk instance; the @ui shard deliberately has no keys. A web-touching
+# PR sets needs-web=true, so an `if: false` skip must not certify green. Every
+# other gate runs+succeeds here, so the skipped auth job is the SOLE tamper.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-auth".result = "skipped"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "auth journey skipped while needs-web=true fails (exit 1)"; else fail "tamper (auth journey) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-auth ("; then pass "the unwired auth journey gate is named"; else fail "unwired auth journey gate not named"; fi
+
+# --- 34e. auth journey legit-skips (needs-web=false) → exit 0 -------------------
+res="$(run_verify "$(mk true true success success | jq -c '."test-e2e-auth".result = "skipped"')")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "auth journey legit-skip (needs-web=false) passes (exit 0)"; else fail "auth journey legit skip should exit 0, got $rc"; fi
+
+# --- 34f. auth journey dropped from ci-success needs: while triggered → exit 1 --
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c 'del(."test-e2e-auth")')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "auth journey absent from needs while needs-web=true fails (exit 1)"; else fail "absent auth journey should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-auth (trigger needs-web=true but result=absent)"; then pass "the absent auth journey reports result=absent"; else fail "auth journey result=absent missing"; fi
+
+# --- 34g. auth journey FAILED → exit 1 (hard-failure path) ----------------------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-auth".result = "failure"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ] && echo "$out" | grep -q "test-e2e-auth"; then pass "a failed auth journey fails the aggregate, by name"; else fail "failed auth journey should exit 1 naming the job, got $rc"; fi
+
 # --- 35. TAMPER: skills-lint skipped while needs-skills=true → exit 1 ----------
 # skills-lint is self-defending: a PR editing .claude/skills/** sets
 # needs-skills=true, so the lint job SHOULD run; an `if: false` skip is the same
@@ -558,6 +600,22 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "pin-check failure fails (exit 1)"; else fail "pin-check failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "actions-pin-check"; then pass "the failing pin-check gate is named"; else fail "failing pin-check gate not named"; fi
 
+# --- 43b. TAMPER: actionlint skipped while needs-ci=true → exit 1 --------------
+# The workflow linter (#8719) is gated on needs-ci like the pin-check, so a PR
+# editing any workflow file SHOULD run it; an `if: false` skip is the same
+# unwiring vector. Every other needs-ci gate is held success so the skipped
+# linter is the SOLE tamper. 29th mk arg: actionlint=skipped, with needs-ci=true.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success success false success false success success skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "actionlint skipped while needs-ci=true fails (exit 1)"; else fail "tamper (actionlint) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "actionlint tamper is flagged as a possible unwiring"; else fail "actionlint tamper message missing"; fi
+if echo "$out" | grep -q "actionlint ("; then pass "the unwired actionlint gate is named"; else fail "unwired actionlint gate not named"; fi
+
+# --- 43c. actionlint legit-skips (needs-ci=false) → exit 0 ---------------------
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped false skipped false skipped false success false false skipped false skipped skipped success false success false success success skipped)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "actionlint legit-skip (needs-ci=false) passes (exit 0)"; else fail "actionlint legit skip should exit 0, got $rc"; fi
+
 # --- 44. TAMPER: test-e2e-engine-smoke skipped while needs-web=true → exit 1 ----
 # The engine-smoke gate (#8602) is self-defending: it is the ONLY per-PR job that
 # boots the real WASM engine (load -> spawn -> play -> export under SwiftShader
@@ -599,6 +657,62 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "engine-smoke failure fails (exit 1)"; else fail "engine-smoke failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "test-e2e-engine-smoke"; then pass "the failing engine-smoke gate is named"; else fail "failing engine-smoke gate not named"; fi
+
+# --- 47a. TAMPER: test-e2e-engine-journeys skipped while needs-web=true → exit 1
+# The engine-journeys gate (#10161) is self-defending: it is the ONLY per-PR job
+# that serves the app against a database — one created for that run, migrated
+# with the real db:migrate and drift-checked with the real db:drift — so it is
+# the only place the account journeys of #9723 can run. It shares the smoke
+# gate's `if:` (`needs-web || needs-engine`). mk hardcodes it to success, so
+# these cases use the jq post-filter idiom of the #9437 cases. Every other
+# needs-web gate runs+succeeds here, so the skipped journeys job is the SOLE
+# tamper.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys skipped while needs-web=true fails (exit 1)"; else fail "tamper (engine-journeys via web arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "engine-journeys tamper is flagged as a possible unwiring"; else fail "engine-journeys tamper message missing"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys ("; then pass "the unwired engine-journeys gate is named (web arm)"; else fail "unwired engine-journeys gate not named (web arm)"; fi
+
+# --- 47b. TAMPER via the needs-engine arm in ISOLATION: engine-journeys skipped
+#         while ONLY needs-engine=true (needs-web=false) → exit 1.
+# An engine-only PR changes what the journeys serve (the WASM the smoke gate
+# hands over), so the needs-engine arm must be independently load-bearing, as
+# it is for the smoke gate. needs-web stays false (mk's default), so no other
+# gate can raise a competing tamper: the journeys job is the SOLE one.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-engine" = "true" | ."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys skipped while ONLY needs-engine=true fails (exit 1)"; else fail "tamper (engine-journeys via engine arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys ("; then pass "the unwired engine-journeys gate is named (engine arm)"; else fail "unwired engine-journeys gate not named (engine arm)"; fi
+
+# --- 47c. engine-journeys legit-skips (needs-web=false AND needs-engine=false) → 0
+# A PR touching neither web/ nor engine/ legitimately skips the journeys gate;
+# that must NOT trip the anti-tamper check (neither arm false-positives on an
+# unrelated PR).
+needs="$(mk true true success success success | jq -c '."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "engine-journeys legit-skip (web+engine false) passes (exit 0)"; else fail "engine-journeys legit skip should exit 0, got $rc"; fi
+if echo "$out" | grep -q "All required gates passed"; then pass "engine-journeys legit-skip prints the all-passed line"; else fail "engine-journeys legit-skip all-passed line missing"; fi
+
+# --- 47d. engine-journeys FAILED while triggered → exit 1 (hard-failure path) ---
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-engine-journeys".result = "failure"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys failure fails (exit 1)"; else fail "engine-journeys failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys"; then pass "the failing engine-journeys gate is named"; else fail "failing engine-journeys gate not named"; fi
+
+# --- 47e. engine-journeys ABSENT from needs while triggered → exit 1 ------------
+# The other one-line unwiring: dropping `- test-e2e-engine-journeys` from
+# ci-success's `needs:` list. Valid YAML, the job still runs, the aggregate
+# stops observing it. `.result // "absent"` reads that as absent != success →
+# tamper, but ONLY for jobs the map lists — which is what the entry buys.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-engine" = "true" | del(."test-e2e-engine-journeys")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys absent from needs while triggered fails (exit 1)"; else fail "absent engine-journeys should exit 1, got $rc"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent engine-journeys job reports result=absent"; else fail "engine-journeys result=absent missing"; fi
 
 # --- 48. TAMPER: design-internal-gate skipped while needs-design=true → exit 1 --
 # The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
@@ -998,6 +1112,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   obs_runs="$(grep -E "^[[:space:]]*['\"]?run['\"]?:" <<<"$obs_block")"
   obs_expected_runs="$(cat <<'RUNS'
         run: npm ci
+        run: bash scripts/check-native-bindings.sh
         run: npx tsc --noEmit -p tools/observatory/tsconfig.json
         run: npx vitest run --config tools/observatory/vitest.config.ts
 RUNS
@@ -1038,9 +1153,10 @@ RUNS
   # satisfies the containment grep above — the only per-PR run of the UI suite
   # for a packages/ui-only PR is dead, and this pin reads green. On the
   # `pull_request` path GitHub runs the PR's OWN workflow file, so the mutation
-  # takes effect in the very run that should have caught it. actionlint flags
-  # duplicate keys, but it is not wired into this repo's CI — this count is the
-  # backstop (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
+  # takes effect in the very run that should have caught it. actionlint (the
+  # required `actionlint` job, #8719) flags duplicate keys, but it runs from
+  # this same PR-controlled file — this count is the independent backstop
+  # (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
   # keys are not counted.
   dig_test_step="$(awk '
     !f && /^      - name:/ && index($0, "Test @spawnforge/ui") {f=1; print; next}
@@ -1349,12 +1465,22 @@ RUNS
   else
     fail "verifier anti-tamper map lost its test-e2e-api/needs-web entry — billing and token-guard API coverage stops being observed"
   fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-auth"[[:space:]]+"needs-web"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-auth <-> needs-web"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-auth/needs-web entry — the only per-PR sign-in against a real Clerk instance stops being observed"
+  fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-engine-journeys"[[:space:]]+"needs-web"[[:space:]]+"needs-engine"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-engine-journeys <-> needs-web + needs-engine (both if: arms)"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-engine-journeys entry, or stopped naming BOTH arms of its if: (needs-web, needs-engine) — the only per-PR job that serves the app against a database could be skipped with every required gate green (#10161)"
+  fi
   # And pin the real `if:` each new entry is paired with, matching the
   # quality-gates caller pin below: a map entry paired with a trigger that no
   # longer gates the job is decorative. Whole expression, on the `if:` line only,
   # comments stripped — so `!= 'true'` inversion and trailing-comment survival
   # both fail (the three vectors documented at the quality-gates pin).
-  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web"; do
+  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web" "test-e2e-auth:needs-web" "test-e2e-engine-journeys:needs-web:needs-engine"; do
     pj="${pair%%:*}"; ptrigs="${pair#*:}"
     pblk="$(awk -v j="  $pj:" '$0==j{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && $0!=j{exit}' "$CI_YML")"
     pif="$(grep -v '^[[:space:]]*#' <<<"$pblk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"
@@ -1423,6 +1549,22 @@ else
 fi
 
 echo ""
+
+# Docs production routes are gated on docs inputs and on edits to CI itself.
+for trigger in needs-docs needs-ci; do
+  baseline="$(mk false false success success)"
+  tampered="$(jq -c --arg trigger "$trigger" '."ci-gate".outputs[$trigger]="true" | ."docs-e2e".result="skipped"' <<< "$baseline")"
+  res="$(run_verify "$tampered")"
+  if [[ "$res" == 1\|* && "$res" == *docs-e2e* ]]; then
+    pass "docs-e2e skip rejected when $trigger fires"
+  else
+    fail "docs-e2e skip allowed when $trigger fires"
+  fi
+done
+legitimate="$(mk false false success success | jq -c '."docs-e2e".result="skipped"')"
+res="$(run_verify "$legitimate")"
+if [[ "$res" == 0\|* ]]; then pass "docs-e2e legitimate path skip allowed"; else fail "docs-e2e legitimate path skip rejected"; fi
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "All tests passed."
   exit 0

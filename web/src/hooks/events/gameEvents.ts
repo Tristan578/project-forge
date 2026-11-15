@@ -8,11 +8,23 @@ import { useEditorStore, type GameComponentData, firePlayTick } from '@/stores/e
 // `null` for a payload it cannot read.
 import { parseGameCameraWire } from '@/lib/game/gameCameraPayload';
 import { parseEmittedGameComponent } from '@/lib/engine/gameComponentWire';
+import { pruneEntityAdjustments } from '@/lib/engine/gameComponentCorrections';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { setCharacterGrounded } from '@/lib/scripting/groundedRegistry';
 import { parseSkippedCharacters, describeSkippedCharacters } from '@/lib/engine/characterDiagnostics';
 import { showPersistentError } from '@/lib/toast';
 import { castPayload, type SetFn, type GetFn } from './types';
+import {
+  mergePlayTickDelta,
+  replacePlayTickSnapshot,
+  type PlayTickDeltaPayload,
+  type PlayTickFrame,
+} from './playTickSnapshot';
+
+// The snapshot state and its reset live in `playTickSnapshot.ts` (which
+// imports nothing) so `useEngine.ts` can reset it on engine reset/recovery
+// without an import cycle. Re-exported here for the hub and for tests.
+export { resetPlayTickSnapshot } from './playTickSnapshot';
 
 /**
  * Types already reported, so a per-frame event stream warns once rather than every tick.
@@ -70,7 +82,22 @@ export function handleGameEvent(
       const newAll = { ...state.allGameComponents, [payload.entityId]: payload.components };
       // Update primaryGameComponents if this entity is selected
       const primary = state.primaryId === payload.entityId ? payload.components : state.primaryGameComponents;
-      useEditorStore.setState({ allGameComponents: newAll, primaryGameComponents: primary });
+      // An adjustment marker (PF-1148) says "this field holds X because you asked
+      // for Y". Undo, a play session and a collab sync move values through the
+      // engine without the store action that clears markers, so the engine's own
+      // report is where a marker whose field no longer holds X is dropped — a
+      // marker on a value it does not describe is a false report. A scene
+      // replacement is not left to this: the same id can come back holding the
+      // same value, so every marker goes when the engine accepts the command
+      // (`forgetOutgoingSceneAdjustments` in editorStore.ts).
+      const adjustments = pruneEntityAdjustments(state.gameComponentAdjustments, payload.entityId, components);
+      useEditorStore.setState({
+        allGameComponents: newAll,
+        primaryGameComponents: primary,
+        // Written only when something was dropped, so an echo of the values the
+        // store already holds does not re-render every marker's reader.
+        ...(adjustments !== state.gameComponentAdjustments ? { gameComponentAdjustments: adjustments } : {}),
+      });
       return true;
     }
 
@@ -98,12 +125,20 @@ export function handleGameEvent(
     }
 
     case 'PLAY_TICK': {
-      const payload = castPayload<{
-        entities: Record<string, { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }>;
-        entityInfos: Record<string, { name: string; type: string; colliderRadius: number }>;
-        inputState: { pressed: Record<string, boolean>; justPressed: Record<string, boolean>; justReleased: Record<string, boolean>; axes: Record<string, number> };
-      }>(data);
+      // A full frame replaces the delta snapshot (keyframe); the full payload
+      // goes on unchanged. See `playTickSnapshot.ts`.
+      const payload = castPayload<PlayTickFrame>(data);
+      replacePlayTickSnapshot(payload);
       firePlayTick(payload);
+      return true;
+    }
+
+    case 'PLAY_TICK_DELTA': {
+      // The engine's per-frame Play event (#10375). Merged onto the snapshot
+      // and handed on as the same full frame `PLAY_TICK` carries, so
+      // `useScriptRunner` and `playTickBus` never see a delta. Fires for an
+      // empty delta too — see `mergePlayTickDelta`.
+      firePlayTick(mergePlayTickDelta(castPayload<PlayTickDeltaPayload>(data)));
       return true;
     }
 

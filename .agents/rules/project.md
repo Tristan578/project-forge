@@ -47,11 +47,13 @@ powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation (run after every feature change)
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # MCP server tests
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 
 # E2E tests (requires WASM build)
 cd web && npx playwright test
@@ -89,7 +91,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every PR to main:
 ## Detailed Reference
 
 - `.claude/CLAUDE.md` — Full project constitution
-- `.claude/rules/bevy-api.md` — Bevy 0.18 API patterns
+- `.claude/rules/bevy-api.md` — Bevy 0.19 API patterns
 - `.claude/rules/entity-snapshot.md` — ECS snapshot patterns
 - `.claude/rules/web-quality.md` — ESLint & React patterns
 - `.claude/rules/library-apis.md` — Third-party library APIs

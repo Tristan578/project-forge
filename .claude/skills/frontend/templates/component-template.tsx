@@ -10,7 +10,7 @@
 //   5. Keep this file co-located with a __tests__/MyComponent.test.tsx.
 
 import { useCallback, useState } from 'react';
-import { cn } from '@/lib/utils';
+import { cn } from '@spawnforge/ui';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,7 +42,7 @@ export function MyComponent({ entityId, className }: MyComponentProps) {
 
   // --- Zustand store selectors (granular — never select the whole store) ---
   // const data = useEditorStore(s => s.myDataMap[entityId]);
-  // const dispatchCommand = useEditorStore(s => s.dispatchCommand);
+  // const dispatchCommand = getCommandDispatcher(); // from '@/stores/editorStore'
 
   // --- Stable event handlers (wrapped in useCallback — deps listed exhaustively) ---
   const handleToggle = useCallback(() => {

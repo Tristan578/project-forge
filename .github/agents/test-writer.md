@@ -48,8 +48,7 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 
 ## Coverage Context
 
-- Current thresholds in `web/vitest.config.ts`: 44% statements, 36% branches, 39% functions, 45% lines
-- Final target: 55/45/50/55 (see `docs/coverage-plan.md`)
+- Coverage thresholds live in `web/vitest.config.ts` and are ratcheted upward automatically by `coverage-ratchet.yml`. Read the file for the live values; never trust a number copied into a doc (this line used to say 44/36/39/45 while the config was far past that)
 - Run tests: `cd web && npx vitest run`
 - Run with coverage: `cd web && npx vitest run --coverage`
 

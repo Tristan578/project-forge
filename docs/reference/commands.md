@@ -1,13 +1,13 @@
 # Command Reference
 
-Reference for all 364 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
+Reference for all 383 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
 
 ## Categories
 
-- [Scene](#scene) (30 commands)
+- [Scene](#scene) (31 commands)
 - [Materials](#materials) (11 commands)
 - [Lighting](#lighting) (2 commands)
 - [Environment](#environment) (5 commands)
@@ -15,11 +15,11 @@ Reference for all 364 registered MCP commands. Registration does not imply that 
 - [Editor](#editor) (7 commands)
 - [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
-- [Query](#query) (16 commands)
-- [Runtime](#runtime) (12 commands)
+- [Query](#query) (18 commands)
+- [Runtime](#runtime) (15 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
-- [Audio](#audio) (28 commands)
+- [Audio](#audio) (38 commands)
 - [Particles](#particles) (8 commands)
 - [Animation](#animation) (20 commands)
 - [Mesh](#mesh) (11 commands)
@@ -43,7 +43,7 @@ Reference for all 364 registered MCP commands. Registration does not imply that 
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
 - [Security](#security) (2 commands)
-- [Performance](#performance) (7 commands)
+- [Performance](#performance) (10 commands)
 - [World_building](#world_building) (3 commands)
 - [Localization](#localization) (4 commands)
 - [Economy](#economy) (1 commands)
@@ -643,6 +643,28 @@ Scope: `scene:write` | Token cost: 0
 
 ---
 
+### `set_completion_mode`
+
+Set how the open scene's game counts as complete. "win" (what a scene with no mode plays as) lets Play start only when at least one win condition the player can complete exists; "endless", "sandbox" and "narrative" let a game with no win condition play and pass verification. A win condition the scene does have is still validated in every mode. Saved with the scene file and undoable from Scene Settings. Set it when the creator asks for a sandbox, endless or story game; never infer it from entity names.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mode` | `"win"` \| `"endless"` \| `"sandbox"` \| `"narrative"` | Yes | win: requires a completable win condition. endless: score or survival, no final win. sandbox: a toy with no goal. narrative: ends through authored story progression. |
+
+**Example:**
+```json
+{
+  "command": "set_completion_mode",
+  "params": {
+    "mode": "win"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
 ### `validate_scene`
 
 Validate a serialized .forge SceneFile with the engine decoder without applying or saving it. Internal checkpoint preflight.
@@ -761,7 +783,7 @@ Update PBR material properties on an entity. Supports core PBR, UV transform, pa
 | `diffuseTransmission` | number | No |  |
 | `ior` | number | No | Index of refraction (1.0=air, 1.33=water, 1.5=glass, 2.42=diamond) |
 | `thickness` | number | No | Optical depth for transmission |
-| `attenuationDistance` | number | No | Distance light travels before being attenuated. Use null for infinity. |
+| `attenuationDistance` | number,null | No | Distance light travels before being attenuated: a finite number >= 0. Send null for infinity (no attenuation), which is the default. |
 | `attenuationColor` | number[3] | No | [r, g, b] 0-1 attenuation tint |
 
 **Example:**
@@ -1484,7 +1506,11 @@ Scope: `scene:read` | Token cost: 0
 
 ### `undo`
 
-Undo the last action
+Undo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
@@ -1500,7 +1526,11 @@ Scope: `scene:write` | Token cost: 0
 
 ### `redo`
 
-Redo the last undone action
+Redo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
@@ -1792,6 +1822,48 @@ Scope: `scene:read` | Token cost: 0
 
 ---
 
+### `get_performance_report`
+
+Read the latest (or a named) performance report and the capture status. While a capture runs the status carries its phase and progress (0-1); once finished the report carries the measurement manifest (build SHA, fixture checksum and id, OS, exact browser version, GPU, backend, viewport, device memory, cache state, sample count), p50/p95/p99 frame time, first-interactive time, memory availability, every budget's observed value, limit and pass/fail/unknown status, and the overall verdict. Values the browser could not measure are 'unknown'. Raw frame samples are omitted unless includeSamples is true.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reportId` | string | No | A report id from this session or the pinned baseline. Defaults to the latest report. |
+| `includeSamples` | boolean | No | Include the raw frame-time samples (thousands of numbers). Default false: only their count. |
+
+**Example:**
+```json
+{
+  "command": "get_performance_report",
+  "params": {}
+}
+```
+
+Scope: `performance:read` | Token cost: 0
+
+---
+
+### `compare_performance_reports`
+
+Compare a performance report (default: latest) with a baseline (default: pinned). Fixture checksum, exact browser version and backend must be known and equal; source, first-interactive timing basis, device profile and capture protocol must match. Hidden-tab captures and known warm-versus-cold cache states are incompatible: no deltas or directional claim. Unknown cache state on either side is an advisory and retains deltas; equal cache conditions are not established. Compatible reports return p50/p95/p99 and first-interactive deltas with improved, regressed, unchanged (within 5% on p95), or inconclusive.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reportId` | string | No | Report to compare. Defaults to the latest report. |
+| `baselineReportId` | string | No | Report to compare against. Defaults to the pinned baseline. |
+
+**Example:**
+```json
+{
+  "command": "compare_performance_reports",
+  "params": {}
+}
+```
+
+Scope: `performance:read` | Token cost: 0
+
+---
+
 ## Runtime
 
 ### `play`
@@ -1850,6 +1922,67 @@ Resume play mode from paused state
 ```json
 {
   "command": "resume",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `replay_input_trace`
+
+Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and, for a recorded trace, whether exactly one collectible was collected. A strategy run asserts movement only (the bot's plan does not aim for a collectible) and reports collectiblesCollected without asserting it. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `playerEntityId` | string | Yes | Entity whose displacement proves input reached the runtime |
+| `collectibleEntityIds` | string[] | No | Collectibles expected to be collected. Defaults to every entity carrying a collectible component. |
+| `trace` | object | No | A recorded input trace: { version: 1, fixtureId, actionNames, durationMs, frames: [{ tick, actions: { <name>: { pressed, axis? } } }] } |
+| `strategy` | `"explorer"` \| `"speedrunner"` \| `"completionist"` \| `"random"` \| `"cautious"` | No | AI gameplay-bot strategy to plan and replay instead of a recorded trace |
+
+**Example:**
+```json
+{
+  "command": "replay_input_trace",
+  "params": {
+    "playerEntityId": "my_playerEntityId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `pin_frame_rate`
+
+Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock. Stop releases a pin that is in force during Play; a pin made in Edit, or queued in the frame Play stops, stays until unpin_frame_rate. Physics tracks the pin only at hz >= 60 (Rapier caps its step at 1/60 s); below that, gameplay systems step 1/hz per frame while physics steps 1/60.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `hz` | number | No | Simulation rate in Hz (ticks per second of game time), integer 4-240 (default 60). The engine always advances exactly one tick per rendered frame; hz sets how long that tick is. 4 Hz (a 250 ms tick) is the floor because Bevy clamps any longer step to 250 ms. |
+
+**Example:**
+```json
+{
+  "command": "pin_frame_rate",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `unpin_frame_rate`
+
+Return the simulation clock to the wall clock after pin_frame_rate; the next frame is measured from now. Stop does this for a pin in force during Play; a pin made in Edit stays until this command.
+
+**Example:**
+```json
+{
+  "command": "unpin_frame_rate",
   "params": {}
 }
 ```
@@ -2075,7 +2208,7 @@ Import a glTF/GLB 3D model file (base64-encoded data) into the asset registry an
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dataBase64` | string | Yes | Base64-encoded glTF/GLB file data |
+| `dataBase64` | string | Yes | Base64-encoded glTF/GLB file data (a data:model/gltf-binary;base64, header is accepted). A model whose images are KTX2 or Basis Universal (KHR_texture_basisu), or that is not a readable glTF/GLB, is refused with the reason; use PNG or JPEG textures. |
 | `name` | string | Yes | Display name for the imported model |
 
 **Example:**
@@ -2099,7 +2232,7 @@ Load a texture image and assign it to a material slot on an entity
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dataBase64` | string | Yes | Base64-encoded image data (PNG/JPG) |
+| `dataBase64` | string | Yes | Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64, which is typed by its first bytes: a PNG signature is image/png, a JPEG marker is image/jpeg, and anything else is refused. Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named. |
 | `name` | string | Yes | Display name for the texture |
 | `entityId` | string | Yes | Entity to apply texture to |
 | `slot` | `"base_color"` \| `"normal_map"` \| `"metallic_roughness"` \| `"emissive"` \| `"occlusion"` | Yes | Material texture slot |
@@ -3212,6 +3345,243 @@ Enable or disable raycasting-based audio occlusion (low-pass filtering when geom
   "params": {
     "entityId": "entity_1",
     "enabled": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_add_track`
+
+Add a track (lane) to the music arrangement editor. Manual/AI parity with the Music Arrangement panel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Optional track name; auto-named 'Track N' when omitted |
+
+**Example:**
+```json
+{
+  "command": "arrangement_add_track",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_delete_track`
+
+Delete a music arrangement track and every clip on it. Undoable in the arrangement editor.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to delete |
+
+**Example:**
+```json
+{
+  "command": "arrangement_delete_track",
+  "params": {
+    "trackId": "my_trackId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_track_muted`
+
+Mute or unmute a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to mute or unmute |
+| `muted` | boolean | Yes | Whether the track is silenced in the arrangement |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_track_muted",
+  "params": {
+    "trackId": "my_trackId",
+    "muted": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_rename_track`
+
+Rename a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to rename |
+| `name` | string | Yes | New track name |
+
+**Example:**
+```json
+{
+  "command": "arrangement_rename_track",
+  "params": {
+    "trackId": "my_trackId",
+    "name": "my_name"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_add_clip`
+
+Place an imported or generated audio asset as a clip on a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Track to place the clip on |
+| `sourceUrl` | string | Yes | Audio asset name/id the clip plays from |
+| `sourceDurationSeconds` | number | Yes | Full source length in seconds (the trim ceiling) |
+| `startOffset` | number | No | Seconds along the timeline where the clip begins (default 0) |
+| `name` | string | No | Optional clip label; defaults to the source name |
+
+**Example:**
+```json
+{
+  "command": "arrangement_add_clip",
+  "params": {
+    "trackId": "my_trackId",
+    "sourceUrl": "my_sourceUrl",
+    "sourceDurationSeconds": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_move_clip`
+
+Move a music arrangement clip along its timeline and optionally to another track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to move |
+| `startOffset` | number | Yes | New timeline position in seconds (clamped to >= 0) |
+| `trackId` | string | No | Optional target track id; ignored when the track is unknown |
+
+**Example:**
+```json
+{
+  "command": "arrangement_move_clip",
+  "params": {
+    "clipId": "my_clipId",
+    "startOffset": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_trim_clip`
+
+Adjust a music arrangement clip's trimmed source window (clamped to legal bounds).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to trim |
+| `trimStart` | number | No | Seconds into the source where playback starts |
+| `trimEnd` | number | No | Seconds into the source where playback ends |
+
+**Example:**
+```json
+{
+  "command": "arrangement_trim_clip",
+  "params": {
+    "clipId": "my_clipId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_loop`
+
+Toggle looping on a music arrangement clip and optionally set its loop window.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to update |
+| `loopEnabled` | boolean | Yes | Whether the trimmed window repeats to fill its duration |
+| `trimStart` | number | No | Optional loop-window start in seconds |
+| `trimEnd` | number | No | Optional loop-window end in seconds |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_loop",
+  "params": {
+    "clipId": "my_clipId",
+    "loopEnabled": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_delete_clip`
+
+Delete a clip from the music arrangement. Undoable in the arrangement editor.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to delete |
+
+**Example:**
+```json
+{
+  "command": "arrangement_delete_clip",
+  "params": {
+    "clipId": "my_clipId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_tempo`
+
+Set the music arrangement tempo in beats per minute (clamped to 20-400).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `bpm` | number | Yes | Tempo in BPM (20-400) |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_tempo",
+  "params": {
+    "bpm": 1
   }
 }
 ```
@@ -4934,7 +5304,7 @@ Add a pre-built game component (e.g., CharacterController, Health, Collectible) 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Type of game component to add |
+| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Type of game component to add |
 | `properties` | object | No | Optional property overrides (uses defaults if omitted) |
 
 **Example:**
@@ -4954,13 +5324,13 @@ Scope: `scene:write` | Token cost: 0
 
 ### `update_game_component`
 
-Update properties of an existing game component
+Update properties of an existing game component. Only the named properties change; every other property keeps its current value. Fails if the entity has no component of that type (use add_game_component to add one)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Type of game component to update |
-| `properties` | object | Yes | Property values to update |
+| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Type of game component to update |
+| `properties` | object | Yes | Property values to update; unnamed properties keep their current values |
 
 **Example:**
 ```json
@@ -4984,7 +5354,7 @@ Remove a game component from an entity
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentName` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Name of component to remove |
+| `componentName` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Name of component to remove |
 
 **Example:**
 ```json
@@ -5893,6 +6263,7 @@ Add a widget to a UI screen
 | `width` | number | No | Width (0-100%) |
 | `height` | number | No | Height (0-100%) |
 | `anchor` | `"top_left"` \| `"top_center"` \| `"top_right"` \| `"center_left"` \| `"center"` \| `"center_right"` \| `"bottom_left"` \| `"bottom_center"` \| `"bottom_right"` | No |  |
+| `constraints` | object | No | Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds. Omitted sub-fields are preserved when updating an existing widget; bounds keep core actions tappable (e.g. 44px) from mobile to desktop. |
 | `parentWidgetId` | string | No | Parent widget ID for nesting |
 | `config` | object | No | Type-specific configuration |
 | `style` | object | No | Style overrides |
@@ -5927,6 +6298,7 @@ Update a widget's properties, config, or style
 | `height` | number | No |  |
 | `anchor` | string | No |  |
 | `visible` | boolean | No |  |
+| `constraints` | object,null | No | Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds; omitted sub-fields are merged onto the widget's existing constraints. Pass null to clear all constraints (back to pure anchor/percentage layout). |
 | `config` | object | No | Type-specific config updates (merged) |
 | `style` | object | No | Style updates (merged) |
 
@@ -8378,6 +8750,66 @@ Select the mesh simplification algorithm used for LOD generation. 'qem' preserve
   "params": {
     "backend": "qem"
   }
+}
+```
+
+Scope: `performance:write` | Token cost: 0
+
+---
+
+### `capture_performance_report`
+
+Start a timed, manifest-pinned performance capture of the running scene: a warm-up, then a capture window of animation-frame times (default 10 s + 60 s). Returns immediately with status 'pending' and a captureId; poll get_performance_report for progress and the finished report (p50/p95/p99 frame time, first-interactive time, memory availability, fixture checksum, build SHA, exact browser version, GPU, backend, viewport, cache state, sample count, and a pass/fail/unknown verdict per budget of the device profile). A metric the browser cannot measure is reported as 'unknown', never 0, and never passes a budget. Authoring changes, scene/project changes and engine restarts invalidate an active capture without publishing a report, even if Undo restores the scene. Keep the editor workload unchanged until completion. Refused while another capture runs or when the engine is not loaded. Same controls as the profiler's Run capture button.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `warmupSeconds` | integer | No | Warm-up before measuring, whole seconds 0-60 (default 10). The frame-time budget is only judged on the profile protocol (10 s warm-up, 60 s capture). |
+| `captureSeconds` | integer | No | Capture window, whole seconds 5-300 (default 60). |
+| `profileId` | string | No | Device profile whose budgets judge the run, as id@version (default 'desktop@1': p95 frame time <= 16.7 ms, cold first interactive <= 5 s). |
+| `cacheState` | `"warm"` \| `"cold"` \| `"unknown"` | No | Declare the asset-cache state of the run. Omit to detect it from the engine binary's resource timing (unknown when it cannot be told). |
+
+**Example:**
+```json
+{
+  "command": "capture_performance_report",
+  "params": {}
+}
+```
+
+Scope: `performance:write` | Token cost: 0
+
+---
+
+### `set_performance_baseline`
+
+Pin a captured performance report as the baseline that compare_performance_reports uses by default (persisted in this browser), or clear the pin. Defaults to the latest report. Capturing never changes the pin, so a baseline pinned manually in the profiler survives later captures. Same as the profiler's Pin as baseline / Unpin baseline button.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reportId` | string | No | Report to pin (from get_performance_report). Defaults to the latest report of this session. |
+| `clear` | boolean | No | Clear the pinned baseline instead of setting one. |
+
+**Example:**
+```json
+{
+  "command": "set_performance_baseline",
+  "params": {}
+}
+```
+
+Scope: `performance:write` | Token cost: 0
+
+---
+
+### `cancel_performance_capture`
+
+Cancel the running performance capture. No report is kept. Errors when no capture is running. Same as the profiler's Cancel capture button.
+
+**Example:**
+```json
+{
+  "command": "cancel_performance_capture",
+  "params": {}
 }
 ```
 

@@ -553,6 +553,18 @@ describe('audioEntityHandlers', () => {
       ]);
     });
 
+    it('does not merge an inherited reverb zone into a caller-selected entity (PF-235)', async () => {
+      const inherited = { 'ent-1': { preset: 'cave', wetMix: 0.9, decayTime: 9 } };
+      const reverbZones = Object.create(inherited);
+      const { result, store } = await invoke('set_reverb_zone', { entityId: 'ent-1' }, { reverbZones });
+
+      expect(result.success).toBe(true);
+      expect(vi.mocked(store.setReverbZone).mock.calls[0]).toEqual([
+        'ent-1', expect.objectContaining({ preset: 'hall', wetMix: 0.5, decayTime: 2 }), true,
+      ]);
+      expect(store.updateReverbZone).not.toHaveBeenCalled();
+    });
+
     it('overrides existing values with provided args', async () => {
       const existing = { preset: 'cave', wetMix: 0.8, decayTime: 4.0, preDelay: 30, blendRadius: 3.0, priority: 0 };
       const reverbZones = { 'ent-1': existing };

@@ -14,7 +14,9 @@ SCRIPT="$HERE/../deploy-drift-dispatch.sh"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -59,14 +61,19 @@ chmod +x "$TMP/bin/gh" "$TMP/bin/curl"
 REPO=o/r
 HEAD=abcdef1234567890abcdef1234567890abcdef12
 fixture() { printf '%s' "$2" > "$TMP/fx/$(printf '%s' "$1" | tr '/' '_')"; }
+readonly -f fixture
 reset() { rm -f "$TMP/fx"/* "$TMP/cnt"/*; : > "$TMP/log"; : > "$TMP/out"; fixture "repos/$REPO/branches/main" "{\"commit\":{\"sha\":\"$HEAD\"}}"; }
+readonly -f reset
 runs() { printf '{"total_count":%s,"workflow_runs":[%s]}' "$1" "${2:-}"; }
+readonly -f runs
 run_script() {
   (PATH="$TMP/bin:$PATH" LOG="$TMP/log" FIXTURES="$TMP/fx" COUNTS="$TMP/cnt" \
     GH_TOKEN=t GITHUB_REPOSITORY="$REPO" DRIFT_SLEEP_S=0 DRIFT_VERIFY_ATTEMPTS=3 DRIFT_HEALTH_URL=https://h.test/api/health \
     GITHUB_OUTPUT="$TMP/out" bash "$SCRIPT" 2>&1)
 }
+readonly -f run_script
 count_dispatch() { grep -c "^workflow run $1 --ref main" "$TMP/log" || true; }
+readonly -f count_dispatch
 
 echo "=== nothing to do ==="
 reset

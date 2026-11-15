@@ -42,6 +42,7 @@ test.describe('Performance Budget @ui @dev', () => {
         const vals = (window as unknown as Record<string, unknown>).__LCP_VALUES;
         return Array.isArray(vals) && vals.length > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_SHORT_MS },
     ).catch(async () => {
       // LCP may not fire on some CI configs — fall back to networkidle

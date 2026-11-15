@@ -69,15 +69,22 @@ vi.mock('@/lib/db/schema', () => ({
   tokenPurchases: {},
 }));
 
-vi.mock('@/lib/tokens/pricing', () => ({
-  TIER_MONTHLY_TOKENS: {
-    starter: 500,
-    hobbyist: 2000,
-    creator: 10000,
-    pro: 50000,
-  },
-  TOKEN_PACKAGES: {},
-}));
+// Spread the actual module: `api-auth.ts`'s `assertAiAccess` reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
+// via `@/lib/ai/tierAccess` / `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return {
+    ...actual,
+    TIER_MONTHLY_TOKENS: {
+      starter: 500,
+      hobbyist: 2000,
+      creator: 10000,
+      pro: 50000,
+    },
+    TOKEN_PACKAGES: {},
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Imports

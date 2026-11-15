@@ -5,7 +5,10 @@
  * handling retries, abort signals, and approval gates. Mutates the plan in
  * place and returns it.
  *
- * Zero external imports beyond types.
+ * No external imports beyond types, and one dependency-free value:
+ * `EngineDispatchThrewError`, so the generic catch can tell an engine throw
+ * (never retried) from any other exception without reaching the store or the
+ * engine.
  */
 
 import type {
@@ -17,6 +20,7 @@ import type {
   ExecutorResult,
   ApprovalGate,
 } from './types';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -318,9 +322,13 @@ export async function runPipeline(
     return out;
   };
 
-  // Compose the effective context with the live resolvers
+  // Compose the effective context with the live resolvers — and the plan's own
+  // brief (#9998), for the same reason: the steps were built from `plan.gdd`,
+  // so an executor reading a fact off the brief (`scene_create` reads
+  // `completionMode`) must read THAT one, never whatever the caller passed.
   const effectiveContext: ExecutorContext = {
     ...context,
+    gdd: plan.gdd,
     resolveStepOutput: liveResolve,
     resolveStepOutputs: liveResolveAll,
   };
@@ -436,7 +444,13 @@ export async function runPipeline(
             code: 'EXCEPTION',
             message: err instanceof Error ? err.message : String(err),
             userFacingMessage: executor.userFacingErrorMessage,
-            retryable: true,
+            // An unexpected throw is presumed transient, so it is retried — with
+            // one exception. `EngineDispatchThrewError` means a scene-replacing
+            // command threw inside the engine, which may already have applied it
+            // half-way, and the store has locked saving (#10202). Dispatching the
+            // same command again onto that viewport is the one retry that cannot
+            // help, whatever `maxRetries` the step carries.
+            retryable: !(err instanceof EngineDispatchThrewError),
           },
         };
       }

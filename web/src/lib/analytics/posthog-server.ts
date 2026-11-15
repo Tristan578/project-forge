@@ -51,21 +51,21 @@ export interface AiGenerationInput {
   /** LLM provider (e.g. 'anthropic'). */
   provider: string;
   /** Prompt token count, if known. */
-  inputTokens?: number;
+  inputTokens?: number | undefined;
   /** Completion token count, if known. */
-  outputTokens?: number;
+  outputTokens?: number | undefined;
   /** Wall-clock latency in SECONDS (PostHog `$ai_latency` unit), if measured. */
-  latencySeconds?: number;
+  latencySeconds?: number | undefined;
   /** Whether the generation was streamed. */
-  stream?: boolean;
+  stream?: boolean | undefined;
   /** Whether the generation errored. */
-  isError?: boolean;
+  isError?: boolean | undefined;
   /** Logical route/path for grouping in insights (custom prop, non-content). */
   route: string;
   /** Anthropic prompt-cache read tokens, if known (chat path). */
-  cacheReadInputTokens?: number;
+  cacheReadInputTokens?: number | undefined;
   /** Anthropic prompt-cache creation tokens, if known (chat path). */
-  cacheCreationInputTokens?: number;
+  cacheCreationInputTokens?: number | undefined;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { TRIAL_GRANT_TOKENS } from '../../src/lib/tokens/pricing';
 
 /**
  * Public pages E2E tests — verifies all unauthenticated routes render correctly
@@ -67,7 +68,7 @@ test.describe('Public Pages @ui', () => {
       // asserted hand-written copy that the server never enforced: "1 project"
       // when the free tier gets 3, and "5,000 tokens" when Studio grants 3,000.
       await expect(page.getByText('3 cloud projects')).toBeVisible();
-      await expect(page.getByText('No AI features')).toBeVisible();
+      await expect(page.getByText(`${TRIAL_GRANT_TOKENS} trial AI tokens at signup`)).toBeVisible();
       await expect(page.getByText('Unlimited cloud projects')).toBeVisible();
       await expect(page.getByText(/3,000 AI tokens\/month/)).toBeVisible();
     });
@@ -236,5 +237,45 @@ test.describe('Public Pages @ui', () => {
       const swaggerContainer = page.locator('#swagger-ui');
       await expect(swaggerContainer).toBeAttached();
     });
+  });
+
+  test.describe('Documentation Page', () => {
+    for (const width of [320, 1280]) {
+      test('preserves sentence layout and standalone targets through nested bold at ' + width + 'px (PF-390)', async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.route('**/api/docs', (route) => route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            docs: [{
+              path: 'getting-started/inline-context',
+              title: 'Inline context guide',
+              category: 'getting-started',
+              sections: [],
+              content: '**guide** to begin.\n\n**[guide](https://example.com/guide)** to begin.\n\n**[standalone](https://example.com/standalone)**',
+            }],
+            meta: {},
+          }),
+        }));
+        await page.goto('/docs?path=getting-started%2Finline-context');
+        const sentenceLink = page.locator('a[href="https://example.com/guide"]').filter({ visible: true });
+        const standaloneLink = page.locator('a[href="https://example.com/standalone"]').filter({ visible: true });
+        await expect(sentenceLink).toBeVisible();
+        await expect(standaloneLink).toBeVisible();
+
+        // A nested link must not enlarge its sentence compared with identical plain bold text.
+        const sentenceParagraphs = page.locator('p').filter({ hasText: /^guide to begin\.$/ }).filter({ visible: true });
+        await expect(sentenceParagraphs).toHaveCount(2);
+        const heights = await sentenceParagraphs.evaluateAll((paragraphs) =>
+          paragraphs.map((paragraph) => paragraph.getBoundingClientRect().height));
+        expect(Math.abs(heights[0] - heights[1])).toBeLessThanOrEqual(1);
+        expect(await sentenceLink.evaluate((link) => getComputedStyle(link).display)).toBe('inline');
+
+        const target = await standaloneLink.boundingBox();
+        expect(target).not.toBeNull();
+        expect(target!.width).toBeGreaterThanOrEqual(44);
+        expect(target!.height).toBeGreaterThanOrEqual(44);
+      });
+    }
   });
 });

@@ -31,6 +31,7 @@ mod query;
 mod animation;
 mod particles;
 mod scene_io;
+mod render_errors;
 // Editor-only modules. Every item in each of these three files is reachable
 // only from the `#[cfg(not(feature = "runtime"))]` block in
 // `SelectionPlugin::build()` below, so the whole module is gated rather than
@@ -71,9 +72,11 @@ use crate::core::{
     pending_commands::PendingCommands,
     physics::PhysicsPlugin,
     physics_2d_sim::Physics2dPlugin,
+    simulation_clock::SimulationClockPlugin,
     animation_clip::AnimationClipPlugin,
     post_processing::PostProcessingPlugin,
     quality::QualitySettings,
+    render_errors::RenderErrorReportingPlugin,
     scene,
     scene_file::SceneName,
     scene_graph::{self, SceneGraphCache},
@@ -216,6 +219,12 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
                 }),
         );
 
+    // Replace Bevy 0.19's default RenderErrorHandler, which quits the app on
+    // ANY wgpu error and leaves the editor frozen with no explanation. Ours
+    // never quits; it skips a one-off error or stops rendering, and reports
+    // either to the editor (`RENDER_ERROR`). Policy: `core/render_errors.rs`.
+    app.add_plugins(RenderErrorReportingPlugin);
+
     // Insert the glTF memory directory resource (shared with the "memory" asset source reader)
     app.insert_resource(core::asset_manager::GltfMemoryDir(gltf_memory_dir));
 
@@ -230,6 +239,9 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
         .add_plugins(Physics2dPlugin)
+        // Pinned simulation clock for deterministic replay (#10007). Registered
+        // in both builds: an exported game is replayed the way Play mode is.
+        .add_plugins(SimulationClockPlugin)
         .add_plugins(AnimationClipPlugin)
         .add_plugins(ShaderEffectsPlugin)
         .add_plugins(CustomWgslPlugin)
@@ -385,7 +397,10 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, query::process_terrain_queries)
             .add_systems(Update, query::process_quality_queries)
             .add_systems(Update, query::process_reverb_zone_queries)
-            .add_systems(Update, query::process_play_state_queries);
+            .add_systems(Update, query::process_play_state_queries)
+            // Render-error reports (#8887). Always-active: a published game can
+            // hit a GPU error as easily as the editor can.
+            .add_systems(Update, render_errors::emit_render_error_reports);
 
         // Joint reads and the joint / gravity / debug-toggle drains run in BOTH
         // builds (#9550). `core::commands::physics::dispatch` accepts and queues
@@ -625,9 +640,20 @@ impl Plugin for SelectionPlugin {
         #[cfg(feature = "webgpu")]
         app.add_systems(Update, particles::sync_hanabi_effects);
 
+        // The custom-WGSL hot-swap that `apply_scene_load` queues for a scene
+        // carrying custom shader code. The editor build registers the same
+        // system inside `EditorApplySet` below; a `runtime` build has no such
+        // set, so it is registered here, once, for that build only (#10195).
+        #[cfg(feature = "runtime")]
+        app.add_systems(Update, material::apply_custom_wgsl_source_updates);
+
         app
             // glTF scene spawn system (always-active): spawns loaded glTF scenes as children
             .add_systems(Update, scene_io::apply_gltf_scene_spawn)
+            // Scene load (always-active): an exported game boots by handing its
+            // scene to the runtime engine through `load_scene`, so the drain
+            // must exist in a `runtime` build too (#10195).
+            .add_systems(Update, scene_io::apply_scene_load)
             // Animation systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 animation::register_gltf_animations,
@@ -679,8 +705,17 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, sprite::handle_sprite_and_camera2d_queries)
             .add_systems(Update, sprite::handle_sprite_sheet_state_queries)
             .add_systems(Update, sprite::handle_sprite_animator_state_queries)
-            // 2D camera systems (always-active): project type + Camera2d management
-            .add_systems(Update, sprite::apply_project_type_changes)
+            // 2D camera systems (always-active): project type + Camera2d management.
+            // `.after(apply_scene_load)` is load-bearing (#10227): the loader
+            // queues the scene file's `metadata.projectType` into the queue
+            // this system drains, and without the edge Bevy may run the drain
+            // first, leaving the loaded scene's dimension unapplied for a
+            // frame — long enough for the SCENE_LOADED handler's follow-up
+            // export (`checkpointRecovery.matchesExpected`) to read the OLD
+            // type. `apply_scene_export` is ordered after this system below
+            // for the same reason. Pinned by `scene_file.rs`'s
+            // `project_type_persistence_tests`.
+            .add_systems(Update, sprite::apply_project_type_changes.after(scene_io::apply_scene_load))
             .add_systems(Update, sprite::apply_camera_2d_updates)
             .add_systems(Update, sprite::sync_camera_2d_rendering)
             // 2D play-mode systems: camera bounds clamping + pixel-perfect snapping
@@ -919,10 +954,12 @@ impl Plugin for SelectionPlugin {
                     core::terrain::collect_terrain_changes,
                     procedural::emit_terrain_changes,
                 ).chain().in_set(EditorSystemSet))
-                .add_systems(Update, (
-                    scene_io::apply_scene_export,
-                    scene_io::apply_scene_load,
-                ))
+                // `.after(apply_project_type_changes)` is load-bearing (#10227):
+                // the export writes `Res<ProjectType>` into `metadata.projectType`,
+                // and a load queued in the same frame must have been applied by
+                // the drain before the export reads the resource, or the
+                // exported scene carries the type of the scene it REPLACED.
+                .add_systems(Update, scene_io::apply_scene_export.after(sprite::apply_project_type_changes))
                 .add_systems(Update, (
                     scene_io::apply_new_scene,
                     scene_io::apply_gltf_import,

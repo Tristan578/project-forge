@@ -55,9 +55,10 @@ export interface AdminTierChangeOptions {
   grantedByClerkId: string;
   /**
    * Optional ban-state change to fold into the same atomic write.
-   * `true` -> banned=1, `false` -> banned=0, omitted -> preserve the column.
+   * `true` -> banned=1, `false` -> banned=0, omitted or explicit `undefined`
+   * -> preserve the column (the implementation treats both identically).
    */
-  banned?: boolean;
+  banned?: boolean | undefined;
 }
 
 /**

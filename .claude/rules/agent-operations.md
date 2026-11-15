@@ -1,21 +1,11 @@
 # Agent Standard Operating Procedures
 
-Every agent MUST follow these procedures. Violations of these rules have caused real bugs, lost work, and wasted sessions.
+## Lessons Learned
 
-## MANDATORY: Read Before Acting
-
-Before writing any code, read:
-1. **This file** — common operations and anti-pattern avoidance
-2. **`.claude/rules/lessons-learned.md`** — anti-patterns from real bugs in this repo, and the
-   file `.claude/hooks/inject-lessons-learned.sh` reads to warn you before any Edit, Write, or
-   mutating Bash call.
-
-   It lives IN THE REPO, deliberately. It used to sit under the user-level memory directory at
-   an absolute path containing one machine's username, so on every other machine it resolved to
-   nothing: the hook took its silent `exit 0` and enforcement was off for entire sessions, while
-   the hook's own test skipped the check that would have noticed and reported success (#9605).
-   Knowledge that gates a hook belongs where the hook is — version-controlled, reviewed in PRs,
-   and portable across machines and contributors.
+`.claude/rules/lessons-learned.md` holds anti-patterns from real bugs in this repo, and
+`.claude/hooks/inject-lessons-learned.sh` reads it to warn you before any Edit, Write, or
+mutating Bash call. Both this file and that one load in every session. Keep it in the repo
+(its own header explains why).
 
 ## Taskboard Ownership
 
@@ -31,10 +21,15 @@ The orchestrator (main Claude session) owns ALL ticket lifecycle transitions. Su
 
 ### Before dispatching any agent (orchestrator steps)
 
-1. Ensure taskboard is running and has data:
+1. Ensure taskboard is running and has data. Go through the runtime launcher,
+   never a raw `taskboard start` — a raw start lets the binary fall back to
+   its own default database path, which can silently diverge from the one
+   the MCP server and `github_project_sync.py` resolve (#9995). The launcher
+   is the same entry point `.mcp.json` dials for the MCP server, and it
+   finds a Python 3 for you (`python3` is not a valid executable name on
+   Windows CPython), so it is the one documented start on every OS:
    ```bash
-   curl -s http://taskboard.localhost:1355/api/board > /dev/null || taskboard start --port 3010 &
-   sleep 2  # Wait for startup — NO --db flag, uses OS default
+   node .claude/hooks/taskboard-launch.mjs start   # resolves + verifies the ONE shared database
    # Verify board has tickets (0 = wrong DB path)
    curl -s http://taskboard.localhost:1355/api/board | python3 -c "import json,sys; c=len(json.load(sys.stdin).get('tickets',[])); print(f'{c} tickets')"
    ```
@@ -76,7 +71,7 @@ cd web && PORTLESS=0 npm run dev
 
 ## 2. Testing (CPU-Aware)
 
-**NEVER run the full vitest suite when you only changed a few files.** M2 has limited CPU — full suites block other agents.
+**Never run the full vitest suite for a small change.** It is CPU-heavy, concurrent runs block other agents and cause phantom failures, and the full suite runs before every PR anyway.
 
 ### Targeted Tests (PREFERRED during development)
 ```bash
@@ -216,30 +211,30 @@ vercel logs <deployment-url> --since 1h
 ```bash
 stripe logs tail                    # Live API logs
 stripe events list --limit 5       # Recent events
-stripe listen --forward-to http://spawnforge.localhost:1355/api/webhooks/stripe  # Local testing
+stripe listen --forward-to http://spawnforge.localhost:1355/api/stripe/webhook  # Local testing
 ```
 
 ## 7. Anti-Pattern Prevention
 
-These are the top anti-patterns from `.claude/rules/lessons-learned.md`. Check EVERY time.
+Check these before the matching edit.
 
 ### Before Editing panelRegistry.ts
-Read 10 lines before AND after the insertion point. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after. (#1 bug — 21 instances)
+Read 10 lines before AND after the insertion point. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after.
 
 ### Before Any rateLimit Call
-Verify `await` is present. `rateLimitPublicRoute()` is async. (#2 bug)
+Verify `await` is present. `rateLimitPublicRoute()` is async.
 
 ### Before Using `||` for Defaults
-Is the value ever legitimately `0`? Use `??`. Is the value from `Number()`? Check for NaN: `Number.isFinite()`. (#3 bug)
+Is the value ever legitimately `0`? Use `??`. Is the value from `Number()`? Check for NaN: `Number.isFinite()`.
 
 ### Before Creating a New Module
-Grep for the call sites that SHOULD use it. The module is not done until callers are wired. (#23 bug)
+Grep for the call sites that SHOULD use it. The module is not done until callers are wired.
 
 ### Before Any `forge.*` API Call in Generated Scripts
-Check `web/src/lib/scripting/forgeTypes.ts` — verify method exists, correct namespace, property vs function. (#28 bug)
+Check `web/src/lib/scripting/forgeTypes.ts` — verify method exists, correct namespace, property vs function.
 
 ### Before PR Body
-Use `Closes #NNNN` (GitHub issue number), NOT `Closes PF-XXX`. Run sync-push first. (#26 bug)
+Use `Closes #NNNN` (GitHub issue number), NOT `Closes PF-XXX`. Run sync-push first.
 
 ## 8. Browser Verification
 
@@ -287,3 +282,34 @@ The full conventions (running the suites, the shellcheck scope, fixture seams, s
 anti-tamper, the four-branch runtime assertion, and how to extend a fixture-seam suite) live
 in `.claude/rules/hook-testing.md`, which loads automatically whenever you touch
 `.claude/hooks/**`.
+
+## 13. Native Plan Mode
+
+Claude Code has a built-in plan mode. In it, Claude reads files and runs exploratory
+commands, then writes a plan, and file edits stay blocked until you approve that plan.
+Ways to enter it, checked against Claude Code 2.1.281 (`claude --help`, the `/plan`
+command) and https://code.claude.com/docs/en/permission-modes:
+
+- `/plan` enters plan mode. `/plan <description>` enters it and starts on that task.
+- `Shift+Tab` cycles the permission modes (`default` → `acceptEdits` → `plan`).
+- `claude --permission-mode plan` starts a session in plan mode.
+
+Approving the plan leaves plan mode and switches to the permission mode that the approve
+option names.
+
+**Plan mode does not replace a spec.** The Spec-First rule in `.claude/CLAUDE.md` still
+applies: nothing is implemented without an approved spec in `specs/`, and the `planner`
+skill (`.claude/skills/planner/SKILL.md`) still writes that spec. Plan mode works at a
+smaller scale. Use it inside a session, after the spec and ticket exist, to work out
+*how* to deliver one subtask before any file changes. Then check that plan against the
+ticket's acceptance criteria.
+
+Two limits:
+
+- **Not the default here.** The documented way to start every session in plan mode is
+  `defaultMode: "plan"` in `.claude/settings.json`. #8695 deliberately left that file
+  unchanged, so no project default is set. Enter plan mode yourself.
+- **Not enforced when bypass is available.** In an interactive terminal session where
+  `bypassPermissions` is available, plan mode's edit block is not enforced. Claude is
+  told to plan, but an edit made while planning goes through without a prompt. Treat it
+  as a planning aid, not a control.

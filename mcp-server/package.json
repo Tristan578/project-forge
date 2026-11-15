@@ -1,6 +1,6 @@
 {
   "name": "@project-forge/mcp-server",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MCP server for SpawnForge game engine — exposes all editor commands as AI tools",
   "type": "module",
   "engines": {
@@ -16,14 +16,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "ws": "^8.21.3",
-    "zod": "^4.5.4"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
-    "@types/ws": "^8.5.0",
-    "tsx": "^4.23.13",
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^5.0.0"
   },

@@ -19,7 +19,7 @@ export interface LightingSlice {
   setSkybox: (preset: string) => void;
   setCustomSkybox: (assetId: string, dataBase64: string) => void;
   removeSkybox: () => void;
-  updateSkybox: (changes: { brightness?: number; iblIntensity?: number; rotation?: number }) => void;
+  updateSkybox: (changes: { brightness?: number | undefined; iblIntensity?: number | undefined; rotation?: number | undefined }) => void;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;

@@ -26,14 +26,14 @@ export type GameEventType = (typeof GAME_EVENT_TYPES)[number];
 export interface GameAnalyticsEvent {
   type: GameEventType;
   timestamp: number;
-  position?: { x: number; y: number; z: number };
-  metadata?: Record<string, unknown>;
+  position?: { x: number; y: number; z: number } | undefined;
+  metadata?: Record<string, unknown> | undefined;
 }
 
 export interface PlayerSession {
   sessionId: string;
   startTime: number;
-  endTime?: number;
+  endTime?: number | undefined;
   duration: number;
   events: GameAnalyticsEvent[];
 }

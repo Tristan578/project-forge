@@ -72,6 +72,12 @@ describe('posthog analytics wrapper', () => {
       // surface instead of betting on library internals (#9047).
       asset_host: POSTHOG_ASSET_ORIGIN,
       person_profiles: 'identified_only',
+      // Stated, not derived (#8947): posthog-js 1.419.0 turned web-vitals
+      // attribution on by default and `undefined` lets remote config decide.
+      // The object form is pinned so a bare `false` (which also drops the
+      // network timing Session Replay needs) or a silent revert to the
+      // library default fails here.
+      capture_performance: { web_vitals: true, web_vitals_attribution: false },
       capture_pageview: false,
     }));
   });
@@ -167,6 +173,12 @@ describe('posthog analytics wrapper', () => {
       // surface instead of betting on library internals (#9047).
       asset_host: POSTHOG_ASSET_ORIGIN,
       person_profiles: 'identified_only',
+      // Stated, not derived (#8947): posthog-js 1.419.0 turned web-vitals
+      // attribution on by default and `undefined` lets remote config decide.
+      // The object form is pinned so a bare `false` (which also drops the
+      // network timing Session Replay needs) or a silent revert to the
+      // library default fails here.
+      capture_performance: { web_vitals: true, web_vitals_attribution: false },
       capture_pageview: false,
     }));
   });

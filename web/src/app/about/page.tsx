@@ -75,13 +75,13 @@ export default async function AboutPage() {
         <h2 className="mb-4 text-2xl font-semibold text-white">Architecture</h2>
         <div className="space-y-3 text-zinc-300 leading-relaxed">
           <p>
-            <strong className="text-white">Engine:</strong> Built in Rust using the Bevy 0.18 ECS
+            <strong className="text-white">Engine:</strong> Built in Rust using the Bevy 0.19 ECS
             framework, compiled to WebAssembly via wasm-bindgen. The engine handles scene
             management, physics (Rapier 3D and 2D), rendering, animation, particles, and audio
             metadata — all at native speed in the browser.
           </p>
           <p>
-            <strong className="text-white">Rendering:</strong> WebGPU primary (wgpu 27) with
+            <strong className="text-white">Rendering:</strong> WebGPU primary (wgpu 29) with
             automatic WebGL2 fallback. Four binaries — two editor and two runtime variants —
             ensure compatibility across Chrome, Firefox, Safari, and Edge.
           </p>

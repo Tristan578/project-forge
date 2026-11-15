@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
-import { parseArgs } from './types';
+import { ownEntry, parseArgs } from './types';
 import {
   extractTranslatableStrings,
   SUPPORTED_LOCALES,
@@ -26,19 +26,23 @@ function buildSceneForExtraction(store: Parameters<ToolHandler>[1]['store']): Sc
   const scene: SceneForExtraction = {};
 
   // Entity names from scene graph
+  // NonNullable, not the bare indexed type: we're inside the truthy guard, so
+  // the value is never undefined here, but `SceneForExtraction['nodes']`
+  // (from an OPTIONAL field) still types as `X | undefined`, which the
+  // property write below would then reject under exactOptionalPropertyTypes.
   if (store.sceneGraph?.nodes) {
-    scene.nodes = store.sceneGraph.nodes as SceneForExtraction['nodes'];
+    scene.nodes = store.sceneGraph.nodes as NonNullable<SceneForExtraction['nodes']>;
   }
 
   // Dialogue trees (present when dialogue system is active)
   const storeAsUnknown = store as unknown as Record<string, unknown>;
   if (storeAsUnknown.dialogueTrees) {
-    scene.dialogueTrees = storeAsUnknown.dialogueTrees as SceneForExtraction['dialogueTrees'];
+    scene.dialogueTrees = storeAsUnknown.dialogueTrees as NonNullable<SceneForExtraction['dialogueTrees']>;
   }
 
   // UI widgets (present when UI builder is active)
   if (storeAsUnknown.uiWidgets) {
-    scene.uiWidgets = storeAsUnknown.uiWidgets as SceneForExtraction['uiWidgets'];
+    scene.uiWidgets = storeAsUnknown.uiWidgets as NonNullable<SceneForExtraction['uiWidgets']>;
   }
 
   return scene;
@@ -234,7 +238,7 @@ export const localizationHandlers: Record<string, ToolHandler> = {
 
     const localeDetails = available.map((code) => {
       const def = LOCALE_MAP.get(code);
-      const bundle = store.locales[code];
+      const bundle = ownEntry(store.locales, code);
       return {
         code,
         displayName: def?.displayName ?? code,

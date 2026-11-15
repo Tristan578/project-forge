@@ -18,7 +18,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 
 ## Rendering Strategy
 
-- **Primary: WebGPU** (Bevy 0.18, wgpu 27) — auto-detected via `navigator.gpu`
+- **Primary: WebGPU** (Bevy 0.19, wgpu 29) — auto-detected via `navigator.gpu`
 - **Fallback: WebGL2** — for browsers without WebGPU
 - **4 binaries**: 2 editor + 2 runtime (WebGPU/WebGL2), JS auto-selects at runtime
 - **MUST include `tonemapping_luts`** Bevy feature — without it, materials render pink/magenta
@@ -43,7 +43,7 @@ Declared in `engine/Cargo.toml` (`webgl2`, `webgpu`, `runtime`; `default = []`).
 1. **Spec-First:** Never implement without an approved spec in `specs/`
 2. **Test-First:** Never write logic without a failing test case
 3. **Bridge Isolation:** Only `bridge/` may import `web_sys`/`js_sys`/`wasm_bindgen`
-4. **Taskboard-Driven:** ALL work tracked on taskboard. Use `/kanban` skill.
+4. **Issue-Driven:** All work is tracked as GitHub issues, the backlog of record. The taskboard (`/kanban`) is a local view synced with them.
 5. **Worktree Commit Safety:** Commit after every logical chunk. Uncommitted work is permanently lost.
 6. **Keep Context Current:** Update `.claude/rules/` and `MEMORY.md` as part of every iteration
 
@@ -63,18 +63,20 @@ Key: `_` prefix for unused params, no `useRef.current` during render, no blanket
 
 | File | Contents |
 |------|----------|
-| `rules/bevy-api.md` | Bevy 0.18 API, 0.16->0.18 migration, ECS limits, library APIs |
+| `rules/bevy-api.md` | Bevy 0.19 API, 0.16->0.19 migration, ECS limits, library APIs |
 | `rules/entity-snapshot.md` | EntityType, EntitySnapshot, history, selection events |
 | `rules/web-quality.md` | ESLint rules, React patterns, Next.js constraints |
 | `rules/library-apis.md` | csgrs, noise, terrain, texture pipeline, particles |
 | `rules/file-map.md` | Engine + web structure, communication pattern |
-| `rules/gotchas.md` | Index of the four gotchas files below (always loaded; the bodies are not) |
+| `rules/gotchas.md` | Index of the five gotchas files below (always loaded; the bodies are not) |
 | `rules/gotchas-build-ci.md` | Build/CI, lockfiles, self-defense gates, npm audit, RSC boundary, bundle size |
 | `rules/gotchas-web.md` | Database, API & security, WASM/CDN, UI & frontend |
 | `rules/gotchas-engine.md` | Engine & game loop: command wire, route_domain, component carry, physics |
 | `rules/gotchas-ops.md` | Claude Code config, deploy/service infrastructure, enforcement hooks |
+| `rules/gotchas-codex-port.md` | The generated Codex CLI surface: what `tools/agentic-sync/port.mjs` derives from `.claude/`, the regen recipe, adding a hook |
 | `rules/agent-operations.md` | Agent SOPs, testing, committing, PR creation |
 | `rules/hook-testing.md` | Conventions for the bash suites under `.claude/hooks/__tests__/` |
+| `rules/lessons-learned.md` | Anti-patterns from real bugs; read by `inject-lessons-learned.sh` before Edit/Write/Bash |
 
-Every file except `gotchas.md` carries `paths:` frontmatter and loads only in sessions that
-touch its area; `Read` one directly if you need it outside those paths.
+`gotchas.md`, `agent-operations.md` and `lessons-learned.md` load in every session. Every other
+file carries `paths:` frontmatter and loads only in sessions that touch its area; `Read` one directly if you need it outside those paths.

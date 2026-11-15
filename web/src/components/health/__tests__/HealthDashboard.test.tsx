@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, waitFor, cleanup, act, fireEvent } from '@/test/utils/componentTestUtils';
 import { HealthDashboard, type WireReport } from '../HealthDashboard';
 import type { HealthReport, ServiceHealth } from '@/lib/monitoring/healthChecks';
 
@@ -380,6 +380,33 @@ describe('HealthDashboard', () => {
    * ring-less buttons — turns them red.
    */
   describe('named design-system semantics (#10093 / #9108)', () => {
+    it('retries a failed initial load, disables Retry while pending and replaces the shell on success', async () => {
+      let resolveResponse!: (response: Response) => void;
+      const response = new Promise<Response>((resolve) => { resolveResponse = resolve; });
+      const fetch = vi.fn()
+        .mockRejectedValueOnce(new Error('initial network failure'))
+        .mockImplementationOnce(() => response);
+      vi.stubGlobal('fetch', fetch);
+      render(<HealthDashboard initialReport={null} />);
+      const retry = screen.getByRole('button', { name: 'Retry' });
+      await waitFor(() => expect(retry).toBeEnabled());
+      expect(fetch).toHaveBeenCalledTimes(1);
+      fireEvent.click(retry);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenLastCalledWith('/api/health', { cache: 'no-store' });
+      expect(retry).toBeDisabled();
+      const wire: WireReport = {
+        ...makeReport('healthy', allHealthyServices),
+        services: allHealthyServices.map((service) => ({ ...service, status: 'up' })),
+      };
+      await act(async () => {
+        resolveResponse(new Response(JSON.stringify(wire), { status: 200 }));
+      });
+      expect(screen.getByText('All Systems Operational')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+    });
+
     const bannerCases: Array<[HealthReport['overall'], string, string, string]> = [
       ['healthy', 'All Systems Operational', 'bg-[var(--sf-status-healthy-bg)]', 'text-[var(--sf-status-healthy-fg)]'],
       ['degraded', 'Partial Service Disruption', 'bg-[var(--sf-status-degraded-bg)]', 'text-[var(--sf-status-degraded-fg)]'],

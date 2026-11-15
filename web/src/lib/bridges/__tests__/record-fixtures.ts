@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const ASEPRITE_BIN = process.env.ASEPRITE_PATH
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an explicitly blank ASEPRITE_PATH env var and an unset one are operationally identical
   || '/Applications/Aseprite.app/Contents/MacOS/aseprite';
 
 interface FixtureRecord {

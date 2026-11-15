@@ -30,12 +30,14 @@ run_hook() {
     | bash "$HOOK" >/dev/null 2>&1
   echo $?
 }
+readonly -f run_hook
 
 # run_hook_raw <raw_stdin> -> echoes the hook's exit code (malformed-input path).
 run_hook_raw() {
   printf '%s' "$1" | bash "$HOOK" >/dev/null 2>&1
   echo $?
 }
+readonly -f run_hook_raw
 
 assert_exit() {
   local desc="$1" expected="$2" actual="$3"
@@ -47,6 +49,7 @@ assert_exit() {
     printf '  FAIL %s (expected exit %s, got %s)\n' "$desc" "$expected" "$actual"
   fi
 }
+readonly -f assert_exit
 
 FAIL_COMPLETE="VERDICT: FAIL — fix the missing await on the rateLimitPublicRoute() call in web/src/lib/api/foo.ts line 12."
 FAIL_NO_FILEREF="VERDICT: FAIL — add the missing guard before the deduction, it is required for correctness here."

@@ -59,7 +59,7 @@ export interface LocalCommandStore {
 
 /** The camera a script's `forge.camera.*` call addresses, or `null` if none. */
 function activeCameraId(store: LocalCommandStore): string | null {
-  return store.activeGameCameraId || store.primaryId || null;
+  return store.activeGameCameraId ?? store.primaryId ?? null;
 }
 
 /**

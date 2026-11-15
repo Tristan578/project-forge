@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useId } from 'react';
 import { Globe, Users, Map, Clock, BookOpen, Scroll, Download, Sparkles, ChevronDown, ChevronRight, Loader2, AlertTriangle } from 'lucide-react';
 import {
   WORLD_PRESETS,
@@ -244,6 +244,10 @@ const PRESET_OPTIONS = [
 ];
 
 export function WorldBuilderPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [description, setDescription] = useState('');
   const [selectedPreset, setSelectedPreset] = useState('');
   const [world, setWorld] = useState<GameWorld | null>(null);
@@ -315,11 +319,11 @@ export function WorldBuilderPanel() {
             rows={3}
           />
 
-          <label className="block text-[11px] text-zinc-400" htmlFor="world-preset">
+          <label className="block text-[11px] text-zinc-400" htmlFor={fieldId('world-preset')}>
             Genre preset (optional)
           </label>
           <select
-            id="world-preset"
+            id={fieldId('world-preset')}
             value={selectedPreset}
             onChange={(e) => setSelectedPreset(e.target.value)}
             className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"

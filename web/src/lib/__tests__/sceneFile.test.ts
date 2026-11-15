@@ -101,6 +101,29 @@ describe('readSceneFile', () => {
     warnSpy.mockRestore();
   });
 
+  // #9998: the completion mode is an optional top-level key, deliberately NOT
+  // a formatVersion bump — see lib/scenes/sceneCompletionMode.ts. A `.forge`
+  // file must carry it through the reader unchanged at the current version,
+  // and through the migration chain from an older one.
+  it('keeps the completionMode key of a current-version file', async () => {
+    const json = JSON.stringify({ formatVersion: CURRENT_FORMAT_VERSION, scene: {}, completionMode: 'sandbox' });
+    expect(JSON.parse(await readSceneFile(makeFile(json))).completionMode).toBe('sandbox');
+  });
+
+  it('keeps the completionMode key across the v1 -> current migration', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const json = JSON.stringify({ formatVersion: 1, scene: {}, completionMode: 'narrative' });
+    expect(JSON.parse(await readSceneFile(makeFile(json))).completionMode).toBe('narrative');
+    vi.mocked(console.warn).mockRestore();
+  });
+
+  it('does not invent a completionMode for a legacy file (absent means win)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const json = JSON.stringify({ formatVersion: 1, scene: {} });
+    expect(JSON.parse(await readSceneFile(makeFile(json)))).not.toHaveProperty('completionMode');
+    vi.mocked(console.warn).mockRestore();
+  });
+
   it('should reject file without formatVersion', async () => {
     const json = JSON.stringify({ scene: {} });
     await expect(readSceneFile(makeFile(json))).rejects.toThrow('missing formatVersion');

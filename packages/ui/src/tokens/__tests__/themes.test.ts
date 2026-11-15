@@ -353,13 +353,13 @@ describe('Theme Definitions', () => {
     ['--sf-status-unknown-fg', '--sf-status-unknown-bg', 'unknown'],
   ];
 
-  it.each(THEMES)('%s theme defines every status-colour token as valid hex', (theme) => {
+  it.each(THEMES)('%s theme defines every status-colour token as opaque hex', (theme) => {
     const tokens = THEME_DEFINITIONS[theme];
     for (const [fgKey, bgKey] of STATUS_PAIRS) {
       for (const key of [fgKey, bgKey]) {
         expect(tokens[key], `${theme} missing ${key}`).toBeDefined();
         expect(tokens[key], `${theme}.${key} = ${tokens[key]}`).toMatch(
-          /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
+          /^#[0-9a-fA-F]{6}$/
         );
       }
     }
@@ -380,4 +380,14 @@ describe('Theme Definitions', () => {
       }
     }
   );
+
+  it.each(THEMES)('%s: service status dots and labels meet contrast on cards', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    for (const status of ['healthy', 'degraded', 'down', 'unknown'] as const) {
+      const key = ('--sf-status-' + status + '-indicator') as keyof ThemeTokens;
+      expect(tokens[key], theme + ' ' + key).toMatch(/^#[0-9a-fA-F]{6}$/);
+      const ratio = contrastRatio(tokens[key], tokens['--sf-bg-surface']);
+      expect(ratio, theme + ' ' + status + ': ' + ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 });

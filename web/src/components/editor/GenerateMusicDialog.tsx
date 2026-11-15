@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
@@ -10,6 +10,7 @@ import { useAIGeneration } from '@/hooks/useAIGeneration';
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { trackJob, makeJobId } from '@/lib/chat/handlers/generationHandlers';
 import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
@@ -17,10 +18,14 @@ import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
 interface GenerateMusicDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  entityId?: string;
+  entityId?: string | undefined;
 }
 
 export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusicDialogProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [duration, setDuration] = useState(30);
   const [instrumental, setInstrumental] = useState(true);
@@ -91,6 +96,22 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
           audioBase64: data.audioBase64,
           entityId: target,
           sink: useEditorStore.getState(),
+        });
+        // Hand the generated track to the shared arrangement (#9854): it lands
+        // as a clip in the Music Arrangement editor instead of being a
+        // play-only, standalone result, so imported and generated material sit
+        // in one editable timeline. `Number.isFinite`, not `||`, so a 0-length
+        // report cannot mask a real duration with a default — but 0 itself is
+        // not a real duration either, matching the `> 0` guard in
+        // `generationHandlers.ts` and `useGenerationPolling.ts` (#10058).
+        const durationSeconds =
+          typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds) && data.durationSeconds > 0
+            ? data.durationSeconds
+            : duration;
+        useMusicArrangementStore.getState().addGeneratedClip({
+          sourceUrl: assetName,
+          durationSeconds,
+          name: assetName,
         });
         return target
           ? `Music generated and attached as "${assetName}".`
@@ -178,10 +199,11 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
 
           {/* Duration */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">
+            <label htmlFor={fieldId('duration')} className="mb-1 block text-xs font-medium text-zinc-300">
               Duration: {duration}s
             </label>
             <input
+              id={fieldId('duration')}
               type="range"
               min={15}
               max={120}
@@ -223,6 +245,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
                 className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
               />
               <label htmlFor="attach" className="text-xs text-zinc-300">
+                {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank primary entity name is unset; falls back to a display placeholder */}
                 Auto-attach to <span className="font-medium">{primaryName || 'selected entity'}</span>
               </label>
             </div>

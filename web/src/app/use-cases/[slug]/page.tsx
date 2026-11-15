@@ -1,3 +1,4 @@
+/** Cached marketing use-case pages and metadata for the curated supported slugs. */
 import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
 import Link from 'next/link';
@@ -5,12 +6,19 @@ import { notFound } from 'next/navigation';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
+/** Curated marketing copy, feature examples, and call to action for one use case. */
 interface UseCaseData {
+  /** Display name used in the page heading and metadata. */
   name: string;
+  /** Supported route slug. */
   slug: string;
+  /** Search and sharing description. */
   description: string;
+  /** Introductory page copy. */
   intro: string;
+  /** Feature headings and descriptions displayed in order. */
   features: { title: string; text: string }[];
+  /** Final call-to-action heading. */
   cta: string;
 }
 
@@ -60,7 +68,7 @@ const useCases: Record<string, UseCaseData> = {
       },
       {
         title: 'Game Components',
-        text: '12 drag-and-drop behaviors including Health, Collectible, Inventory, and NPC. Configure properties in the inspector without code.',
+        text: '13 drag-and-drop behaviors including Health, Collectible, Checkpoint, and DialogueTrigger. Configure properties in the inspector without code.',
       },
       {
         title: 'Visual Scripting',
@@ -174,16 +182,28 @@ const useCases: Record<string, UseCaseData> = {
 
 const validSlugs = Object.keys(useCases);
 
+/** Restrict routes to generated curated slugs; other paths receive a 404. */
 export const dynamicParams = false;
 
+/**
+ * Enumerate every curated use-case route for Next.js generation.
+ * @returns Supported slug parameter objects.
+ */
 export function generateStaticParams() {
   return validSlugs.map((slug) => ({ slug }));
 }
 
+/** Next.js route props shared by page rendering and metadata generation. */
 interface UseCasePageProps {
+  /** Asynchronous route parameters supplied by Next.js. */
   params: Promise<{ slug: string }>;
 }
 
+/**
+ * Build metadata from curated copy, with a Not Found title for unknown slugs.
+ * @param props Next.js props containing asynchronous slug parameters.
+ * @returns Page metadata, or the unknown-slug title fallback.
+ */
 export async function generateMetadata({ params }: UseCasePageProps): Promise<Metadata> {
   const { slug } = await params;
   const uc = useCases[slug];
@@ -200,6 +220,12 @@ export async function generateMetadata({ params }: UseCasePageProps): Promise<Me
   };
 }
 
+/**
+ * Render a curated page cached with the days profile and use-cases cache tag.
+ * @param props Next.js props containing asynchronous slug parameters.
+ * @returns Page content and static structured data for a supported slug.
+ * @throws Next.js notFound control flow when the slug has no curated entry.
+ */
 export default async function UseCasePage({ params }: UseCasePageProps) {
   'use cache';
   cacheLife('days');

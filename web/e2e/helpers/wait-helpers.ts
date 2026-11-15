@@ -81,6 +81,7 @@ export async function waitForEngineReady(
   await page.waitForFunction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     () => (window as any).__FORGE_ENGINE_READY === true,
+    undefined,
     { timeout },
   );
 }
@@ -99,6 +100,7 @@ export async function waitForHydration(
   await page.waitForFunction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     () => (window as any).__REACT_HYDRATED === true,
+    undefined,
     { timeout },
   );
 }
@@ -176,6 +178,7 @@ export async function waitForConsoleStable(
   await page.waitForFunction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     () => (window as any).__REACT_HYDRATED === true,
+    undefined,
     { timeout },
   ).catch(() => {
     // If hydration flag isn't set (e.g. non-editor page), just wait for load

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState, useMemo, memo } from 'react';
+import { useCallback, useId, useRef, useState, useMemo, memo } from 'react';
 import { Image as ImageIcon, X, ChevronDown, ChevronRight, BookmarkPlus, Sparkles, HelpCircle, Layers } from 'lucide-react';
 import { useEditorStore, type MaterialData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -9,6 +9,8 @@ import { MATERIAL_PRESETS, ALL_CATEGORIES, getPresetById, saveCustomMaterial, ty
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
+import { readTextureFile, fileReadFailureMessage, textureLoadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import { showError } from '@/lib/toast';
 import { CustomWgslEditor } from './CustomWgslEditor';
 
 interface SliderRowProps {
@@ -23,7 +25,9 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange, tooltipTerm, tooltipText }: SliderRowProps) {
-  const inputId = `slider-${label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
+  // useId, not an id derived from the label: a label-derived id repeats when
+  // the inspector mounts twice, and whenever two rows share a label.
+  const inputId = useId();
   return (
     <div className="flex items-center gap-2">
       <label htmlFor={inputId} className="w-20 shrink-0 text-xs text-zinc-400">
@@ -64,6 +68,8 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   const removeTexture = useEditorStore((s) => s.removeTexture);
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const fileRef = useRef<HTMLInputElement>(null);
+  const selectId = useId();
+  const noteId = useId();
 
   const assetName = textureRef ? assetRegistry[textureRef]?.name : null;
 
@@ -76,13 +82,25 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const file = files[0];
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(',')[1];
-      loadTexture(base64, file.name, entityId, slot);
-    };
-    reader.readAsDataURL(file);
+    // The data URL is sent whole, its type filled in from the extension
+    // when the OS declared none: the header is how the engine learns the
+    // format, and it refuses anything but PNG/JPEG by name (#10396).
+    let dataUrl: string;
+    try {
+      dataUrl = await readTextureFile(file);
+    } catch {
+      showError(fileReadFailureMessage(file.name));
+      return;
+    }
+    // Outside the read's try: a throw from the store action is a load
+    // failure, not an unreadable file, and must not be reported as one. It
+    // is caught rather than left to propagate because this is an event
+    // handler, where a rejection reaches nobody.
+    try {
+      loadTexture(dataUrl, file.name, entityId, slot);
+    } catch (error) {
+      showError(textureLoadFailureMessage(file.name, error));
+    }
   }, [loadTexture, entityId, slot]);
 
   const handleSelectChange = useCallback((value: string) => {
@@ -90,75 +108,97 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
       fileRef.current?.click();
     } else if (value === '__none__') {
       removeTexture(entityId, slot);
-    } else {
-      // value is an asset ID — load it into this slot
-      // For existing assets, we fire loadTexture with the asset's data
-      // But the asset is already loaded; we need to assign it to this slot
-      // The texture is referenced by asset ID
-      loadTexture('', value, entityId, slot);
     }
-  }, [loadTexture, removeTexture, entityId, slot]);
+    // Any other value is an existing asset's id. Assigning one to a slot
+    // needs a command the engine does not have yet (#10398); the option is
+    // disabled, and a programmatic change lands here and does nothing. It
+    // used to send an empty body as a texture, which the engine refused.
+  }, [removeTexture, entityId, slot]);
+
+  const hasAssets = textureAssets.length > 0;
+  // Assets other than the slot's own: listed so a person can see them, but
+  // not offered, because assigning by id needs an engine command that does
+  // not exist yet (#10398). The slot's current texture reads as itself.
+  const hasOtherAssets = textureAssets.some((asset) => asset.id !== textureRef);
 
   return (
-    <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400">
-        {label}
-        {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
-      </label>
-      {textureAssets.length > 0 ? (
-        <>
-          <select
-            value={textureRef ?? '__none__'}
-            onChange={(e) => handleSelectChange(e.target.value)}
-            className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
-          >
-            <option value="__none__">None</option>
-            {textureAssets.map((asset) => (
-              <option key={asset.id} value={asset.id}>{asset.name}</option>
-            ))}
-            <option value="__upload__">Upload new...</option>
-          </select>
-          {textureRef && (
-            <button
-              className="shrink-0 rounded p-0.5 text-zinc-400 hover:text-red-400"
-              onClick={() => removeTexture(entityId, slot)}
-              title="Remove texture"
+    <div>
+      <div className="flex items-center gap-2">
+        {/* `for` must name an element that is there: with no texture asset
+            the select is replaced by an Upload button that names itself. */}
+        <label htmlFor={hasAssets ? selectId : undefined} className="w-20 shrink-0 text-xs text-zinc-400">
+          {label}
+          {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
+        </label>
+        {hasAssets ? (
+          <>
+            <select
+              id={selectId}
+              value={textureRef ?? '__none__'}
+              onChange={(e) => handleSelectChange(e.target.value)}
+              aria-describedby={hasOtherAssets ? noteId : undefined}
+              className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
             >
-              <X size={12} />
-            </button>
-          )}
-        </>
-      ) : (
-        <>
-          <button
-            className="flex items-center gap-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-400 hover:border-[var(--sf-border-strong)] hover:text-zinc-200"
-            onClick={() => fileRef.current?.click()}
-            title={`Upload ${label.toLowerCase()} texture`}
-          >
-            <ImageIcon size={12} />
-            <span>Upload</span>
-          </button>
-          {textureRef && (
+              <option value="__none__">None</option>
+              {textureAssets.map((asset) => (
+                asset.id === textureRef
+                  ? <option key={asset.id} value={asset.id}>{asset.name}</option>
+                  : <option key={asset.id} value={asset.id} disabled>{asset.name} (assign not available yet)</option>
+              ))}
+              <option value="__upload__">Upload new...</option>
+            </select>
+            {textureRef && (
+              <button
+                className="shrink-0 rounded p-0.5 text-zinc-400 hover:text-red-400"
+                onClick={() => removeTexture(entityId, slot)}
+                title="Remove texture"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </>
+        ) : (
+          <>
             <button
-              className="rounded p-0.5 text-zinc-400 hover:text-red-400"
-              onClick={() => removeTexture(entityId, slot)}
-              title="Remove texture"
+              className="flex items-center gap-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-400 hover:border-[var(--sf-border-strong)] hover:text-zinc-200"
+              onClick={() => fileRef.current?.click()}
+              aria-label={`Upload ${label.toLowerCase()} texture`}
+              title={`Upload ${label.toLowerCase()} texture`}
             >
-              <X size={12} />
+              <ImageIcon size={12} />
+              <span>Upload</span>
             </button>
-          )}
-          <span className="truncate text-[10px] text-zinc-400">
-            {assetName ?? (textureRef ? textureRef.slice(0, 8) + '...' : 'none')}
-          </span>
-        </>
+            {textureRef && (
+              <button
+                className="rounded p-0.5 text-zinc-400 hover:text-red-400"
+                onClick={() => removeTexture(entityId, slot)}
+                title="Remove texture"
+              >
+                <X size={12} />
+              </button>
+            )}
+            <span className="truncate text-[10px] text-zinc-400">
+              {assetName ?? (textureRef ? textureRef.slice(0, 8) + '...' : 'none')}
+            </span>
+          </>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".png,.jpg,.jpeg"
+          aria-label={`Upload ${label.toLowerCase()} texture file`}
+          className="hidden"
+          onChange={(e) => handleFileSelect(e.target.files)}
+        />
+      </div>
+      {/* The note is a block under the row, never a flex sibling of the
+          select: as one it kept its width and squeezed the select to
+          nothing whenever another texture asset existed. */}
+      {hasAssets && hasOtherAssets && (
+        <p id={noteId} className="mt-0.5 pl-[5.5rem] text-[10px] text-zinc-500">
+          Assign not available yet (#10398); upload instead
+        </p>
       )}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".png,.jpg,.jpeg,.webp"
-        className="hidden"
-        onChange={(e) => handleFileSelect(e.target.files)}
-      />
     </div>
   );
 }
@@ -186,12 +226,14 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
 
 function PresetSelector({ onApply, onSaveToLibrary }: { onApply: (preset: MaterialPreset) => void; onSaveToLibrary: () => void }) {
   const [selectedId, setSelectedId] = useState<string>('');
+  const presetId = useId();
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
-        <label className="w-20 shrink-0 text-xs text-zinc-400">Preset<InfoTooltip term="materialPreset" /></label>
+        <label htmlFor={presetId} className="w-20 shrink-0 text-xs text-zinc-400">Preset<InfoTooltip term="materialPreset" /></label>
         <select
+          id={presetId}
           value={selectedId}
           onChange={(e) => setSelectedId(e.target.value)}
           className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
@@ -252,6 +294,10 @@ export const MaterialInspector = memo(function MaterialInspector() {
   const removeShaderEffect = useEditorStore((s) => s.removeShaderEffect);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
   const openShaderEditor = useShaderEditorStore((s) => s.openShaderEditor);
+  // useId, not literal ids: the inspector can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
 
   const handleUpdate = useCallback(
     (partial: Partial<MaterialData>) => {
@@ -353,8 +399,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
         {/* Shader Effect */}
         <CollapsibleSection title="Shader Effect" defaultOpen={shaderType !== 'none'}>
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Type<InfoTooltip term="shaderType" /></label>
+            <label htmlFor={fieldId('shader-type')} className="w-20 shrink-0 text-xs text-zinc-400">Type<InfoTooltip term="shaderType" /></label>
             <select
+              id={fieldId('shader-type')}
               value={shaderType}
               onChange={(e) => handleShaderTypeChange(e.target.value)}
               className="flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
@@ -378,8 +425,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
             <>
               {/* Common params */}
               <div className="flex items-center gap-2">
-                <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip text="The color applied to this shader effect" /></label>
+                <label htmlFor={fieldId('shader-color')} className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip text="The color applied to this shader effect" /></label>
                 <input
+                  id={fieldId('shader-color')}
                   type="color"
                   value={linearToHex(primaryShaderEffect.customColor[0], primaryShaderEffect.customColor[1], primaryShaderEffect.customColor[2])}
                   onChange={(e) => {
@@ -453,8 +501,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Base Color */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip term="baseColor" /></label>
+          <label htmlFor={fieldId('base-color')} className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip term="baseColor" /></label>
           <input
+            id={fieldId('base-color')}
             type="color"
             value={baseColorHex}
             onChange={(e) => {
@@ -486,8 +535,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Metallic */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Metallic<InfoTooltip term="metallic" /></label>
+          <label htmlFor={fieldId('metallic')} className="w-20 shrink-0 text-xs text-zinc-400">Metallic<InfoTooltip term="metallic" /></label>
           <input
+            id={fieldId('metallic')}
             type="range"
             min={0}
             max={1}
@@ -506,8 +556,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Roughness */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Roughness<InfoTooltip term="roughness" /></label>
+          <label htmlFor={fieldId('roughness')} className="w-20 shrink-0 text-xs text-zinc-400">Roughness<InfoTooltip term="roughness" /></label>
           <input
+            id={fieldId('roughness')}
             type="range"
             min={0}
             max={1}
@@ -526,8 +577,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Reflectance */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Reflectance<InfoTooltip term="reflectance" /></label>
+          <label htmlFor={fieldId('reflectance')} className="w-20 shrink-0 text-xs text-zinc-400">Reflectance<InfoTooltip term="reflectance" /></label>
           <input
+            id={fieldId('reflectance')}
             type="range"
             min={0}
             max={1}
@@ -546,8 +598,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Emissive */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Emissive<InfoTooltip term="emissive" /></label>
+          <label htmlFor={fieldId('emissive')} className="w-20 shrink-0 text-xs text-zinc-400">Emissive<InfoTooltip term="emissive" /></label>
           <input
+            id={fieldId('emissive')}
             type="color"
             value={emissiveHex}
             onChange={(e) => {
@@ -581,8 +634,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Double Sided */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Double Sided<InfoTooltip term="doubleSided" /></label>
+          <label htmlFor={fieldId('double-sided')} className="w-20 shrink-0 text-xs text-zinc-400">Double Sided<InfoTooltip term="doubleSided" /></label>
           <input
+            id={fieldId('double-sided')}
             type="checkbox"
             checked={primaryMaterial.doubleSided}
             onChange={(e) => handleUpdate({ doubleSided: e.target.checked })}
@@ -593,8 +647,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Unlit */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Unlit<InfoTooltip term="unlit" /></label>
+          <label htmlFor={fieldId('unlit')} className="w-20 shrink-0 text-xs text-zinc-400">Unlit<InfoTooltip term="unlit" /></label>
           <input
+            id={fieldId('unlit')}
             type="checkbox"
             checked={primaryMaterial.unlit}
             onChange={(e) => handleUpdate({ unlit: e.target.checked })}
@@ -647,8 +702,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
           <TextureSlot label="Depth Map" slot="depth_map" textureRef={primaryMaterial.depthMapTexture} entityId={primaryId} tooltipTerm="depthMap" />
           <SliderRow label="Depth Scale" value={primaryMaterial.parallaxDepthScale ?? 0.1} min={0} max={0.5} step={0.005} onChange={(v) => handleUpdate({ parallaxDepthScale: v })} tooltipTerm="depthScale" />
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Method<InfoTooltip term="parallaxMethod" /></label>
+            <label htmlFor={fieldId('parallax-method')} className="w-20 shrink-0 text-xs text-zinc-400">Method<InfoTooltip term="parallaxMethod" /></label>
             <select
+              id={fieldId('parallax-method')}
               value={primaryMaterial.parallaxMappingMethod ?? 'occlusion'}
               onChange={(e) => handleUpdate({ parallaxMappingMethod: e.target.value as 'occlusion' | 'relief' })}
               className="flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
@@ -686,17 +742,24 @@ export const MaterialInspector = memo(function MaterialInspector() {
           </div>
           <SliderRow label="Thickness" value={primaryMaterial.thickness ?? 0} min={0} max={10} step={0.01} onChange={(v) => handleUpdate({ thickness: v })} tooltipTerm="transmissionThickness" />
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Atten. Dist.<InfoTooltip term="attenuationDist" /></label>
+            {/* The label names the distance slider; the checkbox beside it
+                is the separate "Infinite" switch, named on its own. The
+                slider is absent while "Infinite" is on, so `for` is too. */}
+            <label
+              htmlFor={primaryMaterial.attenuationDistance != null ? fieldId('attenuation-distance') : undefined}
+              className="w-20 shrink-0 text-xs text-zinc-400">Atten. Dist.<InfoTooltip term="attenuationDist" /></label>
             <input
               type="checkbox"
               checked={primaryMaterial.attenuationDistance == null}
               onChange={(e) => handleUpdate({ attenuationDistance: e.target.checked ? null : 10 })}
               className="h-3 w-3 rounded border-[var(--sf-border)] bg-[var(--sf-bg-surface)] text-blue-500"
+              aria-label="Infinite attenuation distance"
               title="Infinite attenuation distance"
             />
             <span className="text-[10px] text-zinc-400">Infinite</span>
             {primaryMaterial.attenuationDistance != null && (
               <input
+                id={fieldId('attenuation-distance')}
                 type="range"
                 min={0.01}
                 max={1000}
@@ -711,8 +774,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Atten. Color<InfoTooltip term="attenuationColor" /></label>
+            <label htmlFor={fieldId('attenuation-color')} className="w-20 shrink-0 text-xs text-zinc-400">Atten. Color<InfoTooltip term="attenuationColor" /></label>
             <input
+              id={fieldId('attenuation-color')}
               type="color"
               value={attColorHex}
               onChange={(e) => {

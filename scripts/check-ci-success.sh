@@ -158,6 +158,7 @@ check_triggered "skills-lint"               "needs-skills"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
 check_triggered "actions-pin-check"         "needs-ci"
+check_triggered "actionlint"                "needs-ci"
 check_triggered "observatory-tests"         "needs-observatory" "needs-ci" "needs-deps"
 # quality-gates is `workflow_call`-only, and ci.yml's `quality-gates:` job is its
 # SOLE caller — cd.yml does not run on `pull_request`, so on the PR path that one
@@ -175,6 +176,9 @@ check_triggered "quality-gates"             "needs-any-code"
 # The docs gate is the only required PR proof that the docs Vitest suite,
 # internal-command MDX gate, and manifest sync ran for docs changes.
 check_triggered "docs-internal-gate"        "needs-docs"
+# docs-e2e builds the Vercel-root docs app and smokes its real routes. It must
+# run both for docs inputs and when its workflow contract is changed.
+check_triggered "docs-e2e"                  "needs-docs" "needs-ci"
 # The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
 # unit suite for a packages/ui-only PR — quality-gates' test-web runs that suite
 # only when web/ci changed, so a UI-only PR relies entirely on this gate for its
@@ -188,6 +192,10 @@ check_triggered "test-e2e-journey"          "needs-web"
 # The request-only API gate is the only pre-merge execution of billing and
 # token-guard endpoint coverage. It must run on every web-touching PR.
 check_triggered "test-e2e-api"              "needs-web"
+# The Clerk-keyed auth journey (#8632) is the ONLY per-PR sign-in against a
+# real Clerk instance -- test-e2e-ui deliberately runs keyless. needs-web is the
+# single trigger in its own `if:` (ci.yml test-e2e-auth).
+check_triggered "test-e2e-auth"             "needs-web"
 # The engine-smoke gate is the ONLY per-PR job that boots the real WASM engine
 # (load -> spawn -> play -> export under SwiftShader software WebGL2), closing the
 # F10 gap where rendering/ECS journeys ran only post-merge. It fires on
@@ -195,6 +203,14 @@ check_triggered "test-e2e-api"              "needs-web"
 # are mapped — guarding only one would leave the other as a silent `if: false`
 # skip vector. Protect it from unwiring like the other self-defending gates.
 check_triggered "test-e2e-engine-smoke"     "needs-web" "needs-engine"
+# The engine-journeys gate (#10161) is the ONLY per-PR job that serves the app
+# against a database — one created for that run, migrated with the real
+# db:migrate and drift-checked with the real db:drift — so it is the only place
+# the account journeys of #9723 (save and reopen, publish and play signed out)
+# can ever run. It `needs:` test-e2e-engine-smoke for the engine artifact and
+# shares its `if:` (`needs-web || needs-engine`), so BOTH arms are mapped here
+# exactly as the smoke gate's are.
+check_triggered "test-e2e-engine-journeys"  "needs-web" "needs-engine"
 # command-parity is the ONLY per-PR proof that the three commands.json copies stay
 # in sync and that every MCP command has a handler (web/scripts/check-command-parity.js
 # over mcp-server/manifest, web/src/data and apps/docs/data — one manifest per

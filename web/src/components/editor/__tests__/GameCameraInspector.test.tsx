@@ -7,7 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { GameCameraInspector } from '../GameCameraInspector';
 import { useEditorStore } from '@/stores/editorStore';
-import type { GameCameraData } from '@/stores/slices/types';
+import { ENGINE_CAMERA_DEFAULTS, MODE_READS_DAMPING } from '@/lib/game/gameCameraPayload';
+import type { GameCameraData, GameCameraMode } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -112,6 +113,105 @@ describe('GameCameraInspector', () => {
     // "Look Ahead" is gone: `ThirdPersonFollow` has no such engine parameter, so
     // the control edited a value that could never leave the browser.
     expect(screen.queryByText('Look Ahead')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The Smoothing row is the inspector's face for the engine's `damping`, and
+   * the engine reads `damping` in every arm that FOLLOWS a target. The row was
+   * rendered for thirdPersonFollow only, so a side-scroller or top-down camera
+   * had a follow rate the engine applied and the author could neither see nor
+   * change (review-board finding on #10295, following the Sentry one).
+   *
+   * Driven by `MODE_READS_DAMPING` — the payload module's own table — rather
+   * than a second list of modes, so this cannot pass while the panel and the
+   * wire disagree about which modes have a follow rate.
+   */
+  describe('Smoothing row follows MODE_READS_DAMPING', () => {
+    const ALL_MODES = Object.keys(MODE_READS_DAMPING) as GameCameraMode[];
+
+    it('covers every mode (guards against a vacuous sweep)', () => {
+      expect(ALL_MODES.length).toBe(6);
+      expect(ALL_MODES.filter((m) => MODE_READS_DAMPING[m])).toEqual(
+        expect.arrayContaining(['sideScroller', 'topDown']),
+      );
+    });
+
+    it.each(ALL_MODES)('renders the row in %s iff the engine reads damping there', (mode) => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode } });
+      const { container } = render(<GameCameraInspector />);
+      const label = Array.from(container.querySelectorAll('label')).find(
+        (l) => l.textContent?.trim() === 'Smoothing',
+      );
+      if (!MODE_READS_DAMPING[mode]) {
+        expect(label, `${mode} must not offer a follow rate the engine ignores`).toBeUndefined();
+        return;
+      }
+      expect(label, `${mode} has no Smoothing row`).toBeDefined();
+      const input = container.querySelector(`#${CSS.escape(label!.getAttribute('for')!)}`);
+      // The engine hard-rejects a negative rate (PF-1166); the floor travels
+      // with the row to every mode, not only the one it was written for.
+      expect(input).toHaveAttribute('min', '0');
+    });
+
+    it.each(ALL_MODES)(
+      'a switch to %s seeds followSmoothing iff the engine reads damping there',
+      (mode) => {
+        // Start somewhere else, or the <select> sees no change and fires nothing.
+        const from: GameCameraMode = mode === 'fixed' ? 'orbital' : 'fixed';
+        setupStore({ primaryGameCamera: { mode: from, targetEntity: 'hero' } });
+        render(<GameCameraInspector />);
+        fireEvent.change(screen.getByRole('combobox'), { target: { value: mode } });
+        const dispatched = mockSetGameCamera.mock.calls.at(-1)?.[1] as GameCameraData;
+        expect(dispatched.mode).toBe(mode);
+        expect(dispatched.targetEntity).toBe('hero');
+        // Presence is asserted for EVERY mode, not the value for the follow
+        // ones only: a non-follow mode seeded with a follow rate would dispatch
+        // a `damping` the panel offers no control for, and a follow mode left
+        // unseeded would show the default while dispatching nothing — the two
+        // drift directions `ModeDefaults` pins at compile time, checked here at
+        // the dispatch the user actually gets.
+        expect(Object.hasOwn(dispatched, 'followSmoothing')).toBe(MODE_READS_DAMPING[mode]);
+        if (MODE_READS_DAMPING[mode]) {
+          expect(dispatched.followSmoothing).toBe(ENGINE_CAMERA_DEFAULTS.followSmoothing);
+        }
+      },
+    );
+
+    it('edits followSmoothing from a topDown camera, the same field the wire reads', () => {
+      setupStore({
+        primaryGameCamera: { mode: 'topDown', targetEntity: null, topDownHeight: 15 },
+      });
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Smoothing'), { target: { value: '3' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', {
+        mode: 'topDown',
+        targetEntity: null,
+        topDownHeight: 15,
+        followSmoothing: 3,
+      });
+    });
+  });
+
+  /**
+   * The Target ID placeholder read "(follow selected)" for as long as the
+   * panel existed, and it was never true: nothing substitutes the editor
+   * selection for a blank target, the engine skips every follow arm without
+   * one, and every mode but Fixed never moves. The tooltip and the docs were
+   * corrected with it (review-board round 4 on #10295); this pins the
+   * placeholder's half.
+   */
+  it('does not promise that a blank Target ID follows the selection', () => {
+    setupStore();
+    render(<GameCameraInspector />);
+    const target = screen.getByLabelText('Target ID') as HTMLInputElement;
+    expect(target.placeholder).not.toMatch(/selected|selection/i);
+    expect(target.placeholder).toMatch(/required/);
+    // Same vocabulary as the guide and the gameCameraTarget tooltip: the target
+    // is TRACKED by every mode but Fixed; "follow" is reserved for the three
+    // modes with Smoothing, so "required to follow" read as not applying to
+    // First Person or Orbital (review-board ux finding on #10295).
+    expect(target.placeholder).toMatch(/\btrack\b/);
+    expect(target.placeholder).not.toMatch(/follow/i);
   });
 
   it('renders Test Shake button', () => {
@@ -231,11 +331,14 @@ describe('GameCameraInspector', () => {
 
     // The three shared controls, then whatever the mode adds. Counting as well as
     // naming catches a row that renders with no control at all.
+    // Smoothing appears on every FOLLOWING mode — the engine reads `damping` in
+    // the sideScroller and topDown arms exactly as in thirdPersonFollow's, and
+    // this panel used to offer the control for the last of those only.
     const MODE_CONTROLS: Array<[GameCameraData['mode'], string[]]> = [
       ['thirdPersonFollow', ['Distance', 'Height', 'Smoothing']],
       ['firstPerson', ['Height', 'Mouse Sens.']],
-      ['sideScroller', ['Distance']],
-      ['topDown', ['Height']],
+      ['sideScroller', ['Distance', 'Smoothing']],
+      ['topDown', ['Height', 'Smoothing']],
       ['fixed', []],
       ['orbital', ['Distance', 'Auto Rotate']],
     ];
@@ -300,8 +403,9 @@ describe('GameCameraInspector', () => {
       setupStore();
       render(<GameCameraInspector />);
       fireEvent.change(screen.getByLabelText('Smoothing'), { target: { value: '-3' } });
-      // A negative `damping` makes the follow lerp extrapolate away from the
-      // target. The row reverts to the current value rather than sending it.
+      // A negative `damping` asks the follow to move away from the target (the
+      // engine clamps it to a frozen camera). The row reverts to the current
+      // value rather than sending it.
       expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', baseGameCamera);
     });
 

@@ -246,6 +246,7 @@ export function ScriptEditorPanel() {
         <div className="flex items-center gap-1">
           {/* Template dropdown */}
           <select
+            aria-label="Apply script template"
             className="rounded bg-zinc-800 px-1 py-0.5 text-[10px] text-zinc-400 outline-none"
             value=""
             onChange={(e) => {

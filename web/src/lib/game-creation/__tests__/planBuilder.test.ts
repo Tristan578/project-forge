@@ -1084,6 +1084,44 @@ describe('buildPlan — the win-condition guarantee', () => {
     expect(winConditionSteps(plan)).toHaveLength(0);
     expect(warningsOf(plan).join(' ')).toMatch(/no goal yet/i);
   });
+
+  /**
+   * #9998: the guarantee exists because a `win` game with no goal cannot start.
+   * An endless, sandbox or narrative brief is not that game — its creator chose
+   * "no win condition" on purpose — so inventing one would override the mode
+   * the brief states, and the "no goal yet" warning would be describing a
+   * design decision as a loss.
+   */
+  it.each(['endless', 'sandbox', 'narrative'] as const)(
+    'does not invent a win condition, or warn about a missing goal, for a %s brief',
+    (completionMode) => {
+      const gdd = makeGdd({ completionMode, systems: [makeSystem('movement', 'platformer')] });
+      const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+      expect(winConditionSteps(plan)).toHaveLength(0);
+      expect(warningsOf(plan).join(' ')).not.toMatch(/no goal yet/i);
+    },
+  );
+
+  it('still plans the default for an explicit win brief, exactly as for a legacy one', () => {
+    const explicit = buildPlan(
+      makeGdd({ completionMode: 'win', systems: [makeSystem('movement', 'platformer')] }),
+      'proj-1', 'creator', 10000,
+    );
+    expect(winConditionSteps(explicit)).toHaveLength(1);
+  });
+
+  it('keeps a win condition the brief declares, in every mode', () => {
+    // The mode only removes the REQUIREMENT. A goal the design asked for is
+    // still built — and still validated by verify and the Play gate.
+    const gdd = makeGdd({
+      completionMode: 'sandbox',
+      systems: [makeSystem('movement', 'platformer'), makeSystem('progression', 'score-attack')],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    expect(winConditionSteps(plan)).toHaveLength(1);
+  });
 });
 
 

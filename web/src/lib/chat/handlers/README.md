@@ -17,7 +17,7 @@ handlers/
 ├── securityHandlers.ts         # Content validation, injection detection
 ├── exportHandlers.ts           # Game export (ZIP, PWA, embed), cloud publishing
 ├── shaderHandlers.ts           # Shader effects, custom WGSL, shader graph
-├── performanceHandlers.ts      # LOD, quality presets, performance budget
+├── performanceHandlers.ts      # LOD, quality presets, performance budget, performance reports (capture/query/compare/baseline)
 ├── generationHandlers.ts       # AI asset generation (3D models, textures, audio, music)
 ├── handlers2d.ts               # Sprites, sprite animation, tilemaps, 2D physics, skeleton 2D
 ├── entityHandlers.ts           # Entity metadata, custom properties, prefabs
@@ -28,6 +28,7 @@ handlers/
 ├── physicsJointHandlers.ts     # 3D physics, joints, forces, raycasting, CSG, terrain
 ├── animationParticleHandlers.ts # Skeletal animation, animation clips, particles
 ├── gameplayHandlers.ts         # Game components, game cameras, input bindings
+├── playtestHandlers.ts         # Runtime input replay (replay_input_trace: recorded trace or AI bot plan), simulation clock pin
 ├── assetHandlers.ts            # Asset import, GLTF, textures, prefab instantiation
 ├── pixelArtHandlers.ts         # Pixel art / sprite sheet AI generation
 ├── compoundHandlers.ts         # 9 multi-step compound actions (create_scene, setup_character, setup_game_from_description, etc.)

@@ -100,7 +100,14 @@ vi.mock('../HelpMenu', () => ({ HelpMenu: () => <div data-testid="help-menu">Hel
 vi.mock('../../onboarding/OnboardingWizard', () => ({ OnboardingWizard: () => null }));
 vi.mock('../../onboarding/QuickStartDialog', () => ({ QuickStartDialog: () => null }));
 
-const GATED_GLOBALS = ['__EDITOR_STORE', '__CHAT_STORE', '__FORGE_DISPATCH', '__FORGE_SET_DISPATCH', '__FORGE_REPLAY'] as const;
+const GATED_GLOBALS = [
+  '__EDITOR_STORE',
+  '__CHAT_STORE',
+  '__FORGE_DISPATCH',
+  '__FORGE_SET_DISPATCH',
+  '__FORGE_REPLAY',
+  '__FORGE_REPLAY_CONTROL',
+] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const win = () => window as any;

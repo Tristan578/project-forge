@@ -94,7 +94,11 @@ function runReaper(binaryPath: string, args: string[]): Promise<BridgeResult> {
       { timeout: 60_000 },
       (err, stdout, stderr) => {
         if (err) {
-          const code = (err as NodeJS.ErrnoException & { code?: number }).code;
+          // `err` is already `ExecException`, which declares `code?: number`
+          // directly — no cast needed (the prior `NodeJS.ErrnoException &
+          // { code?: number }` intersection was wrong: ErrnoException's own
+          // `code` is `string`, so the two barely overlap).
+          const code = err.code;
           const exitCode = typeof code === 'number' ? code : 1;
           resolve({
             success: false,

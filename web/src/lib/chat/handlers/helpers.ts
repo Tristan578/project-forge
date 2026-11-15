@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { MaterialData, LightData, PhysicsData, SceneNode } from './types';
 import { F32_SAFE_MAX, zVec2, zVec3, zVec4 } from './types';
+import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
 
 // ===== Compound Action Types =====
 
@@ -14,6 +15,12 @@ export interface CompoundResult {
   entityIds: Record<string, string>;
   operations: Array<{ action: string; success: boolean; entityId?: string; error?: string }>;
   summary: string;
+  /**
+   * Every game-component value the tool did not apply as asked, each tagged
+   * with the entity it landed on (PF-1148). Always present; empty when nothing
+   * was adjusted. `summary` says the same thing in sentences.
+   */
+  corrections: readonly GameComponentFieldCorrection[];
 }
 
 export interface GameplayAnalysis {
@@ -169,10 +176,15 @@ const zPartialPhysics = z.object({
 
 /**
  * Build a compound result from operation list.
+ *
+ * `corrections` are the game-component values the call did not apply as asked
+ * (PF-1148); they are carried as they are and said in the summary, each under
+ * the name of the entity it landed on.
  */
 export function buildCompoundResult(
   operations: Array<{ action: string; success: boolean; entityId?: string; error?: string }>,
-  nameToId: Record<string, string>
+  nameToId: Record<string, string>,
+  corrections: readonly GameComponentFieldCorrection[] = [],
 ): CompoundResult {
   const successCount = operations.filter((op) => op.success).length;
   const success = successCount === operations.length;
@@ -184,12 +196,15 @@ export function buildCompoundResult(
     ? `Partial success: ${successCount}/${operations.length} entities created. Entity IDs: ${Object.entries(nameToId).map(([name, id]) => `${name}=${id}`).join(', ')}`
     : `Failed to create entities. ${operations.filter((op) => !op.success).length} errors.`;
 
+  const nameOf = (entityId: string) => Object.entries(nameToId).find(([, id]) => id === entityId)?.[0];
+
   return {
     success,
     partialSuccess,
     entityIds: nameToId,
     operations,
-    summary,
+    summary: withCorrectionSummary(summary, corrections, nameOf),
+    corrections,
   };
 }
 

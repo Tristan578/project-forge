@@ -12,7 +12,7 @@
  * indistinguishable from the page.
  *
  * `packages/ui/src/tokens/themes.ts` is the single source of truth for these
- * values (the shared `STATUS_COLORS` block). This test asserts the SSR `:root`
+ * values (shared bands and the dark-theme indicators). This test asserts the SSR `:root`
  * default cannot drift from — or disappear behind — that source. It reads both
  * files as text (no `@spawnforge/ui` import) so it does not depend on the ui
  * package being built to `dist/` in CI, and runs identically in the node and
@@ -26,17 +26,19 @@ import { describe, expect, it } from 'vitest';
 const GLOBALS_CSS = resolve(process.cwd(), 'src/app/globals.css');
 const THEMES_TS = resolve(process.cwd(), '..', 'packages/ui/src/tokens/themes.ts');
 
-/**
- * The `--sf-status-*` name→value pairs authored in themes.ts. They live once in
- * `STATUS_COLORS` as `'--sf-status-...': '#rrggbb'`, so a single lowercase-hex
- * regex captures the source of truth without importing the (built) package.
- */
+/** Read the shared bands and dark indicators used by the themeless SSR default. */
 function statusTokensFromSource(ts: string): Map<string, string> {
+  const source = ts.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const map = new Map<string, string>();
-  for (const [, key, value] of ts.matchAll(
-    /'(--sf-status-[a-z-]+)'\s*:\s*'(#[0-9a-fA-F]{3,8})'/g,
-  )) {
-    map.set(key, value.toLowerCase());
+  for (const name of ['STATUS_COLORS', 'DARK_STATUS_INDICATORS']) {
+    const block = source.match(new RegExp('const ' + name + '[\\s\\S]*?=\\s*\\{([^}]*)\\}'));
+    if (!block) throw new Error('Missing SSR status source: ' + name);
+    for (const [, key, value] of block[1].matchAll(
+      /'(--sf-status-[a-z-]+)'\s*:\s*'(#[0-9a-fA-F]{3,8})'/g,
+    )) {
+      if (map.has(key)) throw new Error('Duplicate SSR status token: ' + key);
+      map.set(key, value.toLowerCase());
+    }
   }
   return map;
 }
@@ -66,11 +68,17 @@ describe('/health SSR status-token contract (#10093 / #9108)', () => {
   const sourceStatus = statusTokensFromSource(readFileSync(THEMES_TS, 'utf8'));
   const rootDecls = rootBlockDeclarations(readFileSync(GLOBALS_CSS, 'utf8'));
 
-  it('reads the eight status tokens from the themes.ts source (guard is non-vacuous)', () => {
-    // Four healthy/degraded/down/unknown × bg/fg pairs. A drop below eight means
-    // the regex stopped matching the source — the it.each below would then guard
-    // nothing.
-    expect(sourceStatus.size).toBe(8);
+  it('reads exactly the twelve SSR status tokens from the themes.ts source', () => {
+    expect([...sourceStatus.keys()].sort()).toEqual(
+      ['healthy', 'degraded', 'down', 'unknown'].flatMap(status =>
+        ['bg', 'fg', 'indicator'].map(kind => '--sf-status-' + status + '-' + kind)
+      ).sort(),
+    );
+  });
+
+  it('rejects missing or commented-out source blocks instead of passing vacuously', () => {
+    expect(() => statusTokensFromSource('')).toThrow('Missing SSR status source');
+    expect(() => statusTokensFromSource('/* const STATUS_COLORS = {}; const DARK_STATUS_INDICATORS = {}; */')).toThrow('Missing SSR status source');
   });
 
   it('locates the top-level :root block carrying SpawnForge SSR defaults', () => {

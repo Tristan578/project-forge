@@ -13,6 +13,7 @@ import type { IDockviewPanelProps } from 'dockview-react';
 import { render, cleanup, screen, waitFor } from '@/test/utils/componentTestUtils';
 import { WorkspaceProvider } from '../WorkspaceProvider';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useUserStore } from '@/stores/userStore';
 
 // ── Store mock ─────────────────────────────────────────────────────────────
 
@@ -286,6 +287,91 @@ describe('WorkspaceProvider', () => {
       expect(source).toContain('function PanelLoadingSkeleton()');
       expect(source).not.toMatch(/\bbg-zinc-/);
       expect(source).not.toMatch(/\b(?:text|border)-zinc-/);
+    });
+  });
+
+  // ── withTierGate: trial access (#7715) ─────────────────────────────────
+  //
+  // Uses the REAL tierAccess module (not mocked in this file) and the real
+  // userStore, so this exercises `effectiveTier` exactly as `withTierGate`
+  // calls it — not a stand-in for the rule.
+  describe('withTierGate trial access (#7715)', () => {
+    const initialUserState = useUserStore.getState();
+
+    afterEach(() => {
+      useUserStore.setState(initialUserState, true);
+    });
+
+    function renderPanel(panelId: string) {
+      render(<WorkspaceProvider />);
+      const Panel = capturedComponents?.[panelId];
+      if (!Panel) {
+        throw new Error(`dockview was given no component for panel '${panelId}'`);
+      }
+      return render(<Panel {...({} as IDockviewPanelProps)} />);
+    }
+
+    it('unlocks a hobbyist-gated panel for a starter account with spendable trial tokens', async () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 50, profileLoaded: true });
+
+      renderPanel('review');
+
+      // The gate passed, so the real (mocked-to-null) ReviewPanel component
+      // rendered instead of the lock overlay — nothing to assert on the
+      // panel's own content since it's stubbed to `null`, so assert the
+      // overlay (and its "plan required" copy) is absent.
+      expect(screen.queryByRole('region', { name: 'Panel locked — upgrade required' })).toBeNull();
+      expect(screen.queryByText(/plan required/i)).toBeNull();
+
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    });
+
+    it('locks a hobbyist-gated panel for a starter account with no spendable tokens', async () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: true });
+
+      renderPanel('review');
+
+      expect(screen.getByRole('region', { name: 'Panel locked — upgrade required' })).toBeInTheDocument();
+      expect(screen.getByText(/plan required/i)).toBeInTheDocument();
+    });
+
+    // #7715 review round 2 — before /api/user/profile resolves, `tier`/
+    // `spendableTokens` read their store defaults ('starter'/0), which is
+    // indistinguishable from "no trial access". The panel must not flash
+    // locked for that one render.
+    it('does not lock a hobbyist-gated panel while the profile is still loading', async () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: false });
+
+      renderPanel('review');
+
+      expect(screen.queryByRole('region', { name: 'Panel locked — upgrade required' })).toBeNull();
+      expect(screen.queryByText(/plan required/i)).toBeNull();
+
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    });
+
+    it('keeps a creator-gated panel locked for a starter account with trial tokens', async () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 50, profileLoaded: true });
+
+      renderPanel('world-builder');
+
+      // effectiveTier maps this account to 'hobbyist', which is below the
+      // 'creator' requirement for world-builder — the trial buys hobbyist
+      // access only, not creator+.
+      expect(screen.getByRole('region', { name: 'Panel locked — upgrade required' })).toBeInTheDocument();
+      expect(screen.getByText(/plan required/i)).toBeInTheDocument();
+    });
+
+    // #7715 review round 3 — the pre-load bypass covers only panels the trial
+    // could open. A creator-gated panel is locked for every $0 account, so it
+    // must not render unlocked (even for one render) before the profile lands.
+    it('keeps a creator-gated panel locked while the profile is still loading', () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: false });
+
+      renderPanel('world-builder');
+
+      expect(screen.getByRole('region', { name: 'Panel locked — upgrade required' })).toBeInTheDocument();
+      expect(screen.getByText(/plan required/i)).toBeInTheDocument();
     });
   });
 });

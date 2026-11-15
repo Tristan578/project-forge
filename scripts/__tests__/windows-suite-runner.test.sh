@@ -33,7 +33,9 @@ TMPDIR_T="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$CI_YML" ] || { echo "ci.yml not found: $CI_YML"; exit 1; }
 
@@ -105,6 +107,7 @@ mkworld() {
   done
   echo "$dir"
 }
+readonly -f mkworld
 
 # Run the extracted block exactly as the runner would: GitHub's documented
 # invocation for `shell: bash` is `bash --noprofile --norc -eo pipefail {0}`.
@@ -112,6 +115,7 @@ run_block() {
   local dir="$1"
   ( cd "$dir" && bash --noprofile --norc -eo pipefail "$BLOCK" 2>&1 )
 }
+readonly -f run_block
 
 # ---------------------------------------------------------------------------
 # Case 1 — a suite exiting 3 (UNSUPPORTED) must be tolerated, counted, warned

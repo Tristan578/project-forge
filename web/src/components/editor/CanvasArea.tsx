@@ -10,11 +10,14 @@ import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 import { getCanvasKeyMap, eventToKeyCombo } from '@/lib/workspace/keybindings';
 import { InitOverlay } from './InitOverlay';
+import { RenderErrorNotice } from './RenderErrorNotice';
 import { ViewPresetButtons } from './ViewPresetButtons';
 import { UICanvasOverlay } from './ui-builder/UICanvasOverlay';
 import { UIRuntimeRenderer } from './ui-builder/UIRuntimeRenderer';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 
-const CANVAS_ID = 'game-canvas';
+// Shared with engine recovery and the replay runner: see `lib/engine/canvasId`.
+const CANVAS_ID = EDITOR_CANVAS_ID;
 
 // Keyboard orbit step sizes — kept small enough that held-key repeat feels
 // smooth, large enough that a single tap is perceptible.
@@ -121,6 +124,7 @@ export function CanvasArea() {
                   left: `${el.x}%`,
                   top: `${el.y}%`,
                   fontSize: `${el.fontSize && el.fontSize > 0 ? el.fontSize : 24}px`,
+                  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored text color is unset; falls back to the default swatch
                   color: el.color || 'white',
                   textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
                   fontFamily: 'monospace',
@@ -161,6 +165,9 @@ export function CanvasArea() {
 
       {/* Initialization overlay with progress and error handling */}
       <InitOverlay />
+
+      {/* GPU render errors (#8887): skipped, or the viewport stopped drawing */}
+      <RenderErrorNotice />
 
       {/* Camera preset buttons */}
       {isReady && (

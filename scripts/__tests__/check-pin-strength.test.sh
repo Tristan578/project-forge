@@ -20,7 +20,9 @@ trap 'rm -rf "${TMPDIR_T}"' EXIT
 passed=0
 failed=0
 pass() { echo "  PASS: $1"; passed=$((passed + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; failed=$((failed + 1)); }
+readonly -f fail
 
 # Make a suite directory named $1 holding one fixture suite read from stdin.
 mkfixture() {
@@ -29,11 +31,13 @@ mkfixture() {
   cat > "${dir}/fixture.test.sh"
   echo "${dir}"
 }
+readonly -f mkfixture
 
 run_gate() {
   bash "${GATE}" "$1" >/dev/null 2>&1
   echo "$?"
 }
+readonly -f run_gate
 
 echo "=== the weak pin the gate exists for ==="
 

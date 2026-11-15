@@ -1,9 +1,32 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Button } from '../Button';
-import { THEME_NAMES } from '../../tokens';
+import { THEME_NAMES, THEME_DEFINITIONS } from '../../tokens';
 
 describe('Button', () => {
+  it.each(THEME_NAMES)('%s outline text meets AA at rest and hover using its rendered tokens', (theme) => {
+    render(<Button variant="outline">Refresh</Button>);
+    const classes = screen.getByRole('button').className;
+    const tokens = THEME_DEFINITIONS[theme];
+    const luminance = (hex: string) => {
+      const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+        .map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    for (const prefix of ['', 'hover:']) {
+      const foreground = classes.match(new RegExp('(?:^| )' + prefix + 'text-\\[var\\((--sf-[a-z-]+)\\)\\]'))?.[1];
+      const background = classes.match(new RegExp('(?:^| )' + prefix + 'bg-\\[var\\((--sf-[a-z-]+)\\)\\]'))?.[1];
+      expect(foreground).toBeDefined();
+      expect(background).toBeDefined();
+      const fg = tokens[foreground as keyof typeof tokens];
+      const bg = tokens[background as keyof typeof tokens];
+      expect(fg).toMatch(/^#[0-9a-fA-F]{6}$/);
+      expect(bg).toMatch(/^#[0-9a-fA-F]{6}$/);
+      const light = luminance(fg), dark = luminance(bg);
+      expect((Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it('renders with children', () => {
     render(<Button>Click me</Button>);
     expect(screen.getByRole('button', { name: 'Click me' })).not.toBeNull();

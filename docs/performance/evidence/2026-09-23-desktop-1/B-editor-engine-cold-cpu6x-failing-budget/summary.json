@@ -1,0 +1,20 @@
+[
+  {
+    "fixture": "perf-2d@1",
+    "run": 1,
+    "file": "perf-2d-v1-cold-cpu6x-run1.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 453,
+    "p50Ms": 135,
+    "p95Ms": 184.27999999970194,
+    "p99Ms": 240.11599999964258,
+    "firstInteractiveMs": 23446.8,
+    "distinctColours": 186,
+    "budgets": {
+      "frame-time-p95": "fail (observed 184.27999999970194, limit 16.7)",
+      "first-interactive-cold": "fail (observed 23446.8, limit 5000)"
+    }
+  }
+]

@@ -21,6 +21,7 @@ const mockUser = makeUser({ id: 'user-neg', clerkId: 'clerk_neg' });
 vi.mock('@/lib/auth/api-auth', () => ({
   authenticateRequest: vi.fn(),
   assertTier: vi.fn(() => null),
+  assertAiAccess: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/rateLimit', () => ({

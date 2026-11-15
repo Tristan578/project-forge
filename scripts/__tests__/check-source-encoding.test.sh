@@ -13,7 +13,9 @@ SCRIPT="$HERE/../check-source-encoding.sh"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
 
@@ -30,7 +32,9 @@ run_on() {
   rm -rf "$dir"
   printf '%s|%s' "$out" "$rc"
 }
+readonly -f run_on
 rc_of() { printf '%s' "${1##*|}"; }
+readonly -f rc_of
 
 # Run the gate against one fixture WORKFLOW file, placed under a real
 # .github/workflows/ path so the run:-block check's path scoping matches it.
@@ -51,6 +55,7 @@ run_on_workflow() {
   rm -rf "$dir"
   printf '%s|%s' "$out" "$rc"
 }
+readonly -f run_on_workflow
 
 # A CRLF shell source dies at its shebang (`$'\r': command not found`) on every
 # platform the suites run on; a Windows checkout with core.autocrlf=true
@@ -239,6 +244,7 @@ expect_workflow() {
   rc="$(rc_of "$result")"
   if [ "$rc" = "$expected" ]; then pass "$label"; else fail "$label: $result"; fi
 }
+readonly -f expect_workflow
 UNNAMED=$(cat <<'YAML'
 jobs:
   build:

@@ -19,10 +19,13 @@ if [ "$prs" = "[]" ] || [ -z "$prs" ]; then
   exit 0
 fi
 
-echo "$prs" | python3 - << 'PYEOF'
-import json, sys
+# The PR JSON travels in the environment, not on stdin: the heredoc IS
+# python's stdin (it carries the script), so a pipe into it is discarded and
+# json.load(sys.stdin) would read an empty stream and raise.
+PRS_JSON="${prs}" python3 - << 'PYEOF'
+import json, os
 
-data = json.load(sys.stdin)
+data = json.loads(os.environ["PRS_JSON"])
 for pr in data:
     number = pr.get("number", "?")
     title = pr.get("title", "")[:50]

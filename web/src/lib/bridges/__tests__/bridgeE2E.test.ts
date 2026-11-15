@@ -131,7 +131,7 @@ describe('Bridge E2E Pipeline', () => {
 
     store.getState().updateBridgeOperation(opId, {
       status: 'failed',
-      error: result.error,
+      ...(result.error !== undefined && { error: result.error }),
     });
 
     expect(store.getState().bridgeOperations[0].status).toBe('failed');

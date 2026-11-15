@@ -8,6 +8,8 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
 
 // generateText and createAnthropic are mocked before the import so they can
 // be controlled per-test via vi.mocked().
@@ -33,7 +35,13 @@ vi.mock('@/lib/keys/resolver', () => ({
     }
   },
 }));
-vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn(() => 10) }));
+// Spread the actual module: `assertAiAccess`/`createGenerationHandler` reach
+// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
+// via `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn(() => 10) };
+});
 vi.mock('@/lib/tokens/service', () => ({ refundTokens: vi.fn() }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 vi.mock('ai', () => ({
@@ -42,6 +50,11 @@ vi.mock('ai', () => ({
 }));
 vi.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: vi.fn(() => mockAnthropicModel),
+}));
+// The key -> client-auth mapping (#8858) is unit-tested in wifCredential.test.ts;
+// this marks its output so the test below can see the route USES it.
+vi.mock('@/lib/ai/wifCredential', () => ({
+  anthropicClientAuthForKey: vi.fn((key: string) => ({ authToken: `mapped:${key}` })),
 }));
 
 function makeRequest(body: unknown): NextRequest {
@@ -266,5 +279,15 @@ describe('POST /api/generate/pacing', () => {
     expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
     expect(data.error).not.toContain('DB connection');
     expect(captureException).toHaveBeenCalled();
+  });
+
+  it('builds the Anthropic client from anthropicClientAuthForKey(resolved key), not { apiKey } (#8858)', async () => {
+    // A platform key can be a federated Bearer token; `{ apiKey }` would send
+    // it as x-api-key, which Anthropic rejects.
+    const res = await POST(makeRequest({ report: validReport }));
+    expect(res.status).toBeLessThan(300);
+    expect(anthropicClientAuthForKey).toHaveBeenCalledWith('test-key');
+    expect(createAnthropic).toHaveBeenCalledWith({ authToken: 'mapped:test-key' });
+    expect(createAnthropic).not.toHaveBeenCalledWith({ apiKey: 'test-key' });
   });
 });

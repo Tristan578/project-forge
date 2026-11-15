@@ -1123,7 +1123,8 @@ Calculate the mouse's horizontal position relative to the canvas and update the 
 function mouseMoveHandler(e) {
   const relativeX = e.clientX - canvas.offsetLeft;
   if (relativeX > 0 && relativeX < canvas.width) {
-    paddleX = relativeX - paddleWidth / 2;
+    // Clamp like the keyboard path, so the paddle never leaves the canvas.
+    paddleX = Math.min(Math.max(relativeX - paddleWidth / 2, 0), canvas.width - paddleWidth);
   }
 }
 ```
@@ -1335,7 +1336,8 @@ Below is the entire game in a single, self-contained HTML file. This is the fina
       function mouseMoveHandler(e) {
         const relativeX = e.clientX - canvas.offsetLeft;
         if (relativeX > 0 && relativeX < canvas.width) {
-          paddleX = relativeX - paddleWidth / 2;
+          // Clamp like the keyboard path, so the paddle never leaves the canvas.
+          paddleX = Math.min(Math.max(relativeX - paddleWidth / 2, 0), canvas.width - paddleWidth);
         }
       }
 

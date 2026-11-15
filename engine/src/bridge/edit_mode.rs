@@ -82,7 +82,7 @@ pub fn apply_edit_mode_requests(
         let entity_data = edit_mode_query.iter().find(|(_e, id, _)| id.0 == request.entity_id);
         if let Some((entity, _eid, _)) = entity_data {
             if let Ok(mesh_handle) = mesh_query.get(entity) {
-                if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+                if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
                     let params: serde_json::Value = serde_json::from_str(&request.params).unwrap_or_default();
 
                     match request.operation.as_str() {
@@ -107,11 +107,11 @@ pub fn apply_edit_mode_requests(
                                 })
                                 .unwrap_or([0.0, 1.0, 0.0]);
 
-                            perform_extrude(mesh, &indices, distance, direction);
+                            perform_extrude(&mut mesh, &indices, distance, direction);
                         }
                         "subdivide" => {
                             let level = params.get("level").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
-                            perform_subdivide(mesh, level);
+                            perform_subdivide(&mut mesh, level);
                         }
                         _ => {
                             tracing::warn!("Unknown mesh operation: {}", request.operation);
@@ -127,11 +127,11 @@ pub fn apply_edit_mode_requests(
         let entity_data = edit_mode_query.iter().find(|(_e, id, _)| id.0 == request.entity_id);
         if let Some((entity, _eid, _)) = entity_data {
             if let Ok(mesh_handle) = mesh_query.get(entity) {
-                if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+                if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
                     if request.smooth {
-                        recalculate_smooth_normals(mesh);
+                        recalculate_smooth_normals(&mut mesh);
                     } else {
-                        recalculate_flat_normals(mesh);
+                        recalculate_flat_normals(&mut mesh);
                     }
                 }
             }

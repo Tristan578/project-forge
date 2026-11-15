@@ -2,6 +2,15 @@
 
 This file is read by Gemini CLI, GitHub Copilot, Google Antigravity, OpenAI Codex CLI, and other AI coding tools. For Claude Code, see `.claude/CLAUDE.md`.
 
+## OpenAI Codex CLI — read this first
+
+**Codex does not load `.codex/AGENTS.md` by itself.** It collects `AGENTS.md` only from the repository root down to the directory it was started in (`codex-rs/core/src/agents_md.rs`), and `.codex/` is not on that path. So THIS file is the only instruction text Codex is given automatically, and these four points are here rather than there:
+
+1. **Read `.codex/AGENTS.md` now, in full.** It is your instruction set for this repository: the ticket workflow, what the hooks do and do not enforce under Codex, and the manual fallbacks for the ones that cannot run.
+2. **After every context compaction, re-read `.claude/rules/lessons-learned.md`.** Under Claude Code a hook puts that digest back in front of the model; Codex's `PostCompact` event cannot carry context, so nothing does it for you.
+3. **Edit files with the `apply_patch` tool, not by piping a patch through the shell.** A shell command that contains a patch is refused by the edit hooks unless it is, in full, `apply_patch <<'EOF'` … `EOF` or `cd <literal path> && apply_patch <<'EOF'` … `EOF` with a quoted delimiter and nothing after it (a patch that does not parse is refused on either channel, with the parse error). That includes a command that only *writes* text quoting a patch (a patch file, a fixture, a commit message): create that file with the tool, or pass the text from a file (`git commit -F <file>`).
+4. **The hooks are wired, not verified.** No live Codex session has been observed running them (`docs/guides/codex-cli-support-matrix.md` → First-run checklist). Do not assume a check ran because nothing complained.
+
 ## MANDATORY: Planning Before Development
 
 **No code changes without a ticket.** This is enforced by hooks on all AI tools.
@@ -12,25 +21,32 @@ Before writing ANY code, you MUST:
 3. Move the ticket to `in_progress`
 4. Only then begin implementation
 
-If you are asked to write code and no ticket exists, **create the ticket first**. This is not optional — it ensures all three contributors can monitor progress through the shared GitHub Project board.
+If you are asked to write code and no ticket exists, **create the ticket first**. It keeps progress visible on the shared GitHub Project board.
 
 ## Taskboard Setup
 
-The taskboard (tcarac/taskboard) is the single source of truth for all project work.
+GitHub issues are the backlog of record. The taskboard (tcarac/taskboard) is a local working view synced with them; when the two disagree, the GitHub issue is correct.
 
 ### Installation
 ```bash
-# Option 1: Go install
-go install github.com/tcarac/taskboard@latest
+# `go install github.com/tcarac/taskboard@latest` does NOT work (v0.6.0 has no
+# main package at the module root, and cmd/taskboard embeds a web/dist the
+# module does not ship).
+# Option 1: Homebrew
+brew tap tcarac/taskboard && brew install taskboard
 
-# Option 2: Download binary from releases
+# Option 2: Download a release binary from
 # https://github.com/tcarac/taskboard/releases
 # Place in: ../taskboard/, ~/.local/bin/, /usr/local/bin/, or PATH
+# (or set TASKBOARD_BIN to it)
+
+# Option 3: Build from source
+git clone https://github.com/tcarac/taskboard && cd taskboard && make build
 ```
 
 ### Starting the Server
 
-The session start hook auto-starts the server if the binary is found. If it fails, start it manually with the **Start** command in **Canonical Project Facts** below.
+The session start hook auto-starts the server if the binary is found. If it fails, start it manually with the **Start** command in **Canonical Project Facts** below. On a new machine with no taskboard database yet, run the **First run** command there once instead.
 
 <!-- AGENTIC-SYNC:START -->
 <!-- Generated from tools/agentic-sync/canonical.json by tools/agentic-sync/sync.mjs.
@@ -39,18 +55,19 @@ The session start hook auto-starts the server if the binary is found. If it fail
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
-- Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
+- Start: `node .claude/hooks/taskboard-launch.mjs start`  *(the launcher resolves the shared database path and passes it to the binary itself — never start the binary by hand or pass your own `--db`)*
+- First run on a new machine (no taskboard database yet): `node .claude/hooks/taskboard-launch.mjs init` once, instead of Start  *(the only command that creates the shared database; it refuses when a populated database already exists or a server is already running)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.3.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.4.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 83 · branches 75 · functions 78 · lines 85
+**Coverage thresholds (CI-enforced):** statements 86 · branches 79 · functions 82 · lines 88
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 ### Required Ticket Fields
@@ -79,7 +96,7 @@ Tickets sync bidirectionally with GitHub Project "SpawnForge" (#2, owner: Trista
 - **Automatic pull**: At session start via SessionStart hook
 - **Manual sync**: `python3 .claude/hooks/github_project_sync.py push|pull|status`
 
-All three contributors see the same board on GitHub regardless of which AI tool they use.
+Every AI tool syncs to the same GitHub board.
 
 ### Sync Source of Truth: `github_issue_number` + `sync_repo`
 
@@ -152,7 +169,9 @@ powershell.exe -File ".\build_wasm.ps1"
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 ```
 
@@ -170,7 +189,7 @@ All hooks live in `.claude/hooks/` and are called by each tool's config:
 | `sync-to-github.sh` | Push local changes to GitHub Project | Called by on-stop |
 | `sync-from-github.sh` | Pull GitHub changes to local | Called by on-session-start |
 
-**Tool hook support**: Claude Code, Copilot, Gemini CLI, and Windsurf run these automatically via their hook configs. Codex CLI and Antigravity do not support hooks — developers must run the scripts manually (see `.codex/AGENTS.md` or `.agent/rules/taskboard-sync.md`).
+**Tool hook support**: Claude Code, Copilot, Gemini CLI, and Windsurf run these automatically via their hook configs. Codex CLI runs them through `.codex/hooks.json` (generated from `.claude/settings.json`), but only once its hooks have been approved in `/hooks` — until then, and until that wiring has been confirmed in a live session, run the scripts manually as `.codex/AGENTS.md` describes. Antigravity does not support hooks — run the scripts manually (see `.agent/rules/taskboard-sync.md`).
 
 **Antigravity config**: `.agent/rules/` (project rules + taskboard enforcement) + `.agent/skills/` (kanban, sync-push, sync-pull). See `.agent/rules/project.md` for full architecture and coding standards.
 

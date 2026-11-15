@@ -47,18 +47,24 @@ updates:
       - dependencies
       - rust
     ignore:
-      # Bevy releases (0.18 → 0.19) must land as ONE coordinated migration across
-      # bevy + every bevy_* ecosystem crate (#8887). A piecemeal per-crate bump
-      # (e.g. bevy_math 0.19.0 alone while the workspace pins bevy 0.18.1) leaves
-      # BOTH versions in engine/Cargo.lock → type mismatches at the
-      # transform-gizmo-fork/engine boundary → Quality Gates / WASM Build fails.
-      # Shipped live as #8897/#8898/#8899 (all red). Bevy is 0.x, so 0.18 → 0.19
-      # is `semver-minor`; patch updates (0.18.1 → 0.18.2) still flow. Remove
-      # this rule as part of the coordinated 0.19 migration (#8887).
+      # A Bevy release (0.18 → 0.19 was #8887) must land as ONE coordinated
+      # migration across bevy + every bevy_* ecosystem crate + the local
+      # transform-gizmo fork. A piecemeal per-crate bump (bevy_math 0.19.0 alone
+      # while the workspace pinned bevy 0.18.1) leaves BOTH versions in
+      # engine/Cargo.lock → type mismatches at the fork/engine boundary →
+      # Quality Gates / WASM Build red — shipped live as #8897/#8898/#8899.
+      #
+      # #8887 landed 0.19, so this rule no longer blocks the 0.19 line: patch
+      # updates (0.19.1 → 0.19.2) and ecosystem minors built on bevy 0.19 (e.g.
+      # bevy_rapier 0.35 → 0.36, which still requires bevy ^0.19) flow again.
+      # It is NARROWED to the next Bevy line rather than removed, because
+      # removing it would reopen exactly the piecemeal failure above the day
+      # bevy_* 0.20.0 ships. Residual gap: an ecosystem crate whose NEXT minor
+      # moves to bevy 0.20 while keeping a < 0.20 version number (rapier,
+      # panorbit) is not caught by a version range — close such a PR and fold
+      # it into the coordinated 0.20 migration.
       - dependency-name: "bevy*"
-        update-types:
-          - "version-update:semver-minor"
-          - "version-update:semver-major"
+        versions: [">= 0.20"]
       # egui-family crates (egui/emath/epaint/ecolor) are pinned as a matched
       # set by the local transform-gizmo fork (.transform-gizmo-fork/Cargo.toml,
       # reached via engine's path dependency — Dependabot edits it when relocking
@@ -66,8 +72,10 @@ updates:
       # leaves two versions in engine/Cargo.lock → E0308 `expected epaint::Pos2,
       # found emath::Pos2` at the fork boundary → WASM Build red. Like bevy*,
       # they are 0.x crates, so 0.34 → 0.35 is `semver-minor`; patch updates
-      # still flow. The set moves together when the fork moves — as part of the
-      # coordinated Bevy 0.19 migration (#8887). Tracking: #8911 (PF-944).
+      # still flow. The set moves together when the fork moves. The Bevy 0.19
+      # migration (#8887) did NOT move it: only the fork's core crate
+      # (transform-gizmo) uses emath/epaint/ecolor, and it has no bevy
+      # dependency, so the 0.34 set stayed. Tracking: #8911 (PF-944).
       - dependency-name: "egui*"
         update-types:
           - "version-update:semver-minor"

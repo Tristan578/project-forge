@@ -64,6 +64,7 @@ export function modelToolSchema(commandName: string, parameters: unknown): Model
   const excluded = EXCLUDED_TOOL_PROPERTIES[commandName];
 
   return {
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank JSON-schema type is invalid; treated as unset, defaults to object
     type: schema.type || 'object',
     properties: excluded
       ? Object.fromEntries(Object.entries(properties).filter(([key]) => !excluded.includes(key)))

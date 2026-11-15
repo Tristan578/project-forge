@@ -2,7 +2,8 @@
  * POST /api/auth/webhook — Clerk webhook handler.
  *
  * Processes user.created, user.updated, and user.deleted events.
- * On user.created/updated, upserts the user row in the database.
+ * On user.created, upserts the user row and grants the one-time trial tokens.
+ * On user.updated, upserts the user row only.
  * On user.deleted, removes user data and cancels any active subscriptions.
  *
  * Signature verification is Clerk's own `verifyWebhook()` (#9629): it reads
@@ -23,6 +24,7 @@ import {
   processRetryQueue,
 } from '@/lib/auth/webhookRetry';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { grantTrialTokens } from '@/lib/billing/trial-grant';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 
@@ -32,8 +34,24 @@ async function handleWebhookEvent(
   data: Record<string, unknown>,
 ): Promise<void> {
   switch (eventType) {
-    case 'user.created':
+    case 'user.created': {
+      const user = await syncUserFromClerk(data as Parameters<typeof syncUserFromClerk>[0]);
+      // The one-time trial grant (#7715) keys on the INTERNAL users.id that
+      // syncUserFromClerk returns, never the raw Clerk id. It is idempotent at
+      // the database (a `trial_grant` audit row is the arbiter), so a Clerk
+      // redelivery or a retry-queue replay of this event grants nothing twice.
+      try {
+        await grantTrialTokens(user.id);
+      } catch (err) {
+        captureException(err, { context: 'trial-token-grant-failure', userId: user.id });
+        // Rethrow so the caller's isTransientError / enqueueRetry path decides.
+        throw err;
+      }
+      break;
+    }
     case 'user.updated': {
+      // A profile edit never grants: the user was granted on creation, and a
+      // user who has spent the trial down must not be topped up by renaming.
       await syncUserFromClerk(data as Parameters<typeof syncUserFromClerk>[0]);
       break;
     }

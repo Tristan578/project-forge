@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, parseArgs } from './types';
+import { ownEntry, zEntityId, parseArgs } from './types';
 import { useShaderEditorStore } from '@/stores/shaderEditorStore';
 import { SHADER_NODE_DEFINITIONS } from '@/lib/shaders/shaderNodeTypes';
 import { compileToWgsl, compileToMegaShaderSlot } from '@/lib/shaders/wgslCompiler';
@@ -36,6 +36,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
   create_shader_graph: async (args) => {
     const p = parseArgs(z.object({ name: z.string().optional() }), args);
     if (p.error) return p.error;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank shader graph name is unset; falls back to a display placeholder
     const name = p.data.name || 'Untitled Shader';
     const graphId = useShaderEditorStore.getState().createNewGraph(name);
     return {
@@ -61,6 +62,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     }
 
     const store = useShaderEditorStore.getState();
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- graphId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the active graph
     const targetGraphId = p.data.graphId || store.activeGraphId;
 
     if (!targetGraphId) {
@@ -94,7 +96,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const store = useShaderEditorStore.getState();
-    const activeGraph = store.activeGraphId ? store.graphs[store.activeGraphId] : null;
+    const activeGraph = store.activeGraphId ? ownEntry(store.graphs, store.activeGraphId) : null;
 
     if (!activeGraph) {
       return { success: false, error: 'No active shader graph' };
@@ -124,13 +126,14 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ graphId: z.string().optional() }), args);
     if (p.error) return p.error;
     const store = useShaderEditorStore.getState();
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- graphId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the active graph
     const targetGraphId = p.data.graphId || store.activeGraphId;
 
     if (!targetGraphId) {
       return { success: false, error: 'No active shader graph' };
     }
 
-    const graph = store.graphs[targetGraphId];
+    const graph = ownEntry(store.graphs, targetGraphId);
     if (!graph) {
       return { success: false, error: `Shader graph not found: ${targetGraphId}` };
     }
@@ -165,13 +168,14 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     }
 
     const store = useShaderEditorStore.getState();
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- graphId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the active graph
     const targetGraphId = p.data.graphId || store.activeGraphId;
 
     if (!targetGraphId) {
       return { success: false, error: 'No shader graph specified' };
     }
 
-    const graph = store.graphs[targetGraphId];
+    const graph = ownEntry(store.graphs, targetGraphId);
     if (!graph) {
       return { success: false, error: `Shader graph not found: ${targetGraphId}` };
     }

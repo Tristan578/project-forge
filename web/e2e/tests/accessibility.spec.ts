@@ -111,6 +111,7 @@ test.describe('Accessibility @ui @dev', () => {
           if (!tag || tag === 'BODY') return null;
           return tag;
         },
+        undefined,
         { timeout: E2E_TIMEOUT_LOAD_MS },
       );
       const tag = await focusedTag.jsonValue();
@@ -146,6 +147,7 @@ test.describe('Accessibility @ui @dev', () => {
       // Use waitForFunction to allow focus to settle after animation completes
       const focusedTag = await page.waitForFunction(
         () => document.activeElement?.tagName ?? null,
+        undefined,
         { timeout: E2E_TIMEOUT_ELEMENT_MS },
       );
       expect(await focusedTag.jsonValue()).toBeTruthy();
@@ -181,6 +183,7 @@ test.describe('Accessibility @ui @dev', () => {
           const el = document.activeElement;
           return !!dlg && !!el && el !== document.body && dlg.contains(el);
         },
+        undefined,
         { timeout: E2E_TIMEOUT_ELEMENT_MS }
       );
 
@@ -200,6 +203,7 @@ test.describe('Accessibility @ui @dev', () => {
       // racing them -- the assertion itself is unchanged.
       await page.waitForFunction(
         () => document.getAnimations().every((a) => a.playState !== 'running'),
+        undefined,
         { timeout: E2E_TIMEOUT_ELEMENT_MS }
       );
 
