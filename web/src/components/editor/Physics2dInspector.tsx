@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { HelpCircle } from 'lucide-react';
 import { useEditorStore, type Physics2dData } from '@/stores/editorStore';
 import { defaultPhysics2dData } from '@/lib/physics/physics2dPayload';
@@ -78,6 +78,10 @@ const COLLIDER_SHAPE_OPTIONS = [
 ];
 
 export function Physics2dInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const physics2d = useEditorStore((s) => (primaryId ? s.physics2d[primaryId] : null));
   const physics2dEnabled = useEditorStore((s) => (primaryId ? s.physics2dEnabled[primaryId] ?? false : false));
@@ -147,8 +151,9 @@ export function Physics2dInspector() {
           <>
             {/* Body Type */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Body Type<InfoTooltip term="bodyType2d" /></label>
+              <label htmlFor={fieldId('body-type')} className="w-20 shrink-0 text-xs text-zinc-400">Body Type<InfoTooltip term="bodyType2d" /></label>
               <select
+                id={fieldId('body-type')}
                 value={physics2d.bodyType}
                 onChange={(e) => handleUpdate({ bodyType: e.target.value as Physics2dData['bodyType'] })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -162,8 +167,9 @@ export function Physics2dInspector() {
 
             {/* Collider Shape */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Shape<InfoTooltip term="colliderShape2d" /></label>
+              <label htmlFor={fieldId('shape')} className="w-20 shrink-0 text-xs text-zinc-400">Shape<InfoTooltip term="colliderShape2d" /></label>
               <select
+                id={fieldId('shape')}
                 value={physics2d.colliderShape}
                 onChange={(e) => handleUpdate({ colliderShape: e.target.value as Physics2dData['colliderShape'] })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -204,8 +210,9 @@ export function Physics2dInspector() {
             {/* Mass (dynamic only) */}
             {isDynamic && (
               <div className="flex items-center gap-2">
-                <label className="w-20 shrink-0 text-xs text-zinc-400">Mass<InfoTooltip term="mass2d" /></label>
+                <label htmlFor={fieldId('mass')} className="w-20 shrink-0 text-xs text-zinc-400">Mass<InfoTooltip term="mass2d" /></label>
                 <input
+                  id={fieldId('mass')}
                   type="range"
                   min={0.1}
                   max={100}
@@ -220,8 +227,9 @@ export function Physics2dInspector() {
 
             {/* Friction */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Friction<InfoTooltip term="friction2d" /></label>
+              <label htmlFor={fieldId('friction')} className="w-20 shrink-0 text-xs text-zinc-400">Friction<InfoTooltip term="friction2d" /></label>
               <input
+                id={fieldId('friction')}
                 type="range"
                 min={0}
                 max={2}
@@ -235,8 +243,9 @@ export function Physics2dInspector() {
 
             {/* Restitution */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Bounciness<InfoTooltip term="restitution2d" /></label>
+              <label htmlFor={fieldId('bounciness')} className="w-20 shrink-0 text-xs text-zinc-400">Bounciness<InfoTooltip term="restitution2d" /></label>
               <input
+                id={fieldId('bounciness')}
                 type="range"
                 min={0}
                 max={1}
@@ -251,8 +260,9 @@ export function Physics2dInspector() {
             {/* Gravity Scale (dynamic only) */}
             {isDynamic && (
               <div className="flex items-center gap-2">
-                <label className="w-20 shrink-0 text-xs text-zinc-400">Gravity<InfoTooltip term="gravityScale2d" /></label>
+                <label htmlFor={fieldId('gravity')} className="w-20 shrink-0 text-xs text-zinc-400">Gravity<InfoTooltip term="gravityScale2d" /></label>
                 <input
+                  id={fieldId('gravity')}
                   type="range"
                   min={-2}
                   max={2}

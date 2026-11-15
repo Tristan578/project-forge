@@ -1,5 +1,9 @@
+/** Request authentication, security headers, and pre-stream published-game 404 handling. */
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { loadPublishedGameMetadata } from '@/lib/play/gameMetadata';
+import { gameNotFoundResponse, gameUnavailableResponse } from '@/lib/play/notFoundDocument';
+import { stripNeverCarriedParams } from '@/lib/navigation/authRoutes';
 import {
   buildPlayContentSecurityPolicy,
   isPlayPath,
@@ -9,6 +13,8 @@ import {
 /**
  * Allowed origins for API requests in production.
  * In development, allow localhost variants.
+ * @param env Environment used to derive deployment-specific origins.
+ * @returns Allowed CORS origin strings.
  */
 export function allowedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
   return env.NODE_ENV === 'production'
@@ -34,6 +40,8 @@ const ALLOWED_ORIGINS = allowedOrigins();
  * says this deployment is served as, so preview and branch deployments (which
  * sign in on their own `*.vercel.app` origin) keep working. `@clerk/backend`
  * 3.11.1+ rejects a token whose `azp` is missing or empty once this is set.
+ * @param env Environment with production and preview deployment origins.
+ * @returns Origins accepted in Clerk session authorized-party claims.
  */
 export function buildAuthorizedParties(env: NodeJS.ProcessEnv = process.env): string[] {
   const parties = new Set<string>(allowedOrigins(env));
@@ -69,6 +77,7 @@ function handleCors(req: NextRequest): NextResponse | null {
       return new NextResponse(null, {
         status: 204,
         headers: {
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank Origin header is unset; falls back to the wildcard CORS default
           'Access-Control-Allow-Origin': origin || '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -189,6 +198,8 @@ function addSecurityHeaders(response: NextResponse, req: NextRequest): NextRespo
  * the live `proxy` export is impossible in unit tests (the key check runs once at
  * module load), so without a direct export the `/play` nonce would be proven only
  * on the Clerk path and could silently regress on the one CI actually exercises.
+ * @param req Incoming request in the credential-free proxy branch.
+ * @returns CORS short circuit or nonce/security-stamped passthrough.
  */
 export function passthroughMiddleware(req: NextRequest): NextResponse {
   const corsResponse = handleCors(req);
@@ -211,6 +222,8 @@ export function passthroughMiddleware(req: NextRequest): NextResponse {
  * production: in production the `/dev` editor requires authentication like any
  * other editor route, to prevent unauthenticated access to the full editor UI
  * (#7915).
+ * @param options Whether to include the development editor auth bypass.
+ * @returns Exact public routes and explicitly allowed subtrees.
  */
 export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): string[] {
   const publicRoutes = [
@@ -256,7 +269,7 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     '/api/health/(.*)',
     '/api/status',
     '/api/status/(.*)',
-    // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.json crons) carry
+    // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.ts config.crons) carry
     // only a CRON_SECRET bearer token, no Clerk session. The routes enforce that
     // secret themselves (see the cron-self-enforcement guard in proxy.test.ts),
     // so they must bypass the Clerk proxy or the scheduled call 401s before its
@@ -335,6 +348,10 @@ type ProxyAuth = () => Promise<{
  * stub auth. Exposing the decision as a pure function — given an `auth` result and
  * an `isPublicRoute` matcher — lets the real 401-vs-redirect logic be exercised with
  * the real Clerk route matcher and no live keys (see `proxy.test.ts`).
+ * @param auth Clerk session reader and sign-in redirect provider.
+ * @param req Incoming request.
+ * @param isPublicRoute Matcher for explicitly public routes.
+ * @returns CORS response, authentication failure/redirect, or secured passthrough.
  */
 export async function applyAuthDecision(
   auth: ProxyAuth,
@@ -365,7 +382,8 @@ export async function applyAuthDecision(
       if (req.nextUrl.pathname.startsWith('/api/')) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
-      return redirectToSignIn({ returnBackUrl: req.url });
+      // The MCP relay token (`?mcp=`) is not carried into the sign-in flow.
+      return redirectToSignIn({ returnBackUrl: stripNeverCarriedParams(req.url) });
     }
   }
 
@@ -413,8 +431,54 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
   );
 }
 
-export const proxy = buildProxy();
+const authProxy = buildProxy();
 
+/**
+ * Preflight exact play documents after normal proxy auth/CORS/CSP handling.
+ * Missing published metadata returns a direct404 before root Suspense can stream.
+ * Lookup failures return a retryable503; other routes/methods and redirects retain their response.
+ * @param req Incoming Next.js request.
+ * @returns Existing proxy response, a missing-game404, or a temporary-failure503.
+ */
+export async function proxy(req: NextRequest): Promise<NextResponse> {
+  return preflightPublishedGame(req, await authProxy(req));
+}
+
+/**
+ * Apply published-game preflight to the completed authentication response.
+ * @param req Incoming request whose original document is being forwarded.
+ * @param response Authentication/CORS/security response from the proxy.
+ * @returns Forwarding response, a missing-game404, or a temporary-failure503.
+ */
+export async function preflightPublishedGame(req: NextRequest, response: NextResponse): Promise<NextResponse> {
+  const rewrite = response.headers.get('x-middleware-rewrite');
+  // Clerk forwards auth headers by replacing next() with a same-URL rewrite.
+  // A different destination is a routing/auth decision and must be preserved.
+  const forwardsOriginal = rewrite !== null
+    ? rewrite === req.url
+    : response.headers.get('x-middleware-next') === '1';
+  if (response.status !== 200 || !forwardsOriginal
+      || (req.method !== 'GET' && req.method !== 'HEAD')) return response;
+  const match = /^\/play\/([^/]+)\/([^/]+)\/?$/.exec(req.nextUrl.pathname);
+  if (!match) return response;
+  let userId: string;
+  let slug: string;
+  try {
+    userId = decodeURIComponent(match[1]);
+    slug = decodeURIComponent(match[2]);
+  } catch {
+    // Let Next.js reject malformed route encoding with its native400 behavior.
+    return response;
+  }
+  try {
+    const game = await loadPublishedGameMetadata(userId, slug);
+    return game ? response : gameNotFoundResponse(response, req.method === 'HEAD');
+  } catch {
+    return gameUnavailableResponse(response, req.method === 'HEAD');
+  }
+}
+
+/** Next.js static proxy matchers, including every user-controlled play slug. */
 export const config = {
   matcher: [
     // Skip Next.js internals, static files, and engine WASM

@@ -97,16 +97,18 @@ quest
 When adding a new category, also update `EXPECTED_CATEGORIES` in
 `mcp-server/src/manifest.test.ts`.
 
-## Both Manifest Files Must Stay in Sync
+## All Three Manifest Files Must Stay in Sync
 
 ```
 mcp-server/manifest/commands.json   ← source of truth (edit here)
-web/src/data/commands.json          ← COPY (run cp or validate-mcp.sh sync)
+web/src/data/commands.json          ← COPY (web deploy root)
+apps/docs/data/commands.json        ← COPY (docs deploy root)
 ```
 
 After editing the source:
 ```bash
 cp mcp-server/manifest/commands.json web/src/data/commands.json
+cp mcp-server/manifest/commands.json apps/docs/data/commands.json
 bash .claude/tools/validate-mcp.sh sync
 ```
 

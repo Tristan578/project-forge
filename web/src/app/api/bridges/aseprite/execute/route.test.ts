@@ -2,10 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import type { BridgeToolConfig, BridgeResult } from '@/lib/bridges/types';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { dirname } from 'path';
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/bridges/luaTemplates', () => ({
-  ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet']),
+  ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet', 'drawFrames']),
 }));
 
 // Each test gets a fresh route module to avoid the module-level cache
@@ -14,7 +16,7 @@ async function importRoute() {
   // Re-apply mocks after reset (vi.doMock is not hoisted, unlike vi.mock)
   vi.doMock('server-only', () => ({}));
   vi.doMock('@/lib/bridges/luaTemplates', () => ({
-    ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet']),
+    ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet', 'drawFrames']),
   }));
   const { POST } = await import('./route');
   return POST;
@@ -46,6 +48,36 @@ const mockResult: BridgeResult = {
   outputFiles: ['/tmp/output.png'],
   metadata: { width: 32, height: 32 },
 };
+
+/** Stand-in for a saved `.aseprite` file: arbitrary bytes, including non-UTF-8. */
+const SPRITE_BYTES = Buffer.from([0xe0, 0xa5, 0x00, 0x00, 0xff, 0x46, 0x2d, 0x31, 0x30, 0x32, 0x37, 0x31]);
+
+/**
+ * An `executeOperation` that behaves like the real one on success: it writes
+ * the sprite to the server-chosen `outputPath` the route handed it. Records
+ * each path so a test can check the route removed the file afterwards.
+ */
+function savingExecute(bytes: Buffer = SPRITE_BYTES) {
+  const paths: string[] = [];
+  const fn = vi.fn(async (_binary: string, op: { params: Record<string, unknown> }) => {
+    const out = String(op.params.outputPath);
+    paths.push(out);
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, bytes);
+    return mockResult;
+  });
+  return { fn, paths };
+}
+
+function authed() {
+  vi.doMock('@/lib/auth/api-auth', () => ({
+    authenticateRequest: vi.fn().mockResolvedValue({
+      ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+    }),
+  }));
+}
 
 function makeRequest(body: unknown) {
   return new NextRequest('http://test/api/bridges/aseprite/execute', {
@@ -142,9 +174,10 @@ describe('POST /api/bridges/aseprite/execute', () => {
     const res = await POST(makeRequest({ operation: 'maliciousScript' }));
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toContain('Unknown operation');
-    expect(data.error).toContain('maliciousScript');
-    expect(data.error).toContain('createSprite');
+    // Advertise exactly what this route runs. `drawFrames` is server-only and
+    // the input-sprite templates are refused below, so naming them here would
+    // invite a request that the very next check rejects (#10271).
+    expect(data.error).toBe('Unknown operation: "maliciousScript". Allowed: createSprite, createAnimation');
   });
 
   it('returns 422 when params is an array', async () => {
@@ -236,29 +269,168 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(data.error).toBe('No Aseprite binary path for current platform');
   });
 
-  it('returns 200 with result on successful execution', async () => {
-    vi.doMock('@/lib/auth/api-auth', () => ({
-      authenticateRequest: vi.fn().mockResolvedValue({
-        ok: true as const,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
-      }),
-    }));
+  // #10271 board round 1: the route used to delete the server-chosen file in
+  // `finally` before reading it, so a "successful" createSprite returned
+  // nothing the caller could use. The bytes are the artifact; the path never is.
+  it.each([['createSprite'], ['createAnimation']])(
+    '%s returns the saved sprite bytes and removes the temp file',
+    async (operation) => {
+      authed();
+      vi.doMock('@/lib/bridges/bridgeManager', () => ({
+        discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+      }));
+      const saving = savingExecute();
+      vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+      const POST = await importRoute();
+      const res = await POST(makeRequest({ operation, params: { width: 32, height: 32 } }));
+
+      expect(res.status).toBe(200);
+      const raw = await res.text();
+      expect(JSON.parse(raw)).toEqual({
+        success: true,
+        sprite: {
+          format: 'aseprite',
+          contentType: 'application/octet-stream',
+          base64: SPRITE_BYTES.toString('base64'),
+        },
+        metadata: { width: 32, height: 32 },
+      });
+      expect(Buffer.from(JSON.parse(raw).sprite.base64, 'base64').equals(SPRITE_BYTES)).toBe(true);
+      // The server's path is not the caller's business, in any field.
+      expect(saving.paths).toHaveLength(1);
+      expect(raw).not.toContain('spawnforge-bridge');
+      expect(raw).not.toContain('outputFiles');
+      // And it is gone once the response exists.
+      expect(existsSync(saving.paths[0])).toBe(false);
+    },
+  );
+
+  it('returns the bridge failure, not an empty success, when Aseprite saved nothing', async () => {
+    authed();
     vi.doMock('@/lib/bridges/bridgeManager', () => ({
       discoverTool: vi.fn().mockResolvedValue(connectedConfig),
     }));
+    // Reports success but never writes outputPath.
     vi.doMock('@/lib/bridges/asepriteBridge', () => ({
       executeOperation: vi.fn().mockResolvedValue(mockResult),
     }));
 
     const POST = await importRoute();
     const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
-    expect(data.outputFiles).toEqual(['/tmp/output.png']);
-    expect(data.metadata).toEqual({ width: 32, height: 32 });
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ success: false, error: BRIDGE_FAILURE_MESSAGE });
   });
+
+  // #10271 board round 3: the route returns the saved file's bytes, so an
+  // unbounded request (the template loader allows 0-99999 per number) meant an
+  // unbounded read into memory. Oversized requests are refused before Aseprite
+  // runs, and an oversized file is never read.
+  it.each([
+    [{ width: 2049, height: 32 }, 'width (max 2048)'],
+    [{ width: 32, height: 2049 }, 'height (max 2048)'],
+    [{ width: 32, height: 32, frameCount: 257 }, 'frameCount (max 256)'],
+    [{ width: 99999, height: 99999, frameCount: 99999 }, 'width (max 2048), height (max 2048), frameCount (max 256)'],
+  ])('refuses an oversized request %j before Aseprite runs', async (params, named) => {
+    authed();
+    const discoverToolMock = vi.fn().mockResolvedValue(connectedConfig);
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: discoverToolMock }));
+    const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createAnimation', params }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(`Sprite too large. Reduce: ${named}`);
+    expect(discoverToolMock).not.toHaveBeenCalled();
+    expect(executeOperationMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts a request exactly at the size limits', async () => {
+    authed();
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    const saving = savingExecute();
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({
+      operation: 'createAnimation',
+      params: { width: 2048, height: 2048, frameCount: 256 },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(saving.fn).toHaveBeenCalledTimes(1);
+  });
+
+  // Board round 4 (ux): an oversized output is not a bridge failure. Aseprite
+  // ran; "check Aseprite is installed ... try again" would name the wrong
+  // cause, and a retry with the same size fails the same way.
+  it('reports a saved file over the byte limit as too large (not a bridge failure), unread, and removes it', async () => {
+    authed();
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    const saving = savingExecute(Buffer.alloc(8 * 1024 * 1024 + 1));
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: 'The sprite Aseprite produced is too large to return (over 8 MiB). '
+        + 'Try a smaller size or fewer frames.',
+    });
+    expect(existsSync(saving.paths[0])).toBe(false);
+  });
+
+  it('returns a file exactly at the byte limit', async () => {
+    authed();
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    const atLimit = Buffer.alloc(8 * 1024 * 1024, 7);
+    const saving = savingExecute(atLimit);
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
+
+    expect(res.status).toBe(200);
+    expect(Buffer.from((await res.json()).sprite.base64, 'base64').equals(atLimit)).toBe(true);
+    expect(existsSync(saving.paths[0])).toBe(false);
+  });
+
+  // #10271 board round 1: these three open an existing sprite with
+  // `app.open("{{inputPath}}")`. The route refuses a client path and has no
+  // server-owned input to give them, so they would run `app.open("")`. They
+  // are refused up front, before discovery or any Aseprite run.
+  it.each([['editSprite'], ['applyPalette'], ['exportSheet']])(
+    'refuses %s, which needs an input sprite the route cannot supply',
+    async (operation) => {
+      authed();
+      const discoverToolMock = vi.fn().mockResolvedValue(connectedConfig);
+      vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: discoverToolMock }));
+      const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+      vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+      const POST = await importRoute();
+      const res = await POST(makeRequest({ operation, params: { width: 16 } }));
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe(
+        `Operation "${operation}" requires an input sprite, which this route cannot accept yet. `
+        + 'Allowed: createSprite, createAnimation',
+      );
+      expect(discoverToolMock).not.toHaveBeenCalled();
+      expect(executeOperationMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('never forwards stdout or stderr to the client, on either outcome', async () => {
     // The route used to `NextResponse.json(result)` verbatim, and a
@@ -307,7 +479,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
   });
 
   it('accepts null params and defaults to empty object', async () => {
-    const nullParamsMock = vi.fn().mockResolvedValue(mockResult);
+    const nullParamsMock = savingExecute().fn;
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
@@ -327,12 +499,16 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(res.status).toBe(200);
     expect(nullParamsMock).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ name: 'createSprite', params: {} })
+      expect.objectContaining({
+        name: 'createSprite',
+        // The only param is the server's own output path (#10271).
+        params: { outputPath: expect.stringMatching(/spawnforge-bridge\/[0-9a-f-]+\.aseprite$/) },
+      })
     );
   });
 
   it('accepts missing params and defaults to empty object', async () => {
-    const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+    const executeOperationMock = savingExecute().fn;
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
@@ -352,8 +528,59 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(res.status).toBe(200);
     expect(executeOperationMock).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ name: 'createSprite', params: {} })
+      expect.objectContaining({
+        name: 'createSprite',
+        // The only param is the server's own output path (#10271).
+        params: { outputPath: expect.stringMatching(/spawnforge-bridge\/[0-9a-f-]+\.aseprite$/) },
+      })
     );
+  });
+
+  // #10271: templates hand these to saveAs / app.open. A client choosing them
+  // chose where the server writes and what it opens.
+  it.each([['outputPath'], ['inputPath'], ['outputPng'], ['outputJson']])(
+    'rejects a client-supplied %s before touching Aseprite',
+    async (key) => {
+      const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+      vi.doMock('@/lib/auth/api-auth', () => ({
+        authenticateRequest: vi.fn().mockResolvedValue({
+          ok: true as const,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+        }),
+      }));
+      const discoverToolMock = vi.fn().mockResolvedValue(connectedConfig);
+      vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: discoverToolMock }));
+      vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+      const POST = await importRoute();
+      const res = await POST(
+        makeRequest({ operation: 'createSprite', params: { width: 16, [key]: 'C:/Windows/evil.aseprite' } }),
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain(key);
+      expect(executeOperationMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not run the server-only drawFrames template for a client', async () => {
+    const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+    vi.doMock('@/lib/auth/api-auth', () => ({
+      authenticateRequest: vi.fn().mockResolvedValue({
+        ok: true as const,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      }),
+    }));
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: vi.fn().mockResolvedValue(connectedConfig) }));
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'drawFrames', params: {} }));
+
+    expect(res.status).toBe(400);
+    expect(executeOperationMock).not.toHaveBeenCalled();
   });
 
   it('returns 500 when executeOperation throws', async () => {

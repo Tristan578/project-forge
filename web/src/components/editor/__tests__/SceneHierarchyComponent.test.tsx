@@ -28,6 +28,7 @@ vi.mock('../SceneNode', () => ({
     node,
     onContextMenu,
     isEditing,
+    editingEntityId,
     onEditComplete,
     focusedEntityId,
     onDragStart,
@@ -41,7 +42,8 @@ vi.mock('../SceneNode', () => ({
   }: {
     node: { entityId: string; name: string };
     onContextMenu: (data: { entityId: string; entityName: string; position: { x: number; y: number } }) => void;
-    isEditing: boolean;
+    isEditing?: boolean;
+    editingEntityId?: string | null;
     onEditComplete: (name: string | null) => void;
     focusedEntityId: string | null;
     onDragStart?: (entityId: string, entityName: string) => void;
@@ -66,7 +68,7 @@ vi.mock('../SceneNode', () => ({
       }}
     >
       {node.name}
-      {isEditing && (
+      {(editingEntityId === undefined ? isEditing : editingEntityId === node.entityId) && (
         <input
           data-testid={`rename-input-${node.entityId}`}
           defaultValue={node.name}

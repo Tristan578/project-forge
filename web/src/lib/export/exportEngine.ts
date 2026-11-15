@@ -19,11 +19,11 @@ export interface ExportOptions {
   resolution: GameTemplateOptions['resolution'];
   bgColor: string;
   includeDebug: boolean;
-  preset?: ExportPreset;
-  customLoadingScreen?: LoadingScreenConfig;
-  orientationLock?: 'landscape' | 'portrait' | 'none';
-  textureCompressionConfig?: CompressionConfig;
-  signal?: AbortSignal;
+  preset?: ExportPreset | undefined;
+  customLoadingScreen?: LoadingScreenConfig | undefined;
+  orientationLock?: 'landscape' | 'portrait' | 'none' | undefined;
+  textureCompressionConfig?: CompressionConfig | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -80,6 +80,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
       bgColor: options.bgColor,
       includeDebug: options.includeDebug,
       orientationLock: options.orientationLock,
+      projectType: store.projectType,
       signal,
     };
 
@@ -110,6 +111,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     mobileTouchConfig: mobileTouchConfigJson,
     embeddedWasm,
     orientationLock: options.orientationLock,
+    projectType: store.projectType,
   });
 
   return new Blob([html], { type: 'text/html' });
@@ -250,12 +252,15 @@ async function fetchWasmForInlining(signal?: AbortSignal): Promise<Record<string
     const runtimeBase = `/engine-pkg-${variant}-runtime/`;
     const editorBase = `/engine-pkg-${variant}/`;
 
+    // DOM's RequestInit.signal is `AbortSignal | null` (no `| undefined`);
+    // conditional spread omits the key when this function received none.
+    const fetchInit: RequestInit = { ...(signal !== undefined ? { signal } : {}) };
     try {
-      let jsResponse = await fetch(runtimeBase + 'forge_engine.js', { signal });
-      if (!jsResponse.ok) jsResponse = await fetch(editorBase + 'forge_engine.js', { signal });
+      let jsResponse = await fetch(runtimeBase + 'forge_engine.js', fetchInit);
+      if (!jsResponse.ok) jsResponse = await fetch(editorBase + 'forge_engine.js', fetchInit);
 
-      let wasmResponse = await fetch(runtimeBase + 'forge_engine_bg.wasm', { signal });
-      if (!wasmResponse.ok) wasmResponse = await fetch(editorBase + 'forge_engine_bg.wasm', { signal });
+      let wasmResponse = await fetch(runtimeBase + 'forge_engine_bg.wasm', fetchInit);
+      if (!wasmResponse.ok) wasmResponse = await fetch(editorBase + 'forge_engine_bg.wasm', fetchInit);
 
       if (jsResponse.ok && wasmResponse.ok) {
         const jsText = await jsResponse.text();

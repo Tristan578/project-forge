@@ -115,8 +115,8 @@ export enum ErrorCode {
 
 interface ApiErrorOptions {
   code?: ErrorCode;
-  details?: Record<string, unknown>;
-  headers?: Record<string, string>;
+  details?: Record<string, unknown> | undefined;
+  headers?: Record<string, string> | undefined;
 }
 
 /**
@@ -142,7 +142,10 @@ export function createErrorResponse(
 
   return NextResponse.json(body, {
     status,
-    headers: options?.headers,
+    // DOM's ResponseInit doesn't accept an explicit `undefined` for
+    // `headers` under exactOptionalPropertyTypes; conditional spread omits
+    // the key when the caller supplied none.
+    ...(options?.headers !== undefined ? { headers: options.headers } : {}),
   });
 }
 
@@ -226,7 +229,7 @@ export function apiErrorResponse(
   code: ErrorCode,
   message: string,
   status: number,
-  options?: { details?: Record<string, unknown>; headers?: Record<string, string> },
+  options?: { details?: Record<string, unknown> | undefined; headers?: Record<string, string> | undefined },
 ): NextResponse {
   return createErrorResponse(status, message, { code, details: options?.details, headers: options?.headers });
 }

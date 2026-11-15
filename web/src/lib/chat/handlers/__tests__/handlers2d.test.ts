@@ -925,6 +925,17 @@ describe('handlers2d sprite animation edge cases', () => {
       expect(store.setSpriteSheet).toHaveBeenCalled();
     });
 
+    it('preserves an own __proto__ clip name through storage and JSON serialization', async () => {
+      const { result, store } = await invoke('slice_sprite_sheet', {
+        entityId: 'e1', assetId: 'tex-1', clips: [{ name: '__proto__', frames: [0], fps: 12 }],
+      });
+      const sheet = vi.mocked(store.setSpriteSheet).mock.calls[0][1];
+
+      expect(result.success).toBe(true);
+      expect(Object.hasOwn(sheet.clips, '__proto__')).toBe(true);
+      expect(JSON.parse(JSON.stringify(sheet.clips)).__proto__.name).toBe('__proto__');
+    });
+
     it('fails without assetId', async () => {
       const { result } = await invoke('slice_sprite_sheet', { entityId: 'e1' });
       expect(result.success).toBe(false);

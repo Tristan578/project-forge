@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import '@spawnforge/ui/tokens/theme.css';
+/* Shared UI utilities live outside the web source tree. */
+@source "../../../packages/ui/src";
 
 :root {
   --background: #09090b;
@@ -18,7 +20,7 @@
   --sf-text-muted: #71717a;
   --sf-text-disabled: #52525b;
   --sf-border: #27272a;
-  --sf-border-strong: #3f3f46;
+  --sf-border-strong: #656570;
   --sf-accent: #3b82f6;
   --sf-accent-hover: #2563eb;
   --sf-accent-active: #1d4ed8; /* #8742: button hover CTA — mirrors dark theme in themes.ts */
@@ -26,6 +28,23 @@
   --sf-destructive: #ef4444;
   --sf-success: #22c55e;
   --sf-warning: #eab308;
+  /* Status-colour semantic (PF-1068 / #9108). Static SSR defaults so themeless
+     public surfaces (e.g. /health) render the tokens before any runtime theme
+     is applied; useTheme() overrides these via applyThemeTokens at runtime.
+     Foreground/background pairs verified >= WCAG AA 4.5:1 in themes.test.ts. */
+  --sf-status-healthy-bg: #15803d;
+  --sf-status-healthy-fg: #ffffff;
+  --sf-status-degraded-bg: #eab308;
+  --sf-status-degraded-fg: #000000;
+  --sf-status-down-bg: #b91c1c;
+  --sf-status-down-fg: #ffffff;
+  --sf-status-unknown-bg: #52525b;
+  --sf-status-unknown-fg: #ffffff;
+  /* Unfilled card status indicators, readable before hydration. */
+  --sf-status-healthy-indicator: #4ade80;
+  --sf-status-degraded-indicator: #facc15;
+  --sf-status-down-indicator: #f87171;
+  --sf-status-unknown-indicator: #a1a1aa;
   --sf-radius-sm: 4px;
   --sf-radius-md: 6px;
   --sf-radius-lg: 8px;

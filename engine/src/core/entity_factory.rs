@@ -994,7 +994,7 @@ fn spawn_point_light_with_id(
         PointLight {
             intensity: 100_000.0,
             color: Color::WHITE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_translation(pos),
@@ -1024,7 +1024,7 @@ fn spawn_directional_light_with_id(
         light_data,
         DirectionalLight {
             illuminance: 10_000.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_translation(pos)
@@ -1053,7 +1053,7 @@ fn spawn_spot_light_with_id(
         SpotLight {
             intensity: 100_000.0,
             color: Color::WHITE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             range: 20.0,
             inner_angle: 0.0,
             outer_angle: std::f32::consts::FRAC_PI_4,
@@ -1354,7 +1354,7 @@ pub fn spawn_from_snapshot(
                 PointLight {
                     intensity: ld.intensity,
                     color: Color::linear_rgb(ld.color[0], ld.color[1], ld.color[2]),
-                    shadows_enabled: ld.shadows_enabled,
+                    shadow_maps_enabled: ld.shadows_enabled,
                     shadow_depth_bias: ld.shadow_depth_bias,
                     shadow_normal_bias: ld.shadow_normal_bias,
                     range: ld.range,
@@ -1375,7 +1375,7 @@ pub fn spawn_from_snapshot(
                 DirectionalLight {
                     illuminance: ld.intensity,
                     color: Color::linear_rgb(ld.color[0], ld.color[1], ld.color[2]),
-                    shadows_enabled: ld.shadows_enabled,
+                    shadow_maps_enabled: ld.shadows_enabled,
                     shadow_depth_bias: ld.shadow_depth_bias,
                     shadow_normal_bias: ld.shadow_normal_bias,
                     ..default()
@@ -1394,7 +1394,7 @@ pub fn spawn_from_snapshot(
                 SpotLight {
                     intensity: ld.intensity,
                     color: Color::linear_rgb(ld.color[0], ld.color[1], ld.color[2]),
-                    shadows_enabled: ld.shadows_enabled,
+                    shadow_maps_enabled: ld.shadows_enabled,
                     shadow_depth_bias: ld.shadow_depth_bias,
                     shadow_normal_bias: ld.shadow_normal_bias,
                     range: ld.range,
@@ -1676,8 +1676,8 @@ pub fn apply_material_updates(
         for (entity_id, mut current_mat) in query.iter_mut() {
             if entity_id.0 == update.entity_id {
                 let old_material = current_mat.clone();
-                // Merge: start from incoming update but preserve existing texture IDs
-                // when the update leaves them as None (update_material only sends changed fields).
+                // The incoming material replaces the whole component; only texture IDs
+                // the update leaves as None are carried over from the old one.
                 let mut new_mat = update.material_data.clone();
                 if new_mat.base_color_texture.is_none() { new_mat.base_color_texture = old_material.base_color_texture.clone(); }
                 if new_mat.normal_map_texture.is_none() { new_mat.normal_map_texture = old_material.normal_map_texture.clone(); }
@@ -4912,6 +4912,7 @@ mod reverb_zone_history_tests {
     use super::{apply_redo_requests, apply_undo_requests, HistoryStack, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::history::{queue_redo_from_bridge, queue_undo_from_bridge};
+    use crate::core::quality::QualitySettings;
     use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled, ReverbZoneResync};
     use bevy::prelude::*;
 

@@ -56,9 +56,20 @@ with `4409`), and closes an unknown `role` with `4400`.
 The editor side is opt-in per tab (the `?mcp=` parameter), is off in production
 builds unless `NEXT_PUBLIC_MCP_BRIDGE=true`, and asks for your consent in the tab
 before it attaches — a small dialog naming what the agent can and cannot do.
+The token is never carried through sign-in: if a signed-out visit to a
+protected editor URL sends you to the sign-in page, you land back without
+`?mcp=`, so **sign in first, then open (or reopen) the `?mcp=<token>` URL**.
+The local URL this guide uses, `/dev?mcp=<token>`, is public outside production
+and never goes through sign-in there. `/dev` does not render in a production
+build at all, signed in or not: it redirects to `/sign-in` unless the build is
+non-production or was made with `NEXT_PUBLIC_E2E_HOOKS=true` (the CI journey
+build). So a production build opted in with `NEXT_PUBLIC_MCP_BRIDGE=true` has to
+use a project URL, `/editor/<id>?mcp=<token>`, and that one does go through
+sign-in whenever Clerk is configured and you are signed out: sign in first, then
+open it.
 Once attached, a persistent indicator names each command that ran or was
-refused, with a one-click **Detach**. The bridge runs an **allowlist**: 306 of
-the 364 commands are permitted by name, and anything not enumerated — including
+refused, with a one-click **Detach**. The bridge runs an **allowlist**: 325 of
+the 383 commands are permitted by name, and anything not enumerated — including
 any command added to the manifest later — is refused. Scripting is denied
 outright: `create_script` source reaches `Function(...)` in the editor (see SEC-2
 in the root `CLAUDE.md`), as are commands that spend generation tokens, export,
@@ -243,7 +254,7 @@ Nine high-level tools that chain multiple commands in sequence:
 | `create_level_layout` | Generate a level layout with ground, walls, obstacles and spawn points |
 | `setup_game_from_description` | Scaffold a complete, playable game from a plain-text description |
 
-Use `list_doc_topics` or `search_docs` to discover the full set of 364 commands by category.
+Use `list_doc_topics` or `search_docs` to discover the full set of 383 commands by category.
 
 ## Available Resources
 
@@ -334,7 +345,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 **"Not connected to the MCP relay"** — start the relay (`cd mcp-server && MCP_RELAY_TOKEN=<secret> npm run relay`) with the same token the server was given. The server retries with backoff a bounded number of times and then stops; restart it after the relay is up.
 
-**"No editor is attached to the MCP relay"** — the relay is up but no tab has attached. Open the editor with `?mcp=<token>` (`http://spawnforge.localhost:1355/dev?mcp=<token>` locally), then **approve the consent prompt in the tab** — the bridge does not attach until you do. Only one tab can be attached at a time; a second one is refused.
+**"No editor is attached to the MCP relay"** — the relay is up but no tab has attached. Open the editor with `?mcp=<token>` (`http://spawnforge.localhost:1355/dev?mcp=<token>` locally), then **approve the consent prompt in the tab** — the bridge does not attach until you do. If the address bar no longer shows `?mcp=` because a sign-in page came in between, reopen the `?mcp=<token>` project URL (`/editor/<id>?mcp=<token>`) now that you are signed in: the token is deliberately not carried through sign-in. In a production build `/dev` is not an alternative, because it does not render there. Only one tab can be attached at a time; a second one is refused.
 
 **The relay exits immediately with "MCP_RELAY_TOKEN is required" or "…is N characters; at least 32 are required"** — the token is missing or too short. Generate one with `openssl rand -hex 32`.
 
@@ -354,7 +365,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 ## Command Reference
 
-For a complete list of all 364 commands with full parameter schemas, see:
+For a complete list of all 383 commands with full parameter schemas, see:
 
 - [Command Reference](../reference/commands.md)
 - Use the `search_docs` tool to find commands by keyword

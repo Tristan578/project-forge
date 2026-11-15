@@ -6,6 +6,7 @@ import { createMockStore } from './handlerTestUtils';
 import { compoundHandlers } from '../compoundHandlers';
 import { generationHandlers } from '../generationHandlers';
 import type { ToolCallContext, ExecutionResult } from '../types';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // Capture jobs registered by the REAL generate_texture handler so the compound
 // flow can be exercised end-to-end against the handler that actually consumes
@@ -361,7 +362,7 @@ describe('compoundHandlers', () => {
   // create_scene_from_description
   // ===========================================================================
 
-  describe('create_scene_from_description', () => {
+describe('create_scene_from_description', () => {
     it('spawns entities from description', async () => {
       const { result, store } = await invoke('create_scene_from_description', {
         entities: [
@@ -404,7 +405,68 @@ describe('compoundHandlers', () => {
       });
 
       expect(result.success).toBe(false);
+      expect(result.error).toBe('The engine did not accept a new scene. The existing scene was not cleared, so nothing was created.');
       expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, round 2: the store also answers `false` when IT refused
+    // — browser storage would not clear the prefab-instance registry before
+    // the dispatch — so the model must not be told the engine did.
+    it('names browser storage, not the engine, when the registry could not be cleared before the dispatch', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      const { result } = await invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => false),
+        newSceneRefusal: vi.fn(() => 'registry_not_cleared'),
+        spawnEntity,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked.');
+      expect(result.error).toContain('nothing was created.');
+      expect(result.error).not.toContain('engine did not accept');
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202: `newScene()` re-raises a dispatch the engine threw on, after
+    // locking saving (#10079). The handler must stop before spawning anything
+    // onto a viewport that may be half-cleared, and tell the user to reload
+    // rather than let the executor's generic catch relay the raw engine text.
+    it('fails without spawning and tells the user to reload when clearing the scene throws the engine error', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      const { result, store } = await invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => { throw new EngineDispatchThrewError('new_scene', 'engine unreachable'); }),
+        spawnEntity,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
+      expect(result.error).toContain('engine unreachable');
+      expect(result.error).toContain('Nothing was created.');
+      expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, M3: a plain throw out of `newScene` (a storage write
+    // refused under quota) set no lockout, so this catch must not claim one.
+    // It rethrows — still before spawning anything — and the executor's
+    // generic catch reports the plain message.
+    it('rethrows a non-engine throw without spawning and without claiming a lockout', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      await expect(invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); }),
+        spawnEntity,
+      })).rejects.toThrow('Quota exceeded');
+
       expect(spawnEntity).not.toHaveBeenCalled();
     });
 
@@ -476,16 +538,16 @@ describe('compoundHandlers', () => {
           interactKey: 'interact',
           oneShot: false,
         },
-      });
+      }, expect.objectContaining({ corrections: [] }));
     });
 
     it.each([
-      // [supplied value, what the engine's u32 coercion leaves]
-      [9_999_999, 1_000_000], // above U32_MAXES.collectible.value → clamped down
-      [-5, 0],                // below zero → clamped up; u32 has no negatives
-      [2.7, 3],               // fractional → rounded, as `prop_u32` rounds
-      ['not-a-number', 1],    // not a number at all → the field's default
-    ])('coerces an out-of-range collectible value %o to %o', async (supplied, expected) => {
+      // [supplied value, what the engine's u32 coercion leaves, the reported reason]
+      [9_999_999, 1_000_000, 'clamped'],        // above U32_MAXES.collectible.value → clamped down
+      [-5, 0, 'clamped'],                       // below zero → clamped up; u32 has no negatives
+      [2.7, 3, 'rounded'],                      // fractional → rounded, as `prop_u32` rounds
+      ['not-a-number', 1, 'invalid-replaced'],  // not a number at all → the field's default
+    ])('coerces an out-of-range collectible value %o to %o', async (supplied, expected, reason) => {
       // The private builder cast every field straight through (`props.x as number`),
       // so an LLM-supplied absurd value reached the engine verbatim. Assert the
       // EXACT resulting number: a `typeof === 'number'` check would still pass if
@@ -511,7 +573,10 @@ describe('compoundHandlers', () => {
           pickupSoundAsset: null,
           rotateSpeed: 90,
         },
-      });
+      }, expect.objectContaining({
+        // PF-1148: and the store is told what the coercion did to the request.
+        corrections: [{ component: 'collectible', field: 'value', requested: supplied, applied: expected, reason }],
+      }));
     });
 
     it('collapses a win conditionType the engine cannot parse to its default', async () => {
@@ -541,7 +606,11 @@ describe('compoundHandlers', () => {
           targetScore: 25,
           targetEntityId: null,
         },
-      });
+      }, expect.objectContaining({
+        corrections: [{
+          component: 'winCondition', field: 'conditionType', requested: 'collect_all', applied: 'score', reason: 'invalid-replaced',
+        }],
+      }));
     });
 
     it('reparents entities using the distinct ids returned by spawnEntity', async () => {
@@ -1501,5 +1570,163 @@ describe('compoundHandlers', () => {
       const comp = lastCallArg(store.addGameComponent, 1) as { collectible: { value: number } };
       expect(comp.collectible.value).toBe(2);
     });
+
+    // PF-1148: a compound call touches many entities, so each value it did not
+    // apply as asked is reported with the entity it landed on — and the store
+    // is handed the same report, so the inspector marks the field.
+    describe('reporting adjusted values', () => {
+      const speedClamp = {
+        component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+      };
+
+      it('create_scene_from_description reports and names the entity', async () => {
+        const { result, store } = await spawnWith({
+          name: 'Lift',
+          gameComponent: 'moving_platform',
+          gameComponentProps: { speed: 99999 },
+        });
+        const data = result.result as { corrections: unknown[]; summary: string };
+        expect(data.corrections).toEqual([{ ...speedClamp, entityId: 'e1' }]);
+        expect(data.summary).toContain(
+          '1 value was adjusted to fit the engine’s limits: '
+          + '"Lift" Moving Platform speed: you asked for 99999, it was capped at 1000.',
+        );
+        const report = lastCallArg(store.addGameComponent, 2) as { corrections: unknown[] };
+        expect(report.corrections).toEqual([speedClamp]);
+      });
+
+      it('create_scene_from_description reports nothing for in-range props', async () => {
+        const { result } = await spawnWith({
+          name: 'Lift',
+          gameComponent: 'moving_platform',
+          gameComponentProps: { speed: 4 },
+        });
+        const data = result.result as { corrections: unknown[]; summary: string };
+        expect(data.corrections).toEqual([]);
+        expect(data.summary).not.toContain('adjusted');
+        expect(data.summary).toContain('Created 1 entities');
+      });
+
+      it('create_level_layout reports an obstacle’s adjusted value', async () => {
+        const { result } = await invoke('create_level_layout', {
+          theme: 'platformer',
+          obstacles: [{
+            type: 'cube', name: 'Lift', position: [0, 0, 0],
+            gameComponent: 'moving_platform', gameComponentProps: { speed: 99999 },
+          }],
+        }, {
+          spawnEntity: vi.fn(() => 'e1'),
+        });
+        expect((result.result as { corrections: unknown[] }).corrections).toEqual([{ ...speedClamp, entityId: 'e1' }]);
+      });
+
+      it('setup_character reports both controller corrections', async () => {
+        const { result } = await invoke('setup_character', {
+          name: 'Hero',
+          controller: { speed: 1e6, jumpHeight: -5 },
+        }, {
+          spawnEntity: vi.fn(() => 'char-1'),
+        });
+        expect((result.result as { corrections: unknown[] }).corrections).toEqual([
+          { component: 'characterController', field: 'speed', requested: 1e6, applied: 1000, reason: 'clamped', entityId: 'char-1' },
+          { component: 'characterController', field: 'jumpHeight', requested: -5, applied: 0, reason: 'clamped', entityId: 'char-1' },
+        ]);
+      });
+
+      it('configure_game_mechanics reports, and says so in its summary', async () => {
+        mockFindEntityByName.mockReturnValue('e1');
+        const { result } = await invoke('configure_game_mechanics', {
+          entityConfigs: [{
+            entityName: 'Coin',
+            gameComponents: [{ type: 'collectible', props: { value: 1.5 } }],
+          }],
+        });
+        const data = result.result as { corrections: unknown[]; summary: string };
+        expect(data.corrections).toEqual([
+          { component: 'collectible', field: 'value', requested: 1.5, applied: 2, reason: 'rounded', entityId: 'e1' },
+        ]);
+        expect(data.summary).toBe(
+          'Configured 1 settings/entities. 1 value was adjusted to fit the engine’s limits: '
+          + '"Coin" Collectible value: you asked for 1.5, it was rounded to the whole number 2.',
+        );
+      });
+    });
+  });
+});
+
+describe('PF-235 compound record maps', () => {
+  it('filters inherited scene records across describe, analyze, arrange, and style without mutations', async () => {
+    const inheritedNode = makeSceneNode({ entityId: 'ghost', name: 'Inherited ghost', components: ['Mesh3d'] });
+    const nodes = Object.create({ ghost: inheritedNode });
+    const sceneGraph = { nodes, rootIds: [] };
+
+    const described = await invoke('describe_scene', { detail: 'summary', filterEntityIds: ['ghost'] }, { sceneGraph });
+    expect((described.result.result as Record<string, unknown>).entityCount).toBe(0);
+
+    const analyzed = await invoke('analyze_gameplay', {}, {
+      sceneGraph,
+      allGameComponents: Object.create({ ghost: [{ type: 'characterController' }] }),
+      allScripts: Object.create({ ghost: 'inherited' }), inputBindings: [], physicsEnabled: false, environment: { fogEnabled: false },
+    });
+    expect((analyzed.result.result as Record<string, unknown>).entityCount).toBe(0);
+    expect((analyzed.result.result as Record<string, unknown>).mechanics).not.toContain('player_character');
+
+    const arranged = await invoke('arrange_entities', { entityIds: ['ghost'], pattern: 'line' }, { sceneGraph });
+    expect(arranged.store.updateTransform).not.toHaveBeenCalled();
+    expect((arranged.result.result as Record<string, unknown>).arranged).toBe(0);
+
+    const styled = await invoke('apply_style', { targetEntityIds: ['ghost'], palette: { primary: [1, 0, 0, 1] } }, { sceneGraph });
+    expect(styled.store.updateMaterial).not.toHaveBeenCalled();
+  });
+
+  it('retains an own __proto__ creation name and relationship in JSON output', async () => {
+    const { result, store } = await invoke('create_scene_from_description', {
+      entities: [
+        { type: 'cube', name: '__proto__' },
+        { type: 'sphere', name: 'Child', parentName: '__proto__' },
+      ],
+    }, { spawnEntity: vi.fn((_type: string, name: string) => `id-${name}`) });
+
+    expect(result.success).toBe(true);
+    expect(store.reparentEntity).toHaveBeenCalledWith('id-Child', 'id-__proto__');
+    const entityIds = (result.result as { entityIds: Record<string, string> }).entityIds;
+    expect(Object.hasOwn(entityIds, '__proto__')).toBe(true);
+    expect(JSON.parse(JSON.stringify(entityIds)).__proto__).toBe('id-__proto__');
+  });
+
+  it('does not read inherited script, component, or terrain records for an own scene node', async () => {
+    const hero = makeSceneNode({ entityId: 'hero', name: 'Hero', components: ['Mesh3d'] });
+    const inheritedComponents = [{ type: 'characterController' }];
+    const inheritedTerrain = { noiseType: 'perlin', heightScale: 10 };
+    const inheritedStore = {
+      sceneGraph: { nodes: { hero }, rootIds: ['hero'] },
+      allScripts: Object.create({ hero: 'inherited-script' }),
+      allGameComponents: Object.create({ hero: inheritedComponents }),
+      terrainData: Object.create({ hero: inheritedTerrain }),
+      inputBindings: [], physicsEnabled: false, environment: { fogEnabled: false },
+    };
+    const summary = await invoke('describe_scene', { detail: 'summary' }, inheritedStore);
+    expect(summary.result.result).toMatchObject({ entityCount: 1, hasScripts: false });
+    const detail = await invoke('describe_scene', { detail: 'full' }, inheritedStore);
+    expect(detail.result.result).toMatchObject({ entities: [{
+      id: 'hero', hasScript: false, gameComponents: [], terrain: null,
+    }] });
+    const analysis = await invoke('analyze_gameplay', {}, inheritedStore);
+    expect(analysis.result.result).toMatchObject({
+      entityRoles: [{ id: 'hero', name: 'Hero', role: 'decoration' }], mechanics: [],
+    });
+
+    const ownStore = {
+      ...inheritedStore,
+      allScripts: { hero: 'own-script' },
+      allGameComponents: { hero: inheritedComponents },
+      terrainData: { hero: inheritedTerrain },
+    };
+    const ownDetail = await invoke('describe_scene', { detail: 'full' }, ownStore);
+    expect(ownDetail.result.result).toMatchObject({ entities: [{
+      id: 'hero', hasScript: true, gameComponents: inheritedComponents, terrain: inheritedTerrain,
+    }] });
+    const ownAnalysis = await invoke('analyze_gameplay', {}, ownStore);
+    expect(ownAnalysis.result.result).toMatchObject({ mechanics: expect.arrayContaining(['player_character', 'scripting']) });
   });
 });

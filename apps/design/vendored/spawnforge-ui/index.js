@@ -12,6 +12,7 @@ export { Select } from './primitives/Select';
 export { Textarea } from './primitives/Textarea';
 export { Switch } from './primitives/Switch';
 export { Checkbox } from './primitives/Checkbox';
+export { Radio } from './primitives/Radio';
 export { Separator } from './primitives/Separator';
 export { Tooltip } from './primitives/Tooltip';
 export { Dialog } from './primitives/Dialog';
@@ -24,6 +25,7 @@ export { Avatar } from './primitives/Avatar';
 export { Progress } from './primitives/Progress';
 export { Skeleton } from './primitives/Skeleton';
 export { Toast } from './primitives/Toast';
+export { InlineAlert, } from './primitives/InlineAlert';
 // Ambient theme effects
 export { ThemeAmbient } from './effects/ThemeAmbient';
 // Tier 2 Composites
@@ -31,6 +33,7 @@ export { ThemeImportExport } from './composites/ThemeImportExport';
 export { SettingsPanel } from './composites/SettingsPanel';
 export { Vec3Input } from './composites/Vec3Input';
 export { SliderInput } from './composites/SliderInput';
+export { NumberField } from './composites/NumberField';
 export { ColorPicker } from './composites/ColorPicker';
 export { TreeView } from './composites/TreeView';
 export { PropertyGrid } from './composites/PropertyGrid';

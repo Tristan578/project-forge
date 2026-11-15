@@ -9,6 +9,8 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 
 // Mock dependencies before importing route
 vi.mock('@/lib/db/client', () => ({
@@ -16,23 +18,41 @@ vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(),
 }));
 
-vi.mock('@/lib/db/schema', () => ({
-  generationJobs: {
-    userId: 'userId',
-    status: 'status',
-    createdAt: 'createdAt',
-  },
-}));
+vi.mock('@/lib/db/schema', async () => {
+  const { pgTable, text, integer } = await import('drizzle-orm/pg-core');
+  const table = pgTable('generation_jobs', {
+    resultUrl: text('result_url'),
+    parameters: text('parameters'),
+    imported: integer('imported'),
+  });
+  return {
+    generationJobs: {
+      userId: 'userId', status: 'status', createdAt: 'createdAt',
+      resultUrl: table.resultUrl, parameters: table.parameters, imported: table.imported,
+    },
+  };
+});
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  sql: (await importOriginal<typeof import('drizzle-orm')>()).sql,
   eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
   and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+  or: vi.fn((...args: unknown[]) => ({ type: 'or', args })),
   inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
   desc: vi.fn((col: unknown) => ({ type: 'desc', col })),
 }));
 
+const qstash = vi.hoisted(() => ({ configured: false }));
+vi.mock('@/lib/qstash/client', () => ({
+  isQstashConfigured: () => qstash.configured,
+}));
+
 vi.mock('@/lib/auth/api-auth', () => ({
   authenticateRequest: vi.fn(),
+}));
+
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  findOtherProviderJobOwnerId: vi.fn(),
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
@@ -44,6 +64,8 @@ import { POST, GET } from '../route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
+import { findOtherProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 const mockInsertReturning = vi.fn();
 const mockSelectFrom = vi.fn();
@@ -84,6 +106,10 @@ function mockAuth(ok = true) {
 describe('/api/jobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // #10262: no existing binding by default, so POST creates the row as
+    // before. Tests that exercise the "already bound to someone else" branch
+    // override this per-test.
+    vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue(null);
   });
 
   // ── POST ──────────────────────────────────────────────────────────────
@@ -163,6 +189,16 @@ describe('/api/jobs', () => {
       );
     });
 
+    it('stores a synchronous PNG larger than the old URL limit on creation', async () => {
+      mockAuth(true);
+      const { insertChain } = setupDb();
+      mockInsertReturning.mockResolvedValueOnce([{ id: 'sync-job' }]);
+      const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
+      const response = await POST(new NextRequest('http://localhost/api/jobs', { method: 'POST', body: JSON.stringify({ providerJobId: 'dalle3-sync:usage-1', provider: 'dalle3', type: 'sprite', prompt: 'hero', resultUrl }) }));
+      expect(response.status).toBe(201);
+      expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({ resultUrl }));
+    });
+
     it('truncates prompt to 500 chars', async () => {
       mockAuth(true);
       const { insertChain } = setupDb();
@@ -206,6 +242,122 @@ describe('/api/jobs', () => {
 
       expect(response.status).toBe(500);
       expect(body.error).toBe('Failed to create job');
+    });
+
+    // #10262: this row is client-reported, so a caller could otherwise plant
+    // one claiming someone else's already-bound providerJobId, surfacing a
+    // stranger's job in the caller's own GET /api/jobs list.
+    describe('job ownership (#10262)', () => {
+      // 404 with the status routes' sentence, not a 409 naming "another
+      // account": the body must not say who, or that it is another account.
+      // This does NOT assert the response is oracle-free — 201 vs 404 still
+      // tells a caller some other account bound the id (accepted residual; see
+      // the comment at the check in route.ts).
+      it('returns 404 without inserting when providerJobId is already bound to a different user', async () => {
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue('someone-else');
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'j-1',
+            provider: 'meshy',
+            type: 'model',
+            prompt: 'A red cube',
+          }),
+        });
+
+        const response = await POST(req);
+        const body = await response.json();
+
+        expect(response.status).toBe(404);
+        expect(body.error).toBe(JOB_NOT_FOUND_MESSAGE);
+        expect(JSON.stringify(body)).not.toMatch(/another account/i);
+        expect(insertChain.values).not.toHaveBeenCalled();
+      });
+
+      // The lookup excludes the caller in SQL (pinned in jobOwnership.test.ts),
+      // so a job bound only to THIS user resolves to null here.
+      it('allows creating a row for a providerJobId already bound to THIS SAME user', async () => {
+        mockAuth(true);
+        setupDb();
+        mockInsertReturning.mockResolvedValueOnce([{ id: 'job-abc' }]);
+        vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue(null);
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'j-1',
+            provider: 'meshy',
+            type: 'model',
+            prompt: 'A red cube',
+          }),
+        });
+
+        const response = await POST(req);
+
+        expect(response.status).toBe(201);
+        expect(findOtherProviderJobOwnerId).toHaveBeenCalledWith('j-1', 'user-123');
+      });
+
+      // The reported `provider` is client-supplied and is not the binding's
+      // namespace: the sprite route binds an SDXL job under 'replicate' while
+      // its client reports 'sdxl'. The lookup must not depend on it, or the
+      // honest sprite case is never checked and any caller skips the 404 by
+      // sending another string.
+      it('refuses a foreign-bound job whatever provider string the client reports', async () => {
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue('someone-else');
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'pred-1',
+            provider: 'sdxl',
+            type: 'sprite',
+            prompt: 'A knight',
+          }),
+        });
+
+        const response = await POST(req);
+
+        expect(response.status).toBe(404);
+        expect(insertChain.values).not.toHaveBeenCalled();
+        expect(findOtherProviderJobOwnerId).toHaveBeenCalledTimes(1);
+        expect(findOtherProviderJobOwnerId).toHaveBeenCalledWith('pred-1', 'user-123');
+      });
+
+      // findOtherProviderJobOwnerId deliberately does NOT catch a lookup failure
+      // (see its doc comment and jobOwnership.test.ts's "propagates a lookup
+      // failure" case) — it rejects, relying on this route's outer try/catch
+      // to turn that into a fixed 500 and skip the insert. That fail-closed
+      // behavior at the route level is the actual security property #10262
+      // is about, so it must be exercised here, not just at the DB-insert
+      // failure ("returns 500 on DB error") which never touches this path.
+      it('returns 500 without inserting when findOtherProviderJobOwnerId itself rejects', async () => {
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findOtherProviderJobOwnerId).mockRejectedValueOnce(new Error('db down'));
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'j-1',
+            provider: 'meshy',
+            type: 'model',
+            prompt: 'A red cube',
+          }),
+        });
+
+        const response = await POST(req);
+        const body = await response.json();
+
+        expect(response.status).toBe(500);
+        expect(body.error).toBe('Failed to create job');
+        expect(insertChain.values).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -269,6 +421,52 @@ describe('/api/jobs', () => {
       expect(response.status).toBe(200);
     });
 
+    it('status=active also returns durable rows the callback finished but no client reflected (#8892)', async () => {
+      mockAuth(true);
+      const { selectChain } = setupDb();
+      mockSelectFrom.mockResolvedValueOnce([]);
+
+      await GET(new NextRequest('http://localhost/api/jobs?status=active'));
+
+      // and(user, or(live states, and(terminal states, imported = 0, durable)))
+      type Node = { type: string; args: unknown[] };
+      const where = selectChain.where.mock.calls[0][0] as Node;
+      expect(where.type).toBe('and');
+      const orArm = where.args[1] as Node;
+      expect(orArm.type).toBe('or');
+      const live = orArm.args[0] as Node;
+      expect(live.type).toBe('inArray');
+      expect(live.args[1]).toEqual(['pending', 'processing', 'downloading']);
+      const terminalAnd = orArm.args[1] as Node;
+      expect(terminalAnd.type).toBe('and');
+      expect((terminalAnd.args[0] as Node).type).toBe('inArray');
+      expect((terminalAnd.args[0] as Node).args[1]).toEqual(['completed', 'failed']);
+      // imported = 0: the live client sets it, the webhook never does.
+      expect((terminalAnd.args[1] as Node).type).toBe('eq');
+      expect((terminalAnd.args[1] as Node).args[1]).toBe(0);
+      // Scoped to rows the client marked durable at creation, so a failed
+      // legacy row (imported = 0 forever) never resurfaces.
+      const durableScope = new PgDialect().sqlToQuery(terminalAnd.args[2] as SQL);
+      expect(durableScope.sql).toContain(`->>'durable' = 'true'`);
+    });
+
+    it('reports durableCompletionEnabled as a boolean only', async () => {
+      mockAuth(true);
+      setupDb();
+      mockSelectFrom.mockResolvedValueOnce([]);
+      qstash.configured = false;
+      let body = await (await GET(new NextRequest('http://localhost/api/jobs'))).json();
+      expect(body.durableCompletionEnabled).toBe(false);
+
+      setupDb();
+      mockSelectFrom.mockResolvedValueOnce([]);
+      qstash.configured = true;
+      body = await (await GET(new NextRequest('http://localhost/api/jobs?status=active'))).json();
+      expect(body.durableCompletionEnabled).toBe(true);
+      expect(JSON.stringify(body)).not.toMatch(/QSTASH|token/i);
+      qstash.configured = false;
+    });
+
     it('filters by specific status', async () => {
       mockAuth(true);
       setupDb();
@@ -293,4 +491,29 @@ describe('/api/jobs', () => {
       expect(body.error).toBe('Failed to fetch jobs');
     });
   });
+  it('keeps the active jobs list below the body limit when multiple inline PNGs exist', async () => {
+    mockAuth(true);
+    setupDb();
+    const now = new Date();
+    mockSelectFrom.mockResolvedValueOnce(['one', 'two'].map((id) => ({ id, providerJobId: 'dalle3-sync:' + id, provider: 'dalle3', type: 'sprite', prompt: 'hero', parameters: {}, status: 'downloading', progress: 100, resultUrl: null, hasInlineResult: true, createdAt: now, updatedAt: now })));
+    const response = await GET(new NextRequest('http://localhost/api/jobs?status=active'));
+    expect(response.status).toBe(200);
+    const projection = vi.mocked(vi.mocked(getDb)().select).mock.calls[0][0];
+    const dialect = new PgDialect();
+    expect(dialect.sqlToQuery(projection!.resultUrl as SQL)).toEqual({
+      sql: `CASE WHEN "generation_jobs"."result_url" LIKE 'data:%' THEN NULL ELSE "generation_jobs"."result_url" END`,
+      params: [],
+    });
+    expect(dialect.sqlToQuery(projection!.hasInlineResult as SQL)).toEqual({
+      sql: `COALESCE("generation_jobs"."result_url" LIKE 'data:%', FALSE)`,
+      params: [],
+    });
+    const text = await response.text();
+    expect(text.length).toBeLessThan(4096);
+    expect(JSON.parse(text).jobs).toEqual([
+      expect.objectContaining({ id: 'one', resultUrl: null, hasInlineResult: true }),
+      expect.objectContaining({ id: 'two', resultUrl: null, hasInlineResult: true }),
+    ]);
+  });
+
 });

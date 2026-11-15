@@ -10,16 +10,24 @@
 # for every other advisory at or above the fail threshold, AND hard for the same
 # id reappearing at a node_modules path it was never waived for.
 #
-# History: THE ALLOWLIST IS CURRENTLY EMPTY — every advisory ever waived here was
-# eventually relocked away, and each waiver was pruned once the gate's anti-rot
-# note reported it gone. First went two esbuild advisories under drizzle-kit's
+# History: THE ALLOWLIST IS EMPTY. Every advisory ever waived here eventually
+# left every audited workspace, and each waiver was pruned once the gate's
+# anti-rot note reported it gone. First went two esbuild advisories under drizzle-kit's
 # deprecated @esbuild-kit/* chain (GHSA-gv7w-rqvm-qjhr, GHSA-g7r4-m6w7-qqqr,
 # pruned in PF-1002/#9007 when that cohort left the tree). Then brace-expansion
 # (GHSA-mh99-v99m-4gvg), waived on the premise that it was "patched ONLY in 5.0.8,
 # no 1.x backport exists" — which made the root copy under the minimatch@3 /
 # eslint-9 lint toolchain un-relockable. Upstream then shipped 1.1.17; PF-1045
 # relocked the root copy to 1.1.18 inside its existing "^1.1.7" range with no
-# eslint-major migration, and PF-1046 pruned the entry.
+# eslint-major migration, and PF-1046 pruned the entry. Last went braces
+# (GHSA-vfj7-8cjw-p6xm, waived 2026-10-03 in #10322 for the dev-only chain
+# eslint-config-next -> @next/eslint-plugin-next -> fast-glob 3.3.1 ->
+# micromatch 4.0.8 -> braces 3.0.3). It left differently: braces 3.0.3 is still
+# in the tree, but GitHub now lists the advisory as unreviewed with no affected
+# package, so npm's advisory data no longer maps it to braces and every audited
+# workspace reported it "not present". The waiver was pruned on that note
+# (#10440). If the advisory is re-mapped, this gate blocks on it again: relock
+# first, and re-add a pinned entry only if braces is still un-relockable then.
 #
 # The lesson that generalizes: "un-relockable" is a claim about a moment, not a
 # property of the dependency. It expires silently the day upstream backports, and
@@ -40,8 +48,8 @@
 # EXPECTED node_modules path(s); the id showing up anywhere else is a BLOCK, not
 # a WAIVE, naming the unexpected location(s) so the next regression is loud.
 #
-# Tracking issue: #8617 (F25) — re-evaluate every entry when its removal path
-# (documented alongside the id) becomes available.
+# Origin: #8617 (F25, closed). Each entry names its own open tracking issue
+# beside it; re-evaluate the entry when its removal path becomes available.
 #
 # CONTRACT
 #   check-npm-audit.sh <workspace-dir>
@@ -90,19 +98,36 @@ set -uo pipefail
 # advisory is legitimately un-relockable at more than one location) are
 # comma-separated. GHSA ids and node_modules paths never contain `:` or `,`.
 # EMPTY IS THE CORRECT STEADY STATE — see the History note above for why the
-# three former occupants were pruned rather than carried. Do NOT add an entry
+# four former occupants were pruned rather than carried. A new entry is a dated
+# exception with an expiry, not a new normal: give it a removal path, a re-check
+# trigger and a tracking issue beside it. Do NOT add an entry
 # back "to get the pipeline green": try relocking FIRST (`npm view <pkg>
 # versions` against the advisory's patched range). Every waiver ever added here
 # was justified as un-relockable and every one of them stopped being so; that is
 # the base rate. An entry is warranted only once a relock is proven impossible.
 #
-# The empty array is expanded through the `${ARR[@]+"${ARR[@]}"}` guard at all
-# three read sites below: under `set -u`, bash 3.2 (the macOS system bash, which
-# `#!/usr/bin/env bash` resolves to) aborts on a plain `"${ARR[@]}"` expansion of
-# an empty array. Unguarded, the abort happens INSIDE a command substitution, so
+# ADDING OR PRUNING AN ENTRY touches four files in ONE commit:
+#   1. this array (pruning the LAST entry leaves the single line
+#      `# (no waivers in effect)` as the body: the suite's column-0 body cut
+#      fails closed on an empty body);
+#   2. the same id in ALLOWED_GHSA in scripts/check-security-alerts.sh (the
+#      suite's lockstep pin requires every id here to be mirrored there);
+#   3. scripts/__tests__/check-npm-audit.test.sh: expected_allowlist_entries,
+#      the section-0 shipped-gate cases for the entry, then expected_openers and
+#      SELF_EXEC_EXPECTED_DROP if a heredoc fixture changed (each failure message
+#      prints the value to use);
+#   4. the `npm audit` bullet in .claude/rules/gotchas-build-ci.md.
+#
+# The array is expanded through the `${ARR[@]+"${ARR[@]}"}` guard at all
+# three read sites below: under `set -u`, bash older than 4.4 (macOS ships 3.2,
+# which `#!/usr/bin/env bash` resolves to there) aborts on a plain `"${ARR[@]}"` expansion of
+# an empty array — the steady state, and the state it returns to whenever the
+# last waiver is pruned. Unguarded, the abort happens INSIDE a command substitution, so
 # the crashed capture reads as an empty result — which the caller scores as
-# WAIVED. A crash that fails OPEN is exactly what this gate must not do; the
-# suite greps every gate run for `unbound variable` to keep it that way.
+# WAIVED. A crash that fails OPEN is exactly what this gate must not do. The
+# suite enforces the guard STRUCTURALLY: every subscripted mention of the
+# array in this file must sit inside the guarded form. Its runtime `unbound variable`
+# sweep only bites under bash older than 4.4, so it cannot fail on CI's bash 5.
 #
 # Keep the declaration's `(` and `)` at column 0 on their own lines: the suite
 # cuts the array body with a column-0-anchored awk range to scope its

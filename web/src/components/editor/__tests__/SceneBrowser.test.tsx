@@ -39,6 +39,7 @@ function buildState(overrides: {
   scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
   activeSceneId?: string | null;
   nodeCount?: number;
+  checkpointError?: string | null;
 }) {
   const nodes: Record<string, { entityId: string; name: string; parentId: null; children: string[]; components: string[]; visible: boolean }> = {};
   for (let i = 0; i < (overrides.nodeCount ?? 0); i++) {
@@ -46,6 +47,7 @@ function buildState(overrides: {
   }
   return {
     scenes: overrides.scenes ?? [],
+    checkpointError: overrides.checkpointError ?? null,
     activeSceneId: overrides.activeSceneId ?? null,
     sceneGraph: { nodes, rootIds: Object.keys(nodes) },
     switchScene: mockSwitchScene,
@@ -267,6 +269,25 @@ describe('SceneBrowser', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('previous save is intact');
     expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
     mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('wraps a long unbroken token in the checkpoint error instead of overflowing the dialog', () => {
+    // #10267: the checkpoint error can carry the engine's refusal text (bounded
+    // upstream to ~490 characters), which may quote a scene value with no
+    // spaces. jsdom has no layout, so this pins what makes wrapping possible
+    // inside the fixed-width dialog: the alert wraps anywhere a word cannot
+    // (`break-words`). Its parent is a flex COLUMN, so the alert is stretched
+    // to the dialog's width on the cross axis and needs no `min-w-0`; if the
+    // parent ever becomes a row, that assumption breaks and this test says so.
+    const token = 'A'.repeat(500);
+    setupStore({ checkpointError: `The engine refused this scene: ${token} No checkpoint was saved.` });
+
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(token);
+    expect(alert.classList.contains('break-words')).toBe(true);
+    expect(alert.parentElement?.classList.contains('flex-col')).toBe(true);
   });
 
   it('keeps recovery controls busy until the async engine confirmation finishes', async () => {

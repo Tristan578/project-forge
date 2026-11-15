@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { jobOwnershipRefusal } from '@/lib/generate/jobOwnershipResponse';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -16,12 +20,32 @@ async function GET_impl(request: NextRequest) {
   });
   if (mid.error) return mid.error;
 
+  // Per-panel tier gate, POLL variant (#7715): the panel POST /api/generate/tileset-gen declares
+  // ('generate-sprite'), checked BEFORE any provider key is resolved. A poll reads
+  // a job already paid for, so a starter that has HELD tokens is judged at the
+  // trial access tier whatever its live balance, and a never-granted starter
+  // as a plain starter. Not a jobId ownership check — see
+  // `src/lib/api/panelTierGate.ts`.
+  const tierDenied = panelTierGateResponseForPoll('generate-sprite', mid.authContext!.user);
+  if (tierDenied) return tierDenied;
+
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get('jobId');
 
   if (!jobId) {
     return NextResponse.json({ error: 'Missing jobId parameter' }, { status: 400 });
   }
+
+  // Ownership check (#10262): resolveApiKey below returns the PLATFORM key by
+  // default, so without this ANY signed-in caller admitted past the tier gate
+  // above could poll a job id they never created and read back another user's
+  // result. Checked BEFORE any provider key is resolved. See
+  // `src/lib/generate/jobOwnership.ts`.
+  // A confirmed miss answers a terminal 404; a lookup that FAILED answers a
+  // retryable 503 — both refuse, but only the first is a verdict on the job
+  // (`jobOwnershipRefusal`).
+  const ownership = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.sprite, jobId);
+  if (ownership !== 'owner') return jobOwnershipRefusal(ownership);
 
   // Poll Replicate for prediction status
   let apiKey: string;
@@ -30,7 +54,7 @@ async function GET_impl(request: NextRequest) {
       mid.userId!,
       DB_PROVIDER.sprite,
       0,
-      'status_check'
+      STATUS_CHECK_OPERATION
     );
     apiKey = resolved.key;
   } catch (err) {

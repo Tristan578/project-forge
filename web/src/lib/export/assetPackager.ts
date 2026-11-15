@@ -95,7 +95,7 @@ function mimeToExt(mimeType: string): string | undefined {
 }
 
 export async function packageAssets(
-  assets: Record<string, AssetMetadata & { data?: ArrayBuffer }>,
+  assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }>,
   options: AssetPackageOptions = {},
 ): Promise<AssetPackage> {
   const {
@@ -121,6 +121,7 @@ export async function packageAssets(
       continue;
     }
 
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank file extension (e.g. a trailing dot) is not a usable extension; treated as unset
     const ext = asset.name.split('.').pop() || 'bin';
     const originalMimeType = getMimeType(ext);
 

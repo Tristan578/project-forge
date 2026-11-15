@@ -21,6 +21,7 @@ vi.mock('lucide-react', () => ({
   HelpCircle: (props: Record<string, unknown>) => <span data-testid="help-icon" {...props} />,
   Keyboard: (props: Record<string, unknown>) => <span data-testid="keyboard-icon" {...props} />,
   BookOpen: (props: Record<string, unknown>) => <span data-testid="book-icon" {...props} />,
+  Compass: (props: Record<string, unknown>) => <span data-testid="compass-icon" {...props} />,
   GraduationCap: (props: Record<string, unknown>) => <span data-testid="grad-icon" {...props} />,
   RotateCcw: (props: Record<string, unknown>) => <span data-testid="rotate-icon" {...props} />,
   MessageSquareText: (props: Record<string, unknown>) => <span data-testid="msg-icon" {...props} />,
@@ -117,6 +118,23 @@ describe('HelpMenu', () => {
     fireEvent.click(screen.getByLabelText('Help menu'));
     fireEvent.click(screen.getByText('Restart Tutorial'));
     expect(mockStartTutorial).toHaveBeenCalledWith('first-scene');
+  });
+
+  // #10171: the highlight-only capabilities tour. Starting it again after an
+  // Escape (which only skips it) must work, so the entry is always live.
+  it('starts the capabilities tour from "What can SpawnForge do?", and again after it ends', () => {
+    setupStore();
+    render(<HelpMenu onOpenShortcuts={mockOnOpenShortcuts} onOpenFeedback={mockOnOpenFeedback} />);
+
+    fireEvent.click(screen.getByLabelText('Help menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'What can SpawnForge do?' }));
+    expect(mockStartTutorial).toHaveBeenCalledWith('capabilities');
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Help menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'What can SpawnForge do?' }));
+    expect(mockStartTutorial).toHaveBeenCalledTimes(2);
+    expect(mockStartTutorial).toHaveBeenLastCalledWith('capabilities');
   });
 
   it('calls onOpenFeedback when Send Feedback is clicked', () => {

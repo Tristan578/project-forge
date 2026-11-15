@@ -39,7 +39,17 @@ vi.mock('@/lib/generate/spriteClient', () => ({
 // without auth/rate-limit/key-resolution side effects. Mocking these modules
 // also keeps their heavy transitive deps (redis, DB) out of the test. ---
 vi.mock('@/lib/api/middleware', () => ({
-  withApiMiddleware: vi.fn(async () => ({ error: null, userId: 'user-1' })),
+  withApiMiddleware: vi.fn(async () => ({
+    error: null,
+    userId: 'user-1',
+    authContext: { user: { id: 'user-1', tier: 'pro' } },
+  })),
+}));
+// The per-panel tier gate (#7715) runs before the status mapping this suite
+// compares; it has its own route tests, so it is passed through here.
+vi.mock('@/lib/api/panelTierGate', () => ({
+  panelTierGateResponse: vi.fn(() => null),
+  panelTierGateResponseForPoll: vi.fn(() => null),
 }));
 vi.mock('@/lib/keys/resolver', () => ({
   resolveApiKey: vi.fn(async () => ({ key: 'provider-key' })),
@@ -52,6 +62,12 @@ vi.mock('@/lib/config/providers', () => ({
   DB_PROVIDER: { model3d: 'meshy', texture: 'meshy', music: 'elevenlabs', sprite: 'replicate' },
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
+// Job-ownership check (#10262) runs before the status mapping this suite
+// compares; it has its own unit tests (jobOwnership.test.ts) and route tests
+// (each */status/route.test.ts), so it is passed through here.
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  verifyProviderJobOwner: vi.fn(async () => 'owner' as const),
+}));
 
 import { pollProviderStatus, type AsyncGenerationType } from '../pollProviderStatus';
 import { GET as modelGET } from '@/app/api/generate/model/status/route';

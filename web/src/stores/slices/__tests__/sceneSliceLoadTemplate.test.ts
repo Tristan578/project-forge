@@ -18,9 +18,12 @@ import {
   takeStagedSceneAudio,
   clearStagedSceneAudio,
 } from '@/lib/audio/sceneAudioManifest';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
+import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+import { ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
-type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
+type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string; threw?: true } | void;
 
 function detachDispatcher() {
   setSceneDispatcher(null as unknown as Dispatcher);
@@ -71,6 +74,22 @@ describe('sceneSlice.loadTemplate', () => {
       expect(nodeCount).toBeGreaterThan(0);
       expect(Object.keys(sceneGraph.nodes)).toContain('player');
       if (result.success) expect(result.entityCount).toBe(nodeCount);
+    });
+
+    // #10058: a template never carries its own music arrangement, but a
+    // freshly-loaded template used to leave whatever arrangement the
+    // PREVIOUS scene had sitting in the store — stale tracks/clips that then
+    // rode along into the template's next cloud save.
+    it('clears a stale music arrangement left by the previous scene', async () => {
+      const trackId = useMusicArrangementStore.getState().addTrack('Stale');
+      useMusicArrangementStore.getState().addClip({ trackId, sourceUrl: 'x', sourceDurationSeconds: 10 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(true);
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
     });
 
     it('sends load_scene with JSON the engine can read, not the raw template data', async () => {
@@ -181,6 +200,27 @@ describe('sceneSlice.loadTemplate', () => {
       expect(takeStagedSceneAudio()).toEqual({});
     });
 
+    it('does not let an earlier scene\'s unclaimed completion mode follow the template in (#9998)', async () => {
+      // Same take-once handoff as the audio: a template file declares no mode,
+      // so it opens as a legacy `win` game rather than inheriting a refused
+      // load's `sandbox` — which would let it Play with no goal.
+      stageSceneCompletionMode('sandbox');
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+
+      await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('puts a previous completion-mode staging back when the engine refuses the template (#9998)', async () => {
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher(vi.fn<Dispatcher>(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(takeStagedSceneCompletionMode()).toBe('narrative');
+    });
+
     it('applies every shipped template', async () => {
       const { TEMPLATE_REGISTRY } = await import('@/data/templates');
       for (const entry of TEMPLATE_REGISTRY) {
@@ -225,6 +265,39 @@ describe('sceneSlice.loadTemplate', () => {
       expect(harness.setScript).not.toHaveBeenCalled();
       expect(harness.addGameComponent).not.toHaveBeenCalled();
       expect(harness.setInputPreset).not.toHaveBeenCalled();
+      // A clean refusal leaves the OUTGOING scene on screen and intact, so it
+      // locks nothing — the control for the thrown case below (#10202).
+      expect(harness.store.getState().sceneLoadError).toBeNull();
+    });
+
+    // #10079 / #10202: a THROWN `load_scene` can leave the outgoing scene
+    // despawned mid-apply, so saving must lock until reload — the lockout
+    // `loadScene` and `newScene` set on their throw paths. This action never
+    // set it. And the throw arrives two ways: a dispatcher that rethrows, or
+    // the one the editor registers (`useEngineEvents`), which catches it and
+    // answers `{ success: false, error, threw: true }`.
+    it.each([
+      ['rethrows', (): ReturnType<Dispatcher> => { throw new Error('JsValue("serialize failed")'); }],
+      ['answers threw: true', (): ReturnType<Dispatcher> => ({ success: false, error: 'JsValue("serialize failed")', threw: true })],
+    ])('locks saving with the ENGINE_LOAD_THREW reason and tells the user to reload when the dispatch throws (dispatcher %s)', async (_via, answer) => {
+      const dispatch = vi.fn<Dispatcher>((command) => (command === 'load_scene' ? answer() : undefined));
+      setSceneDispatcher(dispatch);
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result).toEqual({ success: false, error: expect.stringContaining('JsValue("serialize failed")') });
+      // The one reload sentence every surface imports (#10202 review, m6).
+      expect(result).toEqual({ success: false, error: expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE) });
+      expect(harness.store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('the engine failed while loading it'),
+        at: expect.any(Number),
+      });
+      // The lockout is what it is for: saving now refuses to export.
+      dispatch.mockClear();
+      harness.store.getState().saveScene();
+      expect(dispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
+      expect(harness.setScript).not.toHaveBeenCalled();
+      expect(harness.addGameComponent).not.toHaveBeenCalled();
     });
 
     it('refuses when the engine acknowledges the load but never applies it', async () => {

@@ -95,9 +95,76 @@ describe('AudioInspector', () => {
     render(<AudioInspector />);
     expect(screen.getByText('Volume')).toBeInTheDocument();
     expect(screen.getByText('Pitch')).toBeInTheDocument();
-    expect(screen.getByText('Loop')).toBeInTheDocument();
     expect(screen.getByText('Preview')).toBeInTheDocument();
     expect(screen.getByText('Remove Audio')).toBeInTheDocument();
+    // The three checkbox controls carry an associated accessible name (useId +
+    // htmlFor/id), so getByLabelText — which resolves ONLY through that pairing —
+    // finds each real checkbox. getByText would pass on a visual label sitting
+    // beside an unassociated input, which is the exact PF-1182/PF-1183 drift.
+    for (const name of ['Loop', 'Spatial', 'Autoplay']) {
+      expect(screen.getByLabelText(name)).toHaveAttribute('type', 'checkbox');
+    }
+  });
+
+  it('gives the migrated Volume and Pitch sliders their own accessible names', () => {
+    // Both sliders now come from the shared @spawnforge/ui SliderInput composite,
+    // which renders its own <label htmlFor>. getByLabelText resolves only through
+    // that association, so it fails if the composite ever stops wiring the label
+    // to the range input (the drift this dedupe removes). Each also carries its
+    // range role and value, proving the migrated control is the real slider.
+    mockEditorStore({
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 0.5,
+          pitch: 1.5,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    const volume = screen.getByLabelText('Volume');
+    const pitch = screen.getByLabelText('Pitch');
+    expect(volume).toHaveAttribute('type', 'range');
+    expect(volume).toHaveValue('0.5');
+    expect(pitch).toHaveAttribute('type', 'range');
+    expect(pitch).toHaveValue('1.5');
+  });
+
+  it('forwards a slider change to setAudio for the migrated Volume and Pitch sliders', () => {
+    // The migration routes onChange through the shared SliderInput composite
+    // (onChange={(e) => onChange(Number(e.target.value))}) and SliderRowWithTerm's
+    // onChange={onChange} pass-through. Firing a real change event proves that
+    // path still reaches setAudio with the parsed numeric value — a regression
+    // that dropped/mis-wired the forwarding (e.g. to formatValue) would leave the
+    // accessible-name test above green while breaking every edit.
+    const setAudio = vi.fn();
+    mockEditorStore({
+      setAudio,
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 0.5,
+          pitch: 1.5,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0.75' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { volume: 0.75 });
+    fireEvent.change(screen.getByLabelText('Pitch'), { target: { value: '2' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { pitch: 2 });
   });
 
   it('reads the selected entity, not whichever entity reported audio last', () => {
@@ -141,9 +208,58 @@ describe('AudioInspector', () => {
       },
     });
     render(<AudioInspector />);
-    expect(screen.getByText('Max Distance')).toBeInTheDocument();
-    expect(screen.getByText('Ref Distance')).toBeInTheDocument();
-    expect(screen.getByText('Rolloff')).toBeInTheDocument();
+    // These come from the shared @spawnforge/ui NumberField composite, which
+    // renders its own <label htmlFor>. getByLabelText resolves only through that
+    // association, so it fails if the composite ever stops wiring the label to the
+    // number input — the drift PF-1183 removed by deleting the bespoke local copy.
+    for (const name of ['Max Distance', 'Ref Distance', 'Rolloff']) {
+      expect(screen.getByLabelText(name)).toHaveAttribute('type', 'number');
+    }
+  });
+
+  it.each([
+    { label: 'Max Distance', raw: '-5', field: 'maxDistance', expected: 1 },
+    { label: 'Ref Distance', raw: '-5', field: 'refDistance', expected: 0.1 },
+    { label: 'Rolloff', raw: '-5', field: 'rolloffFactor', expected: 0 },
+    { label: 'Rolloff', raw: '20', field: 'rolloffFactor', expected: 10 },
+  ])('bounds $label before sending it to setAudio', ({ label, raw, field, expected }) => {
+    const setAudio = vi.fn();
+    mockEditorStore({
+      setAudio,
+      entityAudio: { 'ent-1': {
+        assetId: null, volume: 1, pitch: 1, loopAudio: false, spatial: true,
+        maxDistance: 50, refDistance: 1, rolloffFactor: 1, autoplay: false,
+      } },
+    });
+    render(<AudioInspector />);
+    fireEvent.change(screen.getByLabelText(label), { target: { value: raw } });
+    expect(setAudio).toHaveBeenCalledExactlyOnceWith('ent-1', { [field]: expected });
+  });
+
+  it('forwards a spatial number-field edit to setAudio through the shared composite', () => {
+    // Proves the NumberField onChange path (parseFloat -> onChange) still reaches
+    // setAudio with the parsed numeric value, so the accessible-name test above
+    // cannot pass while the edit wiring is broken (lessons-learned #11).
+    const setAudio = vi.fn();
+    mockEditorStore({
+      setAudio,
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 1.0,
+          pitch: 1.0,
+          loopAudio: false,
+          spatial: true,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    fireEvent.change(screen.getByLabelText('Max Distance'), { target: { value: '80' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { maxDistance: 80 });
   });
 
   it('names the tier a locked generate button needs, not just in the tooltip', () => {
@@ -151,7 +267,7 @@ describe('AudioInspector', () => {
     // they can still make their pitch — but `title` is unreachable by keyboard,
     // so the requirement has to be in the accessible name.
     mockEditorStore();
-    useUserStore.setState({ tier: 'starter' });
+    useUserStore.setState({ tier: 'starter' , profileLoaded: true });
     render(<AudioInspector />);
     expect(
       screen.getByRole('button', { name: 'Generate sound with AI — requires Starter tier' })
@@ -163,11 +279,52 @@ describe('AudioInspector', () => {
 
   it('drops the tier clause once the tier actually allows it', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     render(<AudioInspector />);
     expect(
       screen.getByRole('button', { name: 'Generate sound with AI' })
     ).not.toHaveAttribute('aria-disabled');
+  });
+
+  // #7715 — a starter account holding spendable trial tokens reads as
+  // hobbyist through `effectiveTier`, which is exactly the tier both
+  // generate buttons require, so the tier clause must drop for it too.
+  it('drops the tier clause for a starter account with spendable trial tokens', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter', spendableTokens: 50 , profileLoaded: true });
+    render(<AudioInspector />);
+    const sound = screen.getByRole('button', { name: 'Generate sound with AI' });
+    const music = screen.getByRole('button', { name: 'Generate music with AI' });
+    expect(sound).not.toHaveAttribute('aria-disabled');
+    expect(music).not.toHaveAttribute('aria-disabled');
+    expect(sound).not.toHaveAccessibleName(/requires/);
+    expect(music).not.toHaveAccessibleName(/requires/);
+  });
+
+  // Companion case: once the trial balance is spent, the same account is
+  // gated exactly as any other starter account.
+  it('keeps the tier clause for a starter account with no spendable tokens', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter', spendableTokens: 0 , profileLoaded: true });
+    render(<AudioInspector />);
+    expect(
+      screen.getByRole('button', { name: 'Generate sound with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Generate music with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  // #7715 review round 2 — before /api/user/profile resolves, `tier`/
+  // `spendableTokens` read their store defaults ('starter'/0), which is
+  // indistinguishable from "no trial access". The tier clause must not flash
+  // for that one render.
+  it('does not show the tier clause while the profile is still loading', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: false });
+    render(<AudioInspector />);
+    expect(screen.getByRole('button', { name: 'Generate sound with AI' })).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByRole('button', { name: 'Generate music with AI' })).not.toHaveAttribute('aria-disabled');
   });
 });
 
@@ -182,7 +339,7 @@ describe('AudioInspector music gate (#9117)', () => {
 
   it('gates the Sound button when NEITHER sfx nor voice can run', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'sfx-generation' || featureId === 'voice-generation'
         ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
@@ -202,7 +359,7 @@ describe('AudioInspector music gate (#9117)', () => {
   // impossible to exercise (#9725 p8).
   it('keeps the Sound button open while voice is still available', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'sfx-generation'
         ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
@@ -222,7 +379,7 @@ describe('AudioInspector music gate (#9117)', () => {
   // to a disabled amber badge when the body landed (#9725 p8).
   it('does not present a ready button while the gate is still loading', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation(() => ({
       blocked: false, reason: undefined, loading: true, unprovisionable: false, byokConfigurable: false,
     }));
@@ -236,7 +393,7 @@ describe('AudioInspector music gate (#9117)', () => {
 
   it('disables the Music button with the reason in its name and a distinct Unavailable badge, and never opens the dialog', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     // Both buttons ask the gate for their own capability; only music is blocked here.
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
@@ -276,7 +433,7 @@ describe('AudioInspector music gate (#9117)', () => {
 
   it('keeps a merely unconfigured capability clickable and opens its dialog', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'sfx-generation' || featureId === 'voice-generation' ? UNCONFIGURED : OPEN,
     );
@@ -295,7 +452,7 @@ describe('AudioInspector music gate (#9117)', () => {
   // and Settings is offered — #9725 p7, reintroduced silently.
   it('keeps a merely unconfigured MUSIC capability clickable and opens its dialog', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
         ? { ...UNCONFIGURED, reason: 'Configure an ElevenLabs API key in Settings to enable Music Generation.' }
@@ -322,7 +479,7 @@ describe('AudioInspector music gate (#9117)', () => {
     'shows the tier lock, not an Unavailable badge, when a tier-locked %s capability is merely unconfigured',
     (which) => {
       mockEditorStore();
-      useUserStore.setState({ tier: 'starter' });
+      useUserStore.setState({ tier: 'starter' , profileLoaded: true });
       vi.mocked(useGenerationGate).mockImplementation(() => ({
         blocked: true,
         reason: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.',

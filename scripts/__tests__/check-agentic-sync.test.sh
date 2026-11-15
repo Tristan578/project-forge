@@ -83,6 +83,7 @@ digest_of() {
   fi
   printf '%s' "$d"
 }
+readonly -f digest_of
 
 # Prove the resolved tool actually discriminates before relying on it: equal
 # bytes must agree, different bytes must not. Without this a digest that is
@@ -102,7 +103,9 @@ rm -f "$_p1" "$_p2"
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 SKIP=0
 # skip <reason> - a case the HOST cannot represent, not one we chose not to run.
 # Only ever reachable behind a capability PROBE (never an OS-name check), and
@@ -113,6 +116,7 @@ skipped() {
   SKIP=$((SKIP + 1))
   if [ "${CI:-}" = "true" ]; then bad "skipped in CI: $1"; fi
 }
+readonly -f skipped
 # Shared platform contract (#9611): probe_skip_absent_on names a platform whose
 # HOST cannot close the gap, so the CI upgrade above is suppressed only there.
 # shellcheck source=scripts/__tests__/lib/platform.sh
@@ -151,11 +155,13 @@ JSON
   printf 'top\n<!-- AGENTIC-SYNC:START -->\nstale\n<!-- AGENTIC-SYNC:END -->\nbottom\n' > "$root/sub/copilot.md"
   echo "$root"
 }
+readonly -f make_fixture
 
 run_gen() { # <root> <mode...>  → runs the real generator against the fixture root
   local root="$1"; shift
   AGENTIC_SYNC_ROOT="$root" node "$GEN" "$@"
 }
+readonly -f run_gen
 
 # =============================================================================
 echo "== generator: file existence =="
@@ -182,6 +188,37 @@ run_gen "$ROOT" --write >/dev/null 2>&1
 if grep -q "Pinned versions:" "$ROOT/AGENTS.md"; then ok "version list rendered"; else bad "version list missing"; fi
 if grep -q "must match Cargo.lock" "$ROOT/AGENTS.md"; then bad "hardcoded wasm-bindgen note leaked when canonical has no versionsNote"; else ok "no version note when canonical omits versionsNote"; fi
 rm -rf "$ROOT"
+
+echo "== generator: taskboard initCommand renders a first-run line only when present =="
+# The first-run `init` command must reach every onboarding target as its own
+# line, not as a comment under Start, and only when canonical.json declares it.
+ROOT="$(make_fixture)"   # fixture canonical has startCommand but NO initCommand
+run_gen "$ROOT" --write >/dev/null 2>&1
+if grep -q "First run on a new machine" "$ROOT/AGENTS.md"; then bad "first-run line rendered although canonical has no initCommand"; else ok "no first-run line when canonical omits initCommand"; fi
+rm -rf "$ROOT"
+ROOT="$(make_fixture)"
+perl -0pi -e 's/("startCommand": "[^"]*")/$1, "initCommand": "FIXTURE-INIT-CMD"/' "$ROOT/tools/agentic-sync/canonical.json"
+if grep -q '"initCommand": "FIXTURE-INIT-CMD"' "$ROOT/tools/agentic-sync/canonical.json"; then
+  run_gen "$ROOT" --write >/dev/null 2>&1
+  if grep -qE '^- First run on a new machine .*FIXTURE-INIT-CMD' "$ROOT/AGENTS.md" && grep -qE '^- First run on a new machine .*FIXTURE-INIT-CMD' "$ROOT/sub/copilot.md"; then
+    ok "canonical initCommand rendered as its own first-run line in every target"
+  else
+    bad "initCommand from canonical not rendered as a first-run line"
+  fi
+else
+  bad "fixture mutation did not apply: initCommand missing from the fixture canonical"
+fi
+rm -rf "$ROOT"
+# The real canonical must declare it (derived from the file, not restated here),
+# and the real AGENTS.md must carry it on a first-run line.
+real_init="$(node -e 'const c=require(process.argv[1]); process.stdout.write((c.facts.taskboard||{}).initCommand||"")' "$REPO_ROOT/tools/agentic-sync/canonical.json")"
+if [ -z "$real_init" ]; then
+  bad "the real canonical.json declares no facts.taskboard.initCommand"
+elif grep -F -- "- First run on a new machine" "$REPO_ROOT/AGENTS.md" | grep -qF -- "\`$real_init\`"; then
+  ok "the real AGENTS.md carries the first-run line for canonical initCommand ($real_init)"
+else
+  bad "the real AGENTS.md lacks the first-run line for '$real_init' (run node tools/agentic-sync/sync.mjs --write)"
+fi
 
 echo "== generator: a canonical versionsNote is rendered verbatim =="
 ROOT="$(make_fixture)"
@@ -256,6 +293,7 @@ structural_case() { # <label> <json>
   if [ "$rc" -ne 0 ]; then ok "structural reject: $label → exit non-zero"; else bad "structural reject: $label must NOT read as in-sync"; fi
   rm -rf "$ROOT"
 }
+readonly -f structural_case
 structural_case "empty object (no markerId)"      '{}'
 structural_case "missing markerId"                '{"facts":{},"targets":["AGENTS.md"]}'
 structural_case "empty markerId"                  '{"markerId":"","facts":{},"targets":["AGENTS.md"]}'

@@ -22,12 +22,8 @@ The design app uses a vendored copy of `@spawnforge/ui` at `vendored/spawnforge-
 **To update the vendored copy after changing `packages/ui/`:**
 
 ```bash
-# From monorepo root:
-cd packages/ui && npm run build
-rm -rf apps/design/vendored/spawnforge-ui/dist
-cp -r packages/ui/dist apps/design/vendored/spawnforge-ui/dist
-cp packages/ui/src/effects/effects.css apps/design/vendored/spawnforge-ui/dist/effects/
-cp packages/ui/src/tokens/theme.css apps/design/vendored/spawnforge-ui/dist/tokens/
+# From monorepo root; builds and mirrors the flat package consumed by Storybook:
+bash apps/design/scripts/sync-vendored-ui.sh
 ```
 
 Commit the updated `vendored/` directory alongside your `packages/ui/` changes.

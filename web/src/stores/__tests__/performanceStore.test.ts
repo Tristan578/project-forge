@@ -27,6 +27,7 @@ describe('performanceStore', () => {
         drawCalls: 0,
         entityCount: 0,
         memoryUsage: 0,
+        jsHeapMb: 'unknown',
         wasmHeapSize: 0,
         gpuMemory: 0,
       },
@@ -69,6 +70,7 @@ describe('performanceStore', () => {
         drawCalls: 0,
         entityCount: 0,
         memoryUsage: 0,
+        jsHeapMb: 'unknown',
         wasmHeapSize: 0,
         gpuMemory: 0,
       });
@@ -465,6 +467,7 @@ describe('performanceStore', () => {
           drawCalls: 40,
           entityCount: 30,
           memoryUsage: 128.5,
+          jsHeapMb: 'unknown' as const,
           wasmHeapSize: 0,
           gpuMemory: 0,
         },

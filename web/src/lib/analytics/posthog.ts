@@ -64,6 +64,15 @@ export function initPostHog(): void {
     person_profiles: 'identified_only',
     capture_pageview: false, // We handle page views manually via Next.js router
 
+    // Stated rather than derived (#8947). posthog-js 1.419.0 turned on
+    // web-vitals attribution for INP/LCP by default, and the option's default
+    // of `undefined` means PostHog REMOTE CONFIG decides, not this file. The
+    // object form is deliberate: a bare `capture_performance: false` also
+    // disables network timing, which feeds Session Replay (remote-config gated
+    // above). Web vitals stay on; attribution (element selectors and paths on
+    // every vital) stays off until someone asks for it.
+    capture_performance: { web_vitals: true, web_vitals_attribution: false },
+
     // Session replay (#9973). Stated rather than left to the SDK default, for
     // the same reason `asset_host` is: a default is a bet on library internals,
     // and this one decides whether we record users at all.

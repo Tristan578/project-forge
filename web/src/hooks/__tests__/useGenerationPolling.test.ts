@@ -7,6 +7,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
+import { postProcess } from '@/lib/generate/postProcess';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,6 +17,8 @@ import { renderHook, act } from '@testing-library/react';
 
 const mockUpdateJob = vi.fn();
 const mockJobs: Record<string, Record<string, unknown>> = {};
+/** Mirrors generationStore.durableCompletionEnabled for the DB-first fast path (#8892). */
+const mockDurable = { enabled: false };
 const {
   mockFetchBalance,
   mockShowSuccess,
@@ -37,7 +42,7 @@ vi.mock('@/stores/generationStore', () => ({
       // could exercise a state transition after mount. Snapshot it per read.
       selector({ jobs: { ...mockJobs }, updateJob: mockUpdateJob }),
     {
-      getState: () => ({ jobs: mockJobs }),
+      getState: () => ({ jobs: mockJobs, durableCompletionEnabled: mockDurable.enabled }),
     },
   ),
 }));
@@ -48,6 +53,8 @@ const mockSetCustomSkybox = vi.fn();
 const mockImportAudio = vi.fn();
 const mockSetAudio = vi.fn();
 const mockSetSpriteSheet = vi.fn();
+/** Per-entity sprite data, as the store's `sprites`: an entry marks a 2D sprite target. */
+const mockSprites: Record<string, unknown> = {};
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
@@ -58,6 +65,7 @@ vi.mock('@/stores/editorStore', () => ({
       importAudio: mockImportAudio,
       setAudio: mockSetAudio,
       setSpriteSheet: mockSetSpriteSheet,
+      sprites: mockSprites,
     }),
   },
 }));
@@ -127,9 +135,17 @@ vi.mock('@/lib/sprites/sheetImporter', () => ({
 }));
 
 import { useGenerationPolling } from '../useGenerationPolling';
+// The REAL asset slice, for the tests that drive the poller against the
+// store's own answer when no engine is attached (#10396): no dispatcher is
+// ever set in this file, which is exactly that state.
+import { createAssetSlice, ENGINE_NOT_ATTACHED } from '@/stores/slices/assetSlice';
+import { createSliceStore } from '@/stores/slices/__tests__/sliceTestTemplate';
 // Imported, not retyped: the guidance sentence is the catalogue's, and a test
 // that hardcoded it would pass while the two drifted apart.
 import { RETRY_GUIDANCE } from '@/lib/generate/retryGuidance';
+// The real 404 sentence the status routes send (#10262), so the terminal-404
+// tests prove the route's wording is what reaches the person.
+import { JOB_NOT_FOUND_MESSAGE, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobNotFound';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -168,6 +184,8 @@ describe('useGenerationPolling', () => {
     mockProcessFailedRefunds.mockResolvedValue(undefined);
     // Clear jobs
     Object.keys(mockJobs).forEach(k => delete mockJobs[k]);
+    Object.keys(mockSprites).forEach(k => delete mockSprites[k]);
+    mockDurable.enabled = false;
   });
 
   afterEach(() => {
@@ -997,6 +1015,53 @@ describe('useGenerationPolling', () => {
     });
   });
 
+  // The tier gate (#7715) and the auth layer write a CODE in `error` and the
+  // sentence in `message`. The existing-shape body (sentence in `error`) is
+  // pinned by the test above; these two pin the other shape.
+  async function giveUpWith(body: unknown): Promise<void> {
+    mockJobs['t3'] = makeJob('t3', { usageId: 'usage-t3' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return { ok: false, status: 403, json: () => Promise.resolve(body) } as Response;
+    });
+    renderHook(() => useGenerationPolling());
+    for (let i = 0; i < 101; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+    }
+  }
+
+  function failureTexts(): string[] {
+    const stored = mockUpdateJob.mock.calls
+      .map((c: unknown[]) => (c[1] as Record<string, unknown>).error)
+      .filter((e): e is string => typeof e === 'string');
+    const toasted = mockShowPersistentError.mock.calls.map((c: unknown[]) => c[0] as string);
+    return [...stored, ...toasted];
+  }
+
+  it('surfaces the sentence in `message`, not the code in `error`, when the status route refuses on tier', async () => {
+    const SENTENCE = 'This feature requires the Starter plan';
+    await giveUpWith({ error: 'TIER_REQUIRED', message: SENTENCE, currentTier: 'starter', requiredTier: 'hobbyist' });
+
+    expect(mockShowPersistentError).toHaveBeenCalledWith(SENTENCE, { id: `generation-failed:${SENTENCE}` });
+    const texts = failureTexts();
+    expect(texts.length).toBeGreaterThan(0);
+    expect(texts.some((t) => t.includes('TIER_REQUIRED'))).toBe(false);
+  });
+
+  it('never shows a bare code when the body carries no sentence at all', async () => {
+    await giveUpWith({ error: 'TIER_REQUIRED' });
+
+    const expected = `Generation timed out. ${RETRY_GUIDANCE}`;
+    expect(mockShowPersistentError).toHaveBeenCalledWith(expected, { id: `generation-failed:${expected}` });
+    const texts = failureTexts();
+    expect(texts.length).toBeGreaterThan(0);
+    expect(texts.some((t) => t.includes('TIER_REQUIRED'))).toBe(false);
+  });
+
   it('toasts the provider failure reason when the status route reports failed', async () => {
     const PROVIDER_MESSAGE = 'The 3D model provider rejected the prompt.';
     mockJobs['t3'] = makeJob('t3', { usageId: 'usage-t3' });
@@ -1119,10 +1184,147 @@ describe('useGenerationPolling', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // 404 from a status route is TERMINAL (#10262)
+  //
+  // The only 404 a status route sends is its ownership refusal: the polled job
+  // id is not bound to this account. Nothing about polling again changes that,
+  // and the two legitimate owners who hit it (a job in flight when the
+  // ownership table shipped; a job whose bind write failed) were, before this,
+  // indistinguishable from a transient 500 — retried every 3 s for five
+  // minutes, then refunded with the raw string in an indefinite toast.
+  // ---------------------------------------------------------------------------
+  it('stops polling and refunds on the FIRST 404 from a status route, showing the route sentence', async () => {
+    mockJobs['nf1'] = makeJob('nf1', { usageId: 'usage-nf1' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ error: JOB_NOT_FOUND_MESSAGE }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // Refunded immediately — not after the five-minute cap.
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/generate/refund',
+      expect.objectContaining({ method: 'POST', body: expect.stringContaining('usage-nf1') }),
+    );
+    // Failed with the route's own sentence, verbatim, in the store and the toast.
+    expect(mockUpdateJob).toHaveBeenCalledWith('nf1', { status: 'failed', error: JOB_NOT_FOUND_MESSAGE });
+    expect(mockShowPersistentError).toHaveBeenCalledWith(JOB_NOT_FOUND_MESSAGE, {
+      id: `generation-failed:${JOB_NOT_FOUND_MESSAGE}`,
+    });
+
+    // And polling STOPPED: several more intervals produce no further status read.
+    const statusReads = () =>
+      fetchSpy.mock.calls.filter((c) => typeof c[0] === 'string' && (c[0] as string).includes('/status')).length;
+    expect(statusReads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000 * 5); });
+    expect(statusReads()).toBe(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('uses the routes\' own not-found sentence as the 404 fallback when the body carries none', async () => {
+    // A 404 whose body is not a status-route JSON (an HTML error page, an
+    // empty body) still ends the job, with the SAME constant the routes send —
+    // not the prompt-oriented RETRY_GUIDANCE suffix, and never a bare code.
+    mockJobs['nf2'] = makeJob('nf2', { usageId: 'usage-nf2' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return { ok: false, status: 404, json: () => Promise.reject(new Error('not json')) } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    const expected = JOB_NOT_FOUND_MESSAGE;
+    expect(expected).not.toContain(RETRY_GUIDANCE);
+    expect(mockUpdateJob).toHaveBeenCalledWith('nf2', { status: 'failed', error: expected });
+    expect(mockShowPersistentError).toHaveBeenCalledWith(expected, { id: `generation-failed:${expected}` });
+    expect(fetchSpy).toHaveBeenCalledWith('/api/generate/refund', expect.objectContaining({ method: 'POST' }));
+    fetchSpy.mockRestore();
+  });
+
+  it('still treats a 500 as transient — only 404 is terminal', async () => {
+    // Guards the boundary of the new branch: a 500 with the same body shape
+    // must keep polling exactly as before (#9736), not be swept into the
+    // terminal path.
+    mockJobs['tr1'] = makeJob('tr1', { usageId: 'usage-tr1' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({ error: 'Could not read the 3D Model generation status. Please try again.' }),
+    } as Response));
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
+    expect(mockShowPersistentError).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('keeps polling through a 503 from a FAILED ownership lookup, and completes the job when the lookup recovers', async () => {
+    // A status route answers 503 (not 404) when its ownership lookup itself
+    // failed — a DB blip, or the circuit breaker failing fast during an
+    // outage. That is not a verdict on the job, so it must ride the transient
+    // path: no refund, no toast, and the next successful poll carries on as if
+    // nothing happened. Were it terminal, one outage would fail and refund
+    // every in-flight, correctly bound, paid generation for good.
+    mockJobs['ou1'] = makeJob('ou1', { usageId: 'usage-ou1' });
+    let statusReads = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      statusReads += 1;
+      if (statusReads <= 2) {
+        return {
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ error: JOB_OWNERSHIP_UNAVAILABLE_MESSAGE }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ jobId: 'job-ou1', status: 'processing', progress: 40 }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    // Two 503s so far: still polling, nothing refunded, nothing shown.
+    expect(statusReads).toBe(2);
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
+    expect(mockShowPersistentError).not.toHaveBeenCalled();
+    expect(mockUpdateJob).not.toHaveBeenCalledWith('ou1', expect.objectContaining({ status: 'failed' }));
+
+    // The lookup recovers: the third poll proceeds normally.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(statusReads).toBe(3);
+    expect(mockUpdateJob).toHaveBeenCalledWith('ou1', { status: 'processing', progress: 40 });
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
+    expect(mockShowPersistentError).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  // ---------------------------------------------------------------------------
   // Music completion — looping audio entity creation
   // ---------------------------------------------------------------------------
   it('imports audio and sets looping audio on entity when music completes with entityId', async () => {
     vi.useRealTimers();
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
 
     mockJobs['m2'] = makeJob('m2', {
       type: 'music',
@@ -1178,6 +1380,139 @@ describe('useGenerationPolling', () => {
       volume: 0.7,
     }));
 
+    // #9854: the async/jobId completion path must also land the track as an
+    // editable clip in the Music Arrangement editor, not only attach it. Neither
+    // the status route nor the post-process metadata reported a duration here, so
+    // the clip takes the documented fallback length (30s).
+    await vi.waitFor(() => {
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1);
+    });
+    const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+    expect(clip).toMatchObject({ sourceUrl: 'TestAsset', sourceDurationSeconds: 30 });
+
+    globalThis.FileReader = originalFileReader;
+    vi.useFakeTimers();
+  });
+
+  // #9854: the clip duration is a 3-way fallback chain — status-route
+  // `data.durationSeconds` wins, then post-process `metadata.durationSeconds`,
+  // then the 30s default. The test above pins the default; these two pin the
+  // two live sources so a regression that swaps their priority or drops either
+  // source fails here instead of shipping a wrong clip length.
+  it('uses the status route durationSeconds for the arrangement clip when present', async () => {
+    vi.useRealTimers();
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
+
+    mockJobs['m3'] = makeJob('m3', {
+      type: 'music',
+      entityId: 'ent-music-3',
+      prompt: 'timed theme',
+    });
+
+    const originalFileReader = globalThis.FileReader;
+    class MockFileReader {
+      result = 'data:audio/mpeg;base64,dGVzdA==';
+      onloadend: (() => void) | null = null;
+      onerror: ((_e: unknown) => void) | null = null;
+      readAsDataURL() {
+        queueMicrotask(() => { if (this.onloadend) this.onloadend(); });
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.FileReader = MockFileReader as any;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-m3',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/music.mp3',
+            durationSeconds: 42,
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio-data'], { type: 'audio/mpeg' })),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+
+    await vi.waitFor(() => {
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1);
+    });
+    // Verbatim from the status route — not the 30s default, not the metadata.
+    expect(useMusicArrangementStore.getState().arrangement.clips[0]).toMatchObject({
+      sourceDurationSeconds: 42,
+    });
+
+    globalThis.FileReader = originalFileReader;
+    vi.useFakeTimers();
+  });
+
+  it('falls back to postProcess metadata durationSeconds when the status route omits it', async () => {
+    vi.useRealTimers();
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
+
+    // Only the post-process metadata reports a duration this time; the status
+    // response deliberately omits it so the second link of the chain is exercised.
+    vi.mocked(postProcess).mockReturnValueOnce({
+      ok: true,
+      warnings: [],
+      metadata: { assetName: 'TestAsset', durationSeconds: 55 },
+    });
+
+    mockJobs['m4'] = makeJob('m4', {
+      type: 'music',
+      entityId: 'ent-music-4',
+      prompt: 'metadata-timed theme',
+    });
+
+    const originalFileReader = globalThis.FileReader;
+    class MockFileReader {
+      result = 'data:audio/mpeg;base64,dGVzdA==';
+      onloadend: (() => void) | null = null;
+      onerror: ((_e: unknown) => void) | null = null;
+      readAsDataURL() {
+        queueMicrotask(() => { if (this.onloadend) this.onloadend(); });
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.FileReader = MockFileReader as any;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-m4',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/music.mp3',
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio-data'], { type: 'audio/mpeg' })),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+
+    await vi.waitFor(() => {
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1);
+    });
+    expect(useMusicArrangementStore.getState().arrangement.clips[0]).toMatchObject({
+      sourceDurationSeconds: 55,
+    });
+
     globalThis.FileReader = originalFileReader;
     vi.useFakeTimers();
   });
@@ -1193,78 +1528,79 @@ describe('useGenerationPolling', () => {
     });
 
     const OriginalImage = globalThis.Image;
-    globalThis.Image = class MockImage {
-      naturalWidth = 256;
-      naturalHeight = 64;
-      onload: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      set src(_url: string) {
-        queueMicrotask(() => this.onload?.());
-      }
-    } as unknown as typeof Image;
-
     const origCreateObjectURL = globalThis.URL.createObjectURL;
     const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
-    const mockCreateObjectURL = vi.fn(() => 'blob:mock-url');
-    const mockRevokeObjectURL = vi.fn();
-    globalThis.URL.createObjectURL = mockCreateObjectURL;
-    globalThis.URL.revokeObjectURL = mockRevokeObjectURL;
+    // Restored in a finally: a failing assertion must not leak these
+    // stubs into the tests that follow.
+    try {
+      globalThis.Image = class MockImage {
+        naturalWidth = 256;
+        naturalHeight = 64;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_url: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      } as unknown as typeof Image;
+      globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+      globalThis.URL.revokeObjectURL = vi.fn();
 
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-      const urlStr = typeof url === 'string' ? url : (url as Request).url;
-      if (urlStr.includes('/api/generate/sprite-sheet/status')) {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/api/generate/sprite-sheet/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-ss1',
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/spritesheet.png',
+            }),
+          } as Response;
+        }
         return {
           ok: true,
-          json: () => Promise.resolve({
-            jobId: 'job-ss1',
-            status: 'completed',
-            progress: 100,
-            resultUrl: 'https://example.com/spritesheet.png',
-          }),
+          blob: () => Promise.resolve(new Blob(['fake-png'], { type: 'image/png' })),
         } as Response;
-      }
-      return {
-        ok: true,
-        blob: () => Promise.resolve(new Blob(['fake-png'], { type: 'image/png' })),
-      } as Response;
-    });
+      });
 
-    renderHook(() => useGenerationPolling());
+      renderHook(() => useGenerationPolling());
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
-    });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
 
-    expect(mockLoadTexture).toHaveBeenCalledWith(
-      expect.any(String),
-      'TestAsset',
-      'entity-ss1',
-      'base_color',
-    );
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        expect.any(String),
+        'TestAsset',
+        'entity-ss1',
+        'base_color',
+      );
 
-    expect(mockSetSpriteSheet).toHaveBeenCalledWith(
-      'entity-ss1',
-      expect.objectContaining({
-        assetId: 'SpriteSheet_test',
-        frames: expect.arrayContaining([
-          expect.objectContaining({ index: 0, x: 0, y: 0 }),
-        ]),
-      }),
-    );
+      expect(mockSetSpriteSheet).toHaveBeenCalledWith(
+        'entity-ss1',
+        expect.objectContaining({
+          assetId: 'SpriteSheet_test',
+          frames: expect.arrayContaining([
+            expect.objectContaining({ index: 0, x: 0, y: 0 }),
+          ]),
+        }),
+      );
 
-    const completedCall = mockUpdateJob.mock.calls.find(
-      (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
-    );
-    expect(completedCall).toBeDefined();
-    const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
-    expect(meta).toHaveProperty('spriteSheet');
-
-    globalThis.Image = OriginalImage;
-    globalThis.URL.createObjectURL = origCreateObjectURL;
-    globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+      const completedCall = mockUpdateJob.mock.calls.find(
+        (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
+      );
+      expect(completedCall).toBeDefined();
+      const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
+      expect(meta).toHaveProperty('spriteSheet');
+    } finally {
+      globalThis.Image = OriginalImage;
+      globalThis.URL.createObjectURL = origCreateObjectURL;
+      globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+    }
   });
 
   // ---------------------------------------------------------------------------
@@ -1346,6 +1682,123 @@ describe('useGenerationPolling', () => {
     );
     expect(timedOut).toBe(false);
     fetchSpy.mockRestore();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Durable completion (#8892): rows the QStash callback finished with no tab open
+  // ---------------------------------------------------------------------------
+  it('imports a hydrated completed job from its DB row without starting a poll loop', async () => {
+    // autoPlace false: the model branch then records the result without a download.
+    mockJobs['done'] = makeJob('done', { status: 'completed', progress: 100, dbId: 'db-done', needsCompletionSync: true, autoPlace: false, durable: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-done' && (!init || !init.method)) {
+        return { ok: true, status: 200, json: async () => ({ status: 'completed', resultUrl: 'https://cdn.example.com/tower.glb', resultMeta: null, errorMessage: null }) } as Response;
+      }
+      if (u === '/api/jobs/db-done' && init?.method === 'PATCH') {
+        return { ok: true, status: 200, json: async () => ({ updated: true }) } as Response;
+      }
+      throw new Error(`unexpected fetch ${u} ${init?.method ?? 'GET'}`);
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // The row was read once and reflected; the provider status route was never asked.
+    expect(fetchSpy.mock.calls.map(([u, i]) => `${(i as RequestInit | undefined)?.method ?? 'GET'} ${String(u)}`)).toEqual([
+      'GET /api/jobs/db-done',
+      'PATCH /api/jobs/db-done',
+    ]);
+    expect(mockUpdateJob).toHaveBeenCalledWith('done', expect.objectContaining({ status: 'completed', resultUrl: 'https://cdn.example.com/tower.glb' }));
+    expect(mockUpdateJob).toHaveBeenCalledWith('done', { needsCompletionSync: false });
+    expect(JSON.parse(String((fetchSpy.mock.calls[1][1] as RequestInit).body))).toEqual({ imported: true });
+    // No timer: a terminal job is not polled.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('refunds and fails a hydrated failed job from its DB row, with the server message', async () => {
+    mockJobs['lost'] = makeJob('lost', { status: 'failed', dbId: 'db-lost', needsCompletionSync: true, usageId: 'usage-lost', durable: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-lost' && !init?.method) {
+        return { ok: true, status: 200, json: async () => ({ status: 'failed', resultUrl: null, resultMeta: null, errorMessage: 'The provider rejected this prompt. Try a different description.' }) } as Response;
+      }
+      if (u.includes('refund')) return { ok: true, status: 200, json: async () => ({}) } as Response;
+      if (u === '/api/jobs/db-lost' && init?.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ updated: true }) } as Response;
+      throw new Error(`unexpected fetch ${u}`);
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('refund'))).toBe(true);
+    expect(mockUpdateJob).toHaveBeenCalledWith('lost', { status: 'failed', error: 'The provider rejected this prompt. Try a different description.' });
+    expect(mockShowPersistentError).toHaveBeenCalledWith('The provider rejected this prompt. Try a different description.', expect.anything());
+    expect(mockUpdateJob).toHaveBeenCalledWith('lost', { needsCompletionSync: false });
+  });
+
+  it('keeps needsCompletionSync when the row read fails, so a later load retries', async () => {
+    mockJobs['flaky'] = makeJob('flaky', { status: 'completed', dbId: 'db-flaky', needsCompletionSync: true, durable: true });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) } as Response));
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(mockUpdateJob).not.toHaveBeenCalledWith('flaky', { needsCompletionSync: false });
+    expect(mockUpdateJob).not.toHaveBeenCalledWith('flaky', expect.objectContaining({ status: 'completed' }));
+  });
+
+  it('reads a durable job\'s own row before the provider status route when durable completion is enabled', async () => {
+    mockDurable.enabled = true;
+    mockJobs['dur'] = makeJob('dur', { durable: true, dbId: 'db-dur', autoPlace: false });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-dur') {
+        return { ok: true, status: 200, json: async () => ({ status: 'completed', resultUrl: 'https://cdn.example.com/dur.glb', resultMeta: null, errorMessage: null }) } as Response;
+      }
+      throw new Error(`provider status route must not be asked: ${u}`);
+    });
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0][0])).toBe('/api/jobs/db-dur');
+    expect(mockUpdateJob).toHaveBeenCalledWith('dur', expect.objectContaining({ status: 'completed', resultUrl: 'https://cdn.example.com/dur.glb' }));
+    // Settled from the row: the 30 s safety loop is torn down.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('falls through to the provider status route when the row is still in flight or unreadable', async () => {
+    mockDurable.enabled = true;
+    mockJobs['dur2'] = makeJob('dur2', { durable: true, dbId: 'db-dur2' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-dur2') return { ok: true, status: 200, json: async () => ({ status: 'processing', resultUrl: null, resultMeta: null, errorMessage: null }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ jobId: 'job-dur2', status: 'processing', progress: 42 }) } as Response;
+    });
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(fetchSpy.mock.calls.map(([u]) => String(u))).toEqual(['/api/jobs/db-dur2', '/api/generate/model/status?jobId=job-dur2']);
+    expect(mockUpdateJob).toHaveBeenCalledWith('dur2', { status: 'processing', progress: 42 });
+    unmount();
+  });
+
+  it('does not read the DB row for durable jobs when durable completion is disabled', async () => {
+    mockDurable.enabled = false;
+    mockJobs['dur3'] = makeJob('dur3', { durable: true, dbId: 'db-dur3' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      mockFetchResponse({ jobId: 'job-dur3', status: 'processing', progress: 10 }),
+    );
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(fetchSpy.mock.calls.map(([u]) => String(u))).toEqual(['/api/generate/model/status?jobId=job-dur3']);
+    unmount();
   });
 
   it('clears all timers on unmount', async () => {
@@ -1464,6 +1917,55 @@ describe('useGenerationPolling', () => {
 
       cleanup();
     });
+
+    it('records a refused import as not placed, with the reason, rather than autoPlaced: true', async () => {
+      // The engine inspects a model before queueing it and refuses one whose
+      // textures are KTX2 (#10396); the generation itself succeeded, so the
+      // job completes, but it must not claim the model was added.
+      const cleanup = setupModelCompletion({ autoPlace: true, targetEntityId: 'ent-1' });
+      const reason = 'image #0 is a KTX2 texture (declared by its mimeType); KTX2 textures are not supported, convert the model\'s textures to PNG or JPEG and import again';
+      mockImportGltf.mockReturnValueOnce({ success: false, error: reason });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: reason,
+          targetEntityId: 'ent-1',
+        }),
+      }));
+
+      cleanup();
+    });
+
+    it('records a model that completes while no engine is attached as not placed, with that reason', async () => {
+      // The real slice with no dispatcher used to answer `success: true`, so
+      // the job was recorded as placed when nothing had been queued (#10396).
+      const cleanup = setupModelCompletion({ autoPlace: true, targetEntityId: 'ent-1' });
+      mockImportGltf.mockImplementationOnce(createSliceStore(createAssetSlice).getState().importGltf);
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: ENGINE_NOT_ATTACHED,
+          targetEntityId: 'ent-1',
+        }),
+      }));
+      // A plain rejection: no refusal toast, and the job is not failed or refunded.
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+      expect(mockUpdateJob).not.toHaveBeenCalledWith('ap1', expect.objectContaining({ status: 'failed' }));
+
+      cleanup();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1537,6 +2039,48 @@ describe('useGenerationPolling', () => {
       cleanup();
     });
 
+    // A 2D sprite has one image and no material (#10399): the colour map
+    // becomes the sprite's image and the material-only maps are skipped and
+    // named, instead of each reaching the engine as "no material".
+    it('on a 2D sprite: the albedo map becomes the sprite image, the normal map is skipped and named', async () => {
+      mockSprites['ent-tex-sprite'] = { textureAssetId: null };
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-sprite' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).toHaveBeenCalledExactlyOnceWith(
+        'data:image/png;base64,AAAA',
+        expect.stringContaining('albedo'),
+        'ent-tex-sprite',
+        'sprite',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: true, skippedMaps: ['normal'] }),
+      }));
+      cleanup();
+    });
+
+    it('on a 2D sprite with only a material map requested: nothing is sent and the record says why', async () => {
+      mockSprites['ent-tex-sprite'] = { textureAssetId: null };
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-sprite', materialSlot: 'normal_map' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).not.toHaveBeenCalled();
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          skippedMaps: ['normal'],
+          placementError: 'a 2D sprite takes only the colour map, so normal could not be applied',
+        }),
+      }));
+      cleanup();
+    });
+
     it('applies only the specified materialSlot map', async () => {
       const cleanup = setupTextureCompletion({
         autoPlace: true,
@@ -1562,6 +2106,32 @@ describe('useGenerationPolling', () => {
           autoPlaced: true,
           targetEntityId: 'ent-tex-target',
           materialSlot: 'normal_map',
+        }),
+      }));
+
+      cleanup();
+    });
+
+    it('records a refused map as not placed, naming the map and the reason', async () => {
+      // A provider that returns a map in a format the engine has no decoder
+      // for is refused by the slice before the command is built (#10396).
+      // One refused map out of two means the material was NOT fully placed.
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-target' });
+      const reason = "unsupported texture format 'image/webp'; accepted formats are image/png, image/jpeg";
+      mockLoadTexture
+        .mockReturnValueOnce({ success: false, error: reason })
+        .mockReturnValueOnce({ success: true });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(2);
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: `albedo: ${reason}`,
+          targetEntityId: 'ent-tex-target',
         }),
       }));
 
@@ -1714,6 +2284,380 @@ describe('useGenerationPolling', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // A refused placement is recorded at EVERY site that places an image (#10396)
+  // ---------------------------------------------------------------------------
+  describe('auto-place refusals', () => {
+    const REASON = "unsupported texture format 'image/webp'; accepted formats are image/png, image/jpeg";
+
+    /** A completed image job of `type`, whose download reads as a PNG data URL. */
+    function setupImageCompletion(id: string, type: string, jobOverrides: Record<string, unknown> = {}) {
+      mockJobs[id] = makeJob(id, {
+        type,
+        prompt: 'a thing',
+        autoPlace: true,
+        targetEntityId: 'ent-refused',
+        ...jobOverrides,
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,AAAA';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: `job-${id}`,
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/image.png',
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['img'], { type: 'image/png' })),
+        } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    async function runToCompletion() {
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+
+    it('sprite / tileset: a refused texture is recorded as not placed, with the reason', async () => {
+      const cleanup = setupImageCompletion('rs1', 'sprite', { materialSlot: 'emissive' });
+      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('rs1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: REASON,
+          targetEntityId: 'ent-refused',
+          materialSlot: 'emissive',
+        }),
+      }));
+      cleanup();
+    });
+
+    it('pixel-art: a refused texture is recorded as not placed, with the reason', async () => {
+      const cleanup = setupImageCompletion('rp1', 'pixel-art');
+      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('rp1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: REASON,
+          targetEntityId: 'ent-refused',
+          materialSlot: 'base_color',
+        }),
+      }));
+      cleanup();
+    });
+
+    it('sprite sheet: the sheet is still sliced, but a refused texture is recorded as not placed', async () => {
+      const cleanup = setupImageCompletion('rss1', 'sprite_sheet', { metadata: { frameCount: 4, frameSize: '64' } });
+      const OriginalImage = globalThis.Image;
+      const origCreateObjectURL = globalThis.URL.createObjectURL;
+      const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
+      // Restored in a finally: a failing assertion must not leak these
+      // stubs into the tests that follow.
+      try {
+        globalThis.Image = class MockImage {
+          naturalWidth = 256;
+          naturalHeight = 64;
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_url: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        } as unknown as typeof Image;
+        globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+        globalThis.URL.revokeObjectURL = vi.fn();
+        mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+        expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-refused', expect.anything());
+        expect(mockUpdateJob).toHaveBeenCalledWith('rss1', expect.objectContaining({
+          status: 'completed',
+          metadata: expect.objectContaining({
+            autoPlaced: false,
+            placementError: REASON,
+            targetEntityId: 'ent-refused',
+            spriteSheet: expect.objectContaining({ frameCount: 4 }),
+          }),
+        }));
+      } finally {
+        globalThis.Image = OriginalImage;
+        globalThis.URL.createObjectURL = origCreateObjectURL;
+        globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+        cleanup();
+      }
+    });
+
+    it('sprite sheet: aimed at a 2D sprite, the texture goes to the sprite slot (#10399)', async () => {
+      // The image now reaches the sprite instead of a material the sprite does
+      // not have. The sheet is still not cut into frames - it names its texture
+      // by the job's display name, which the engine never registers (#10408).
+      mockSprites['ent-sheet'] = { textureAssetId: null };
+      const cleanup = setupImageCompletion('rss2', 'sprite_sheet', {
+        targetEntityId: 'ent-sheet',
+        metadata: { frameCount: 4, frameSize: '64' },
+      });
+      const OriginalImage = globalThis.Image;
+      const origCreateObjectURL = globalThis.URL.createObjectURL;
+      const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
+      try {
+        globalThis.Image = class MockImage {
+          naturalWidth = 256;
+          naturalHeight = 64;
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_url: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        } as unknown as typeof Image;
+        globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+        globalThis.URL.revokeObjectURL = vi.fn();
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+        expect(mockLoadTexture).toHaveBeenCalledWith(expect.any(String), expect.any(String), 'ent-sheet', 'sprite');
+        expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-sheet', expect.anything());
+      } finally {
+        globalThis.Image = OriginalImage;
+        globalThis.URL.createObjectURL = origCreateObjectURL;
+        globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+        cleanup();
+      }
+    });
+
+    it('sprite: a job that completes while no engine is attached is recorded as not placed, with that reason', async () => {
+      // The real slice's answer with no dispatcher set, which is this file's
+      // state throughout: `{ success: false, error: ENGINE_NOT_ATTACHED }`,
+      // a rejection with no toast. It used to be `{ success: true }`.
+      const cleanup = setupImageCompletion('na1', 'sprite');
+      mockLoadTexture.mockImplementationOnce(createSliceStore(createAssetSlice).getState().loadTexture);
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(ENGINE_NOT_ATTACHED).toBe('the engine is not attached');
+      expect(mockUpdateJob).toHaveBeenCalledWith('na1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: ENGINE_NOT_ATTACHED,
+          targetEntityId: 'ent-refused',
+        }),
+      }));
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+      cleanup();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // A generated image served without a usable Content-Type (#10396)
+  // ---------------------------------------------------------------------------
+  describe('a generated image served without a usable type', () => {
+    /** The 8-byte PNG signature: what the poller sniffs. */
+    const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    /** A JPEG SOI marker plus the APP0 marker after it. */
+    const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+    /**
+     * A completed sprite job whose download is `blob`, which the FileReader
+     * stub reads as `dataUrl` - the header the real FileReader would write
+     * from the blob's type.
+     */
+    function setupUntypedCompletion(id: string, blob: Blob, dataUrl: string, jobOverrides: Record<string, unknown> = {}) {
+      mockJobs[id] = makeJob(id, {
+        type: 'sprite',
+        prompt: 'a thing',
+        autoPlace: true,
+        targetEntityId: 'ent-untyped',
+        ...jobOverrides,
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = dataUrl;
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: `job-${id}`,
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/image',
+            }),
+          } as Response;
+        }
+        return { ok: true, blob: () => Promise.resolve(blob) } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    async function runToCompletion() {
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+
+    it('a PNG served with an empty type is declared image/png before it is placed', async () => {
+      // `data:;base64,` is what the FileReader writes for a typeless blob, and
+      // the format gate refuses it as unrecognised: a correctly generated
+      // image was recorded as not placed.
+      const cleanup = setupUntypedCompletion('ut1', new Blob([PNG_BYTES], { type: '' }), 'data:;base64,iVBORw0KGgoAAAANSUhEUg==');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
+        'TestAsset',
+        'ent-untyped',
+        'base_color',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('ut1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: true, targetEntityId: 'ent-untyped' }),
+      }));
+      cleanup();
+    });
+
+    it('a JPEG served as application/octet-stream is declared image/jpeg', async () => {
+      const cleanup = setupUntypedCompletion(
+        'ut2',
+        new Blob([JPEG_BYTES], { type: 'application/octet-stream' }),
+        'data:application/octet-stream;base64,/9j/4A==',
+      );
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4A==', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('a typeless blob with neither signature is left as it is, so the gate still refuses it', async () => {
+      // RIFF....WEBP: a WebP the storage served untyped. Guessing a type for
+      // it would send it to a decoder that cannot read it.
+      const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+      const cleanup = setupUntypedCompletion('ut3', new Blob([webp], { type: '' }), 'data:;base64,UklGRgAAAABXRUJQ');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:;base64,UklGRgAAAABXRUJQ', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('the bytes outrank a wrong served type: a PNG served as image/webp is declared image/png', async () => {
+      // The engine picks its decoder from the header; a PNG declared WebP was
+      // refused by the gate although nothing about the image was wrong.
+      const cleanup = setupUntypedCompletion('ut4', new Blob([PNG_BYTES], { type: 'image/webp' }), 'data:image/webp;base64,iVBORw0KGgo=');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it.each([
+      ['binary/octet-stream', JPEG_BYTES, '/9j/4A==', 'image/jpeg'],
+      ['text/plain', PNG_BYTES, 'iVBORw0KGgo=', 'image/png'],
+    ] as const)('an image served as %s is declared by its bytes', async (served, bytes, body, expected) => {
+      const cleanup = setupUntypedCompletion('ut5', new Blob([bytes], { type: served }), `data:${served};base64,${body}`);
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith(`data:${expected};base64,${body}`, 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('a JPEG served as image/png is declared image/jpeg, so the engine does not decode it as a PNG', async () => {
+      const cleanup = setupUntypedCompletion('ut6', new Blob([JPEG_BYTES], { type: 'image/png' }), 'data:image/png;base64,/9j/4A==');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4A==', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    // A 2D sprite renders from its SpriteData, not from a material: with no
+    // slot named, a generated image aimed at a sprite entity goes to the
+    // `sprite` slot the engine now applies (#10399). Before, `base_color`
+    // found no material, changed nothing, and was recorded as placed.
+    describe('the default slot for a 2D sprite target', () => {
+      it.each(['sprite', 'tileset', 'pixel-art'])('a %s job aimed at a sprite entity goes to the sprite slot', async (type) => {
+        mockSprites['ent-untyped'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds1', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=', { type });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', expect.any(String), 'ent-untyped', 'sprite');
+        expect(mockUpdateJob).toHaveBeenCalledWith('ds1', expect.objectContaining({
+          metadata: expect.objectContaining({ materialSlot: 'sprite' }),
+        }));
+        cleanup();
+      });
+
+      it('a slot the job named still wins on a sprite entity', async () => {
+        mockSprites['ent-untyped'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds2', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=', { materialSlot: 'emissive' });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'emissive');
+        cleanup();
+      });
+
+      it('an entity with no sprite data keeps the base colour slot', async () => {
+        mockSprites['some-other-entity'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds3', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=');
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
+        cleanup();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Auto-place: music with targetEntityId
   // ---------------------------------------------------------------------------
   describe('auto-place music', () => {
@@ -1768,6 +2712,95 @@ describe('useGenerationPolling', () => {
 
       globalThis.FileReader = origFileReader;
       vi.useFakeTimers();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Synchronous DALL-E sprite (#9734): the finished image arrives inline on the
+  // job as `resultUrl`; it is imported directly, and the status round-trip that
+  // would corrupt/overflow a base64 payload in the `?jobId=` query string is
+  // skipped entirely.
+  // ---------------------------------------------------------------------------
+  describe('inline synchronous result (#9734)', () => {
+    it('imports the inline resultUrl without ever hitting the status route', async () => {
+      const BASE64 = `data:image/png;base64,${'A'.repeat(2048)}`;
+      mockJobs['sync1'] = makeJob('sync1', {
+        type: 'sprite',
+        status: 'pending',
+        resultUrl: BASE64,
+        autoPlace: true,
+        targetEntityId: 'ent-sync',
+        prompt: 'a hero',
+      });
+
+      vi.stubGlobal('FileReader', class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,SYNC';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      });
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['sprite'], { type: 'image/png' })),
+      } as Response));
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      // The poller NEVER contacts the status route — the base64 image would
+      // corrupt/overflow the query string. Any fetch it made was the direct
+      // download of the inline image.
+      for (const call of fetchSpy.mock.calls) {
+        const url = typeof call[0] === 'string' ? call[0] : (call[0] as Request).url;
+        expect(url).not.toContain('/status');
+        expect(url).not.toContain('jobId=');
+      }
+      // The download targeted the inline data URL, and the sprite was imported.
+      expect(fetchSpy).toHaveBeenCalledWith(BASE64);
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,SYNC',
+        'TestAsset',
+        'ent-sync',
+        'base_color',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('sync1', expect.objectContaining({
+        status: 'completed',
+        resultUrl: BASE64,
+      }));
+
+      vi.unstubAllGlobals();
+      fetchSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // jobId encoding (#9734): the status route reads jobId via
+  // searchParams.get(), which url-decodes, so the poller must encodeURIComponent
+  // it — a raw '+' would otherwise decode to a space.
+  // ---------------------------------------------------------------------------
+  describe('jobId query encoding (#9734)', () => {
+    it('percent-encodes reserved characters in the jobId before polling', async () => {
+      mockJobs['enc'] = makeJob('enc', {
+        type: 'model',
+        jobId: 'pred+id/x=y',
+        status: 'processing',
+      });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        mockFetchResponse({ jobId: 'pred+id/x=y', status: 'processing', progress: 10 }),
+      );
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      const url = fetchSpy.mock.calls[0][0] as string;
+      // Encoded: '+' -> %2B, '/' -> %2F, '=' -> %3D. A raw '+' would decode to a
+      // space on the status route and corrupt the id.
+      expect(url).toContain('jobId=pred%2Bid%2Fx%3Dy');
+      expect(url).not.toContain('jobId=pred+id/x=y');
+      fetchSpy.mockRestore();
     });
   });
 });

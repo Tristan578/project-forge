@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { Plus, Trash2, Eye, EyeOff, Shield, GripVertical } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
@@ -13,6 +13,10 @@ interface _TilemapLayer {
 }
 
 export function TilemapLayerPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const tilemapData = useEditorStore((s) => primaryId ? s.tilemaps?.[primaryId] : null);
   const activeLayerIndex = useEditorStore((s) => s.tilemapActiveLayerIndex ?? 0);
@@ -171,8 +175,9 @@ export function TilemapLayerPanel() {
       {/* Opacity slider for active layer */}
       {tilemapData.layers[activeLayerIndex] && (
         <div className="shrink-0 border-t border-zinc-800 p-3">
-          <label className="mb-1 block text-xs text-zinc-400">Layer Opacity</label>
+          <label htmlFor={fieldId('layer-opacity')} className="mb-1 block text-xs text-zinc-400">Layer Opacity</label>
           <input
+            id={fieldId('layer-opacity')}
             type="range"
             min={0}
             max={1}

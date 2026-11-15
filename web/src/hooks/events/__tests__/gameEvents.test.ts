@@ -40,7 +40,7 @@ vi.mock('@/lib/toast', () => ({
 }));
 
 import { useEditorStore, firePlayTick } from '@/stores/editorStore';
-import { handleGameEvent } from '../gameEvents';
+import { handleGameEvent, resetPlayTickSnapshot } from '../gameEvents';
 import { isCharacterGrounded, getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -54,7 +54,7 @@ describe('handleGameEvent', () => {
     vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+    vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
   });
 
   it('returns false for unknown event types', () => {
@@ -70,7 +70,7 @@ describe('handleGameEvent', () => {
   describe('GAME_COMPONENT_CHANGED', () => {
     it('updates allGameComponents for non-selected entity', () => {
       // Entity is not the primary selected entity
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'other-entity', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'other-entity', primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
       // The engine's `GameComponentData` is `#[serde(tag = "type", rename_all =
       // "camelCase")]`, so what arrives is FLAT — engine field names sitting beside
@@ -105,7 +105,7 @@ describe('handleGameEvent', () => {
 
     it('updates both allGameComponents and primaryGameComponents for selected entity', () => {
       // Entity IS the primary selected entity
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -243,7 +243,7 @@ describe('handleGameEvent', () => {
       const existingComponents = {
         'entity-0': [{ type: 'health', health: { maxHp: 50, currentHp: 50, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: [0, 0, 0], despawnOnDeath: false } }],
       };
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents, gameComponentAdjustments: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -271,7 +271,7 @@ describe('handleGameEvent', () => {
 
     it('handles empty components array', () => {
       const stale = [{ type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: [0, 0, 0], despawnOnDeath: false } }];
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: stale, allGameComponents: {} } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: stale, allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -289,6 +289,103 @@ describe('handleGameEvent', () => {
       expect(useEditorStore.setState).toHaveBeenCalledWith({
         allGameComponents: { 'entity-1': [] },
         primaryGameComponents: [],
+      });
+    });
+
+    // PF-1148: an adjustment marker is only true while the field still holds the
+    // value it says was applied. Undo, a play session and a collab sync all move
+    // values through the engine without the store action that clears markers, so
+    // the engine's own report is where a stale one is dropped. (A scene
+    // replacement drops them all when the engine accepts it; that is pinned in
+    // stores/__tests__/sceneReplacementAdjustments.test.ts.)
+    describe('adjustment markers', () => {
+      const speedClamp = {
+        component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+      } as const;
+      const pauseClamp = {
+        component: 'movingPlatform', field: 'pauseDuration', requested: 600, applied: 60, reason: 'clamped',
+      } as const;
+      const emitted = (speed: number, pauseDuration: number) => ({
+        entityId: 'entity-1',
+        components: [{
+          type: 'movingPlatform', speed, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration, loopMode: 'pingPong',
+        }],
+      });
+      const withMarkers = () => {
+        vi.mocked(useEditorStore.getState).mockReturnValue({
+          ...actions,
+          primaryId: 'entity-1',
+          primaryGameComponents: [],
+          allGameComponents: {},
+          gameComponentAdjustments: { 'entity-1': { movingPlatform: { speed: speedClamp, pauseDuration: pauseClamp } } },
+        } as unknown as StoreState);
+      };
+
+      it('drops a marker once the engine reports its field at a different value', () => {
+        withMarkers();
+        // The speed went back to 2 (an undo); the pause is still the capped 60.
+        handleGameEvent('GAME_COMPONENT_CHANGED', emitted(2, 60), mockSetGet.set, mockSetGet.get);
+        expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+          gameComponentAdjustments: { 'entity-1': { movingPlatform: { pauseDuration: pauseClamp } } },
+        }));
+      });
+
+      it('drops every marker of a component the engine no longer reports', () => {
+        withMarkers();
+        handleGameEvent('GAME_COMPONENT_CHANGED', { entityId: 'entity-1', components: [] }, mockSetGet.set, mockSetGet.get);
+        expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+          gameComponentAdjustments: {},
+        }));
+      });
+
+      it('leaves the markers alone when the engine echoes the applied values', () => {
+        withMarkers();
+        handleGameEvent('GAME_COMPONENT_CHANGED', emitted(1000, 60), mockSetGet.set, mockSetGet.get);
+        const written = vi.mocked(useEditorStore.setState).mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
+        // Not rewritten at all: an unchanged map is not a state change.
+        expect(Object.keys(written).sort()).toEqual(['allGameComponents', 'primaryGameComponents']);
+      });
+
+      describe('a route marker', () => {
+        // The 64 points a 300-point request was cut to, at fractional
+        // coordinates so the engine's f32 echo is a different double.
+        const kept = Array.from({ length: 64 }, (_, i) => [i + 0.1, 0.2, 0.3]);
+        const routeCut = {
+          component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated',
+          unit: 'points', appliedPoints: kept,
+        } as const;
+        const withRouteMarker = () => {
+          vi.mocked(useEditorStore.getState).mockReturnValue({
+            ...actions,
+            primaryId: 'entity-1',
+            primaryGameComponents: [],
+            allGameComponents: {},
+            gameComponentAdjustments: { 'entity-1': { movingPlatform: { speed: speedClamp, waypoints: routeCut } } },
+          } as unknown as StoreState);
+        };
+        const emittedRoute = (waypoints: number[][]) => ({
+          entityId: 'entity-1',
+          components: [{ type: 'movingPlatform', speed: 1000, waypoints, pauseDuration: 0.5, loopMode: 'pingPong' }],
+        });
+
+        it('is dropped when the engine reports a different route with the same number of points', () => {
+          withRouteMarker();
+          // An undo or a collab sync put back another 64-point
+          // route. The count alone cannot tell the two apart; the points can.
+          const other = kept.map(([x]) => [x, 9, 0]);
+          handleGameEvent('GAME_COMPONENT_CHANGED', emittedRoute(other), mockSetGet.set, mockSetGet.get);
+          expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+            gameComponentAdjustments: { 'entity-1': { movingPlatform: { speed: speedClamp } } },
+          }));
+        });
+
+        it('is kept while the engine echoes the route it describes, at f32 precision', () => {
+          withRouteMarker();
+          const echoed = kept.map((point) => point.map(Math.fround));
+          handleGameEvent('GAME_COMPONENT_CHANGED', emittedRoute(echoed), mockSetGet.set, mockSetGet.get);
+          const written = vi.mocked(useEditorStore.setState).mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
+          expect(Object.keys(written).sort()).toEqual(['allGameComponents', 'primaryGameComponents']);
+        });
       });
     });
   });
@@ -374,7 +471,7 @@ describe('handleGameEvent', () => {
 
       for (const mode of modes) {
         vi.clearAllMocks();
-        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
         const result = handleGameEvent(
           'GAME_CAMERA_CHANGED',
@@ -493,6 +590,258 @@ describe('handleGameEvent', () => {
 
       expect(result).toBe(true);
       expect(firePlayTick).toHaveBeenCalledWith(payload);
+    });
+
+    it('replaces the delta snapshot, so the next delta builds on the full frame', () => {
+      // A full frame is a keyframe: what it does not list no longer exists.
+      // A delta that follows it must therefore merge over the full frame, not
+      // over whatever deltas had accumulated before it.
+      resetPlayTickSnapshot();
+      const vec = (x: number): [number, number, number] => [x, x, x];
+      const state = (x: number) => ({ position: vec(x), rotation: vec(0), scale: vec(1) });
+      const inputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+
+      handleGameEvent('PLAY_TICK_DELTA', {
+        changedEntities: { a: state(1), b: state(2) },
+        changedEntityInfos: { a: { name: 'A', type: 'cube', colliderRadius: 0.5 }, b: { name: 'B', type: 'cube', colliderRadius: 0.5 } },
+        removedEntityIds: [],
+        inputState,
+      }, mockSetGet.set, mockSetGet.get);
+      handleGameEvent('PLAY_TICK', {
+        entities: { c: state(3) },
+        entityInfos: { c: { name: 'C', type: 'sphere', colliderRadius: 1 } },
+        inputState,
+      }, mockSetGet.set, mockSetGet.get);
+      handleGameEvent('PLAY_TICK_DELTA', {
+        changedEntities: {},
+        changedEntityInfos: {},
+        removedEntityIds: [],
+        inputState,
+      }, mockSetGet.set, mockSetGet.get);
+
+      expect(firePlayTick).toHaveBeenCalledTimes(3);
+      expect(vi.mocked(firePlayTick).mock.calls[2][0]).toEqual({
+        entities: { c: state(3) },
+        entityInfos: { c: { name: 'C', type: 'sphere', colliderRadius: 1 } },
+        inputState,
+      });
+    });
+  });
+
+  /**
+   * #10375. The engine's per-frame Play system emits ONLY `PLAY_TICK_DELTA`
+   * (`emit_play_tick_system`, engine/src/bridge/scripts.rs); the full-frame
+   * `PLAY_TICK` emitter has no caller. Until this arm existed every Play frame
+   * fell through the hub as "Unknown engine event" and was dropped: a script's
+   * `onUpdate` never ran in the editor and the replay bus never saw a frame.
+   *
+   * The arm keeps a module-level snapshot and hands `firePlayTick` the same full
+   * `{ entities, entityInfos, inputState }` shape `PLAY_TICK` carries, so
+   * `useScriptRunner` and `playTickBus` did not have to learn about deltas.
+   * The merge mirrors the engine's own cache: the first frame after entering
+   * Play lists every entity (the cache was cleared while not in Play), later
+   * frames list only what changed plus what was removed, and the engine emits
+   * every frame even when nothing changed because scripts need input each frame.
+   */
+  describe('PLAY_TICK_DELTA', () => {
+    const vec = (x: number): [number, number, number] => [x, x, x];
+    const state = (x: number) => ({ position: vec(x), rotation: vec(0), scale: vec(1) });
+    const info = (name: string) => ({ name, type: 'cube', colliderRadius: 0.5 });
+    const input = (pressed: Record<string, boolean> = {}) => ({ pressed, justPressed: {}, justReleased: {}, axes: {} });
+    const delta = (overrides: Partial<{
+      changedEntities: Record<string, unknown>;
+      changedEntityInfos: Record<string, unknown>;
+      removedEntityIds: string[];
+      inputState: unknown;
+    }> = {}) => ({
+      changedEntities: {},
+      changedEntityInfos: {},
+      removedEntityIds: [],
+      inputState: input(),
+      ...overrides,
+    });
+    const send = (payload: Record<string, unknown>) =>
+      handleGameEvent('PLAY_TICK_DELTA', payload, mockSetGet.set, mockSetGet.get);
+    const tickAt = (index: number) =>
+      vi.mocked(firePlayTick).mock.calls[index][0] as {
+        entities: Record<string, unknown>;
+        entityInfos: Record<string, unknown>;
+        inputState: unknown;
+      };
+
+    beforeEach(() => {
+      resetPlayTickSnapshot();
+    });
+
+    it('turns the first delta of a run into a full frame', () => {
+      const result = send(delta({
+        changedEntities: { a: state(1), b: state(2) },
+        changedEntityInfos: { a: info('A'), b: info('B') },
+        inputState: input({ jump: true }),
+      }));
+
+      expect(result).toBe(true);
+      expect(firePlayTick).toHaveBeenCalledTimes(1);
+      expect(firePlayTick).toHaveBeenCalledWith({
+        entities: { a: state(1), b: state(2) },
+        entityInfos: { a: info('A'), b: info('B') },
+        inputState: input({ jump: true }),
+      });
+    });
+
+    it('merges a later delta over the snapshot and keeps the entities it does not mention', () => {
+      send(delta({
+        changedEntities: { a: state(1), b: state(2) },
+        changedEntityInfos: { a: info('A'), b: info('B') },
+      }));
+      send(delta({ changedEntities: { a: state(5) } }));
+
+      expect(tickAt(1)).toEqual({
+        entities: { a: state(5), b: state(2) },
+        entityInfos: { a: info('A'), b: info('B') },
+        inputState: input(),
+      });
+    });
+
+    it('fires a tick for an empty delta, carrying the unchanged snapshot', () => {
+      // A static scene changes nothing from one frame to the next, and the
+      // engine still emits every frame because the script runtime needs input
+      // state each frame. A handler that skipped empty deltas would stall every
+      // script in a scene where nothing moves.
+      send(delta({ changedEntities: { a: state(1) }, changedEntityInfos: { a: info('A') } }));
+      const result = send(delta({ inputState: input({ fire: true }) }));
+
+      expect(result).toBe(true);
+      expect(firePlayTick).toHaveBeenCalledTimes(2);
+      expect(tickAt(1)).toEqual({
+        entities: { a: state(1) },
+        entityInfos: { a: info('A') },
+        inputState: input({ fire: true }),
+      });
+    });
+
+    it('drops the entities named in removedEntityIds from both maps', () => {
+      send(delta({
+        changedEntities: { a: state(1), b: state(2) },
+        changedEntityInfos: { a: info('A'), b: info('B') },
+      }));
+      send(delta({ removedEntityIds: ['b'] }));
+
+      expect(tickAt(1).entities).toEqual({ a: state(1) });
+      expect(tickAt(1).entityInfos).toEqual({ a: info('A') });
+    });
+
+    it('merges changedEntityInfos without touching the transforms', () => {
+      send(delta({
+        changedEntities: { a: state(1), b: state(2) },
+        changedEntityInfos: { a: info('A'), b: info('B') },
+      }));
+      send(delta({ changedEntityInfos: { a: { name: 'Renamed', type: 'cube', colliderRadius: 2 } } }));
+
+      expect(tickAt(1).entities).toEqual({ a: state(1), b: state(2) });
+      expect(tickAt(1).entityInfos).toEqual({
+        a: { name: 'Renamed', type: 'cube', colliderRadius: 2 },
+        b: info('B'),
+      });
+    });
+
+    it('passes each frame its own inputState', () => {
+      send(delta({ inputState: input({ jump: true }) }));
+      send(delta({ inputState: input({ jump: false, left: true }) }));
+
+      expect(tickAt(0).inputState).toEqual(input({ jump: true }));
+      expect(tickAt(1).inputState).toEqual(input({ jump: false, left: true }));
+    });
+
+    it('hands each frame a fresh entities object, so a frame a subscriber kept is not rewritten', () => {
+      // `publishPlayTick` caches the latest frame by reference and the
+      // recorder reads frames after the fact; merging in place would silently
+      // turn every kept frame into the newest one.
+      send(delta({ changedEntities: { a: state(1) }, changedEntityInfos: { a: info('A') } }));
+      const first = tickAt(0);
+      send(delta({ changedEntities: { a: state(9) } }));
+
+      expect(first.entities).toEqual({ a: state(1) });
+      expect(tickAt(1).entities).toEqual({ a: state(9) });
+    });
+
+    it('starts over after resetPlayTickSnapshot, so a previous run cannot leak into the next', () => {
+      send(delta({ changedEntities: { a: state(1) }, changedEntityInfos: { a: info('A') } }));
+      resetPlayTickSnapshot();
+      send(delta({ changedEntities: { b: state(2) }, changedEntityInfos: { b: info('B') } }));
+
+      expect(tickAt(1)).toEqual({
+        entities: { b: state(2) },
+        entityInfos: { b: info('B') },
+        inputState: input(),
+      });
+    });
+
+    /**
+     * A scene file keeps its entity ids, so a crafted one can name an entity
+     * `__proto__`, `constructor` or `prototype`. On a `{}`-based map,
+     * `entities['__proto__'] = state` is the inherited setter: it swaps the
+     * map's prototype instead of adding an entry, and every later lookup
+     * resolves through the hostile state (Devin security review on #10390).
+     * The snapshot maps therefore have no prototype at all, and those three
+     * names are ordinary own keys.
+     */
+    describe('hostile entity ids', () => {
+      const hostile = ['__proto__', 'constructor', 'prototype'] as const;
+      const sortedHostile = [...hostile].sort();
+      // Computed keys, so the fixture itself carries them as OWN properties
+      // (a bare `__proto__:` in a literal would set the fixture's prototype).
+      const withHostileIds = <T>(make: (i: number) => T): Record<string, T> =>
+        Object.fromEntries(hostile.map((id, i) => [id, make(i + 1)]));
+      const ownValue = (map: Record<string, unknown>, key: string): unknown =>
+        Object.getOwnPropertyDescriptor(map, key)?.value;
+
+      it('keeps them as own keys of a prototype-less map across a delta merge', () => {
+        const objectPrototypeBefore = Object.getOwnPropertyNames(Object.prototype).sort();
+        send(delta({
+          changedEntities: withHostileIds(state),
+          changedEntityInfos: withHostileIds((i) => info(`E${i}`)),
+        }));
+        // A second, empty frame exercises the copy path as well.
+        send(delta({}));
+
+        const tick = tickAt(1);
+        expect(Object.keys(tick.entities).sort()).toEqual(sortedHostile);
+        expect(Object.keys(tick.entityInfos).sort()).toEqual(sortedHostile);
+        expect(ownValue(tick.entities, '__proto__')).toEqual(state(1));
+        expect(ownValue(tick.entityInfos, '__proto__')).toEqual(info('E1'));
+        expect(Object.getPrototypeOf(tick.entities)).toBeNull();
+        expect(Object.getPrototypeOf(tick.entityInfos)).toBeNull();
+        expect(Object.getOwnPropertyNames(Object.prototype).sort()).toEqual(objectPrototypeBefore);
+        expect(({} as { position?: unknown }).position).toBeUndefined();
+      });
+
+      it('removes a hostile id like any other', () => {
+        send(delta({
+          changedEntities: withHostileIds(state),
+          changedEntityInfos: withHostileIds((i) => info(`E${i}`)),
+        }));
+        send(delta({ removedEntityIds: ['__proto__'] }));
+
+        expect(Object.keys(tickAt(1).entities).sort()).toEqual(['constructor', 'prototype']);
+        expect(Object.keys(tickAt(1).entityInfos).sort()).toEqual(['constructor', 'prototype']);
+        expect(Object.getPrototypeOf(tickAt(1).entities)).toBeNull();
+      });
+
+      it('survives a PLAY_TICK keyframe that carries them', () => {
+        handleGameEvent(
+          'PLAY_TICK',
+          { entities: withHostileIds(state), entityInfos: withHostileIds((i) => info(`E${i}`)), inputState: input() },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+        send(delta({ changedEntities: withHostileIds(() => state(9)) }));
+
+        const tick = tickAt(1);
+        expect(Object.keys(tick.entities).sort()).toEqual(sortedHostile);
+        expect(ownValue(tick.entities, '__proto__')).toEqual(state(9));
+        expect(Object.getPrototypeOf(tick.entities)).toBeNull();
+      });
     });
   });
 

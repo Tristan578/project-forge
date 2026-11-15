@@ -61,6 +61,11 @@ export function generateEventCallbackFragment({ indent = '' }: EventCallbackFrag
       // reported — false is the right answer for it and for any non-character.
       if (!window.__forgeGrounded) window.__forgeGrounded = {};
       window.__forgeGrounded[payload.entityId] = !!payload.grounded;
+    } else if (type === 'SCENE_LOADED') {
+      // Performance harness only (perfHarnessFragment.ts): load_scene returning
+      // success means "queued"; this event is the engine saying it APPLIED the
+      // scene. Absent harness, nothing is written.
+      if (window.__forgePerfHooks) window.__forgePerfHooks.sceneApplied(payload.name);
     }
   } catch(e) {}
 }`;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { useDialogA11y } from '../useDialogA11y';
+import { SCROLL_REGION_ATTR, useDialogA11y } from '../useDialogA11y';
 
 // Test component that wires up the hook
 function TestDialog({
@@ -113,6 +113,41 @@ describe('useDialogA11y', () => {
 
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(screen.getByTestId('btn-last'));
+  });
+
+  it('skips a keyboard-scroll region for initial focus but keeps it in the Tab trap', () => {
+    function RegionFirstDialog() {
+      const { dialogProps, titleProps } = useDialogA11y({
+        title: 'Region first',
+        isOpen: true,
+        onClose: vi.fn(),
+      });
+      return (
+        <div {...dialogProps} tabIndex={-1}>
+          <h2 {...titleProps}>Region first</h2>
+          <div
+            data-testid="region"
+            tabIndex={0}
+            role="region"
+            aria-labelledby={titleProps.id}
+            {...{ [SCROLL_REGION_ATTR]: '' }}
+          >
+            <button data-testid="inner">Inner</button>
+          </div>
+          <button data-testid="outer">Outer</button>
+        </div>
+      );
+    }
+    vi.useFakeTimers();
+    render(<RegionFirstDialog />);
+    act(() => { vi.runAllTimers(); });
+    vi.useRealTimers();
+    expect(document.activeElement).toBe(screen.getByTestId('inner'));
+
+    // Still part of the trap: Tab from the last control wraps to the region.
+    screen.getByTestId('outer').focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByTestId('region'));
   });
 
   it('focuses dialog container when there are no focusable children', () => {

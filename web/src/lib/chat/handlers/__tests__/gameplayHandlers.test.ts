@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { gameplayHandlers } from '../gameplayHandlers';
+import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
 
 // ---------------------------------------------------------------------------
 // Material preset mocks
@@ -245,6 +246,87 @@ describe('add_game_component', () => {
     const data = result.result as { message: string };
     expect(data.message).toContain('health');
   });
+
+  // PF-1148: the chat turn (and the MCP reply, which carries the same result)
+  // reports what it changed from what was asked, in the author's terms.
+  describe('reporting adjusted values', () => {
+    const route = (n: number) => Array.from({ length: n }, (_, i) => [i, 0, 0]);
+
+    it('returns the structured corrections and says them in the message', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'moving_platform',
+        properties: { speed: 99999, waypoints: route(300) },
+      });
+      expect(result.success).toBe(true);
+      const data = result.result as { message: string; corrections: unknown[] };
+      expect(data.corrections).toEqual([
+        { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+        {
+          component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+          appliedPoints: route(64),
+        },
+      ]);
+      expect(data.message).toBe(
+        'Added moving_platform. 2 values were adjusted to fit the engine’s limits: '
+        + 'Moving Platform speed: you asked for 99999, it was capped at 1000. '
+        + 'Moving Platform waypoints: you gave 300 points; only the first 64 points were kept, the most the engine supports.',
+      );
+    });
+
+    it('hands the store the report captured at the first coercion', async () => {
+      // The handler coerces BEFORE the store does, so a report taken at the store
+      // would see an already-valid component and nothing to report.
+      const { store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'moving_platform',
+        properties: { speed: 99999 },
+      });
+      const [entityId, comp, report] = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(entityId).toBe('ent-1');
+      expect(comp).toEqual({
+        type: 'movingPlatform',
+        movingPlatform: { speed: 1000, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+      expect(report.corrections).toEqual([
+        { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+      ]);
+      expect(report.supplied).toEqual(['speed']);
+    });
+
+    it('reports nothing, and says nothing about adjusting, when every value was used as given', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'moving_platform',
+        properties: { speed: 6, waypoints: route(3), loopMode: 'once' },
+      });
+      const data = result.result as { message: string; corrections: unknown[] };
+      expect(data.corrections).toEqual([]);
+      expect(data.message).toBe('Added moving_platform');
+    });
+
+    it('reports nothing for a component added with no properties at all', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'health',
+      });
+      const data = result.result as { message: string; corrections: unknown[] };
+      expect(data.corrections).toEqual([]);
+      expect(data.message).toBe('Added health');
+    });
+
+    it('uses the singular for one adjusted value', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'spawner',
+        properties: { maxCount: 2.6 },
+      });
+      expect((result.result as { message: string }).message).toBe(
+        'Added spawner. 1 value was adjusted to fit the engine’s limits: '
+        + 'Spawner max count: you asked for 2.6, it was rounded to the whole number 3.',
+      );
+    });
+  });
 });
 
 // ===========================================================================
@@ -261,17 +343,106 @@ describe('update_game_component', () => {
     expect(result.error).toContain('Unknown component type');
   });
 
-  it('calls store.updateGameComponent with built component', async () => {
+  // A six-point route, a non-default loop mode and a non-default pause: every
+  // field an update that names only `speed` must leave alone (#10144).
+  const platformRoute: [number, number, number][] = [[0, 0, 0], [2, 0, 0], [4, 1, 0], [6, 1, 0], [8, 2, 0], [10, 2, 0]];
+  const platform = {
+    type: 'movingPlatform' as const,
+    movingPlatform: { waypoints: platformRoute, speed: 2, loopMode: 'once' as const, pauseDuration: 3 },
+  };
+
+  it('keeps every field the caller did not name (partial update, #10144)', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'moving_platform',
+      properties: { speed: 5 },
+    }, { allGameComponents: { 'ent-1': [platform] } });
+    expect(result.success).toBe(true);
+    expect(store.updateGameComponent).toHaveBeenCalledTimes(1);
+    // The FULL component, so the engine's whole-replace receives the merged
+    // values and not the defaults `expect.objectContaining` would hide.
+    expect((store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      'ent-1',
+      {
+        type: 'movingPlatform',
+        movingPlatform: { waypoints: platformRoute, speed: 5, loopMode: 'once', pauseDuration: 3 },
+      },
+      // The report names what the caller WROTE: the carried fields are not
+      // supplied, or a stale marker on the route would be cleared by a speed edit.
+      expect.objectContaining({ corrections: [], supplied: ['speed'] }),
+    ]);
+  });
+
+  it('merges onto the component of the named type, not a sibling on the same entity', async () => {
+    const health = { type: 'health' as const, health: { maxHp: 250, currentHp: 40, invincibilitySecs: 2, respawnOnDeath: false, respawnPoint: [1, 2, 3] as [number, number, number], despawnOnDeath: false } };
     const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
       entityId: 'ent-1',
       componentType: 'health',
-      properties: { maxHp: 50 },
-    });
+      properties: { maxHp: 300 },
+    }, { allGameComponents: { 'ent-1': [platform, health] } });
     expect(result.success).toBe(true);
-    expect(store.updateGameComponent).toHaveBeenCalledTimes(1);
-    const [entityId, comp] = (store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { type: string }];
-    expect(entityId).toBe('ent-1');
-    expect(comp.type).toBe('health');
+    expect((store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      'ent-1',
+      { type: 'health', health: { ...health.health, maxHp: 300 } },
+      expect.objectContaining({ corrections: [], supplied: ['maxHp'] }),
+    ]);
+  });
+
+  it('reports a missing component instead of success', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'moving_platform',
+      properties: { speed: 5 },
+    }, { allGameComponents: { 'ent-1': [{ type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } }] } });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('has no moving_platform component');
+    expect(result.error).toContain('add_game_component');
+    expect(store.updateGameComponent).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a prototype key as a stored entity', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'constructor',
+      componentType: 'health',
+      properties: { maxHp: 5 },
+    });
+    expect(result.success).toBe(false);
+    expect(store.updateGameComponent).not.toHaveBeenCalled();
+  });
+
+  // A stored projectile for the two report cases: an update is a partial write
+  // onto a component that exists (#10144).
+  const projectile = buildStoreComponent('projectile', {});
+  if (!projectile) throw new Error('fixture: projectile did not build');
+
+  it('reports the values it adjusted and hands the store the same report', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'projectile',
+      properties: { speed: 50_000, damage: 25 },
+    }, { allGameComponents: { 'ent-1': [projectile] } });
+    expect(result.success).toBe(true);
+    const data = result.result as { message: string; corrections: unknown[] };
+    const expected = [
+      { component: 'projectile', field: 'speed', requested: 50_000, applied: 10_000, reason: 'clamped' },
+    ];
+    expect(data.corrections).toEqual(expected);
+    expect(data.message).toBe(
+      'Updated projectile. 1 value was adjusted to fit the engine’s limits: '
+      + 'Projectile speed: you asked for 50000, it was capped at 10000.',
+    );
+    const [, , report] = (store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(report.corrections).toEqual(expected);
+    expect([...report.supplied].sort()).toEqual(['damage', 'speed']);
+  });
+
+  it('reports nothing when the update is in range', async () => {
+    const { result } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'projectile',
+      properties: { speed: 40, damage: 25 },
+    }, { allGameComponents: { 'ent-1': [projectile] } });
+    expect(result.result).toEqual({ message: 'Updated projectile', corrections: [] });
   });
 });
 
@@ -328,6 +499,58 @@ describe('get_game_components', () => {
     const data = result.result as { components: unknown[]; count: number };
     expect(data.components).toHaveLength(2);
     expect(data.count).toBe(2);
+  });
+
+  it('does not expose inherited components, while preserving an own prototype-named entity', async () => {
+    const components = [{ type: 'health' }];
+    const inherited = await invokeHandler(gameplayHandlers, 'get_game_components', {
+      entityId: 'toString',
+    }, { allGameComponents: Object.create({ toString: components }) });
+    expect(inherited.result).toEqual({ success: true, result: { components: [], count: 0 } });
+    expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+    expect(inherited.store.addGameComponent).not.toHaveBeenCalled();
+
+    const own = await invokeHandler(gameplayHandlers, 'get_game_components', {
+      entityId: 'toString',
+    }, { allGameComponents: { toString: components } });
+    expect(own.result).toEqual({ success: true, result: { components, count: 1 } });
+  });
+});
+
+// ===========================================================================
+// save_as_prefab
+// ===========================================================================
+
+describe('save_as_prefab', () => {
+  it('does not serialize inherited scene or audio records, while preserving own records', async () => {
+    const audio = { volume: 0.75 };
+    const lightNode = { components: ['PointLight'] };
+    const inherited = await invokeHandler(gameplayHandlers, 'save_as_prefab', {
+      entityId: 'ghost', name: 'Ghost prefab',
+    }, {
+      sceneGraph: { nodes: Object.create({ ghost: lightNode }), rootIds: [] },
+      entityAudio: Object.create({ ghost: audio }),
+      primaryLight: { lightType: 'point' },
+    });
+    expect(inherited.result.success).toBe(true);
+    expect(mockSavePrefab).toHaveBeenCalledWith('Ghost prefab', 'uncategorized', '', expect.objectContaining({
+      entityType: 'cube', audio: undefined,
+    }));
+    expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+    expect(inherited.store.updateMaterial).not.toHaveBeenCalled();
+
+    mockSavePrefab.mockClear();
+    const own = await invokeHandler(gameplayHandlers, 'save_as_prefab', {
+      entityId: 'ghost', name: 'Own prefab',
+    }, {
+      sceneGraph: { nodes: { ghost: lightNode }, rootIds: [] },
+      entityAudio: { ghost: audio },
+      primaryLight: { lightType: 'point' },
+    });
+    expect(own.result.success).toBe(true);
+    expect(mockSavePrefab).toHaveBeenCalledWith('Own prefab', 'uncategorized', '', expect.objectContaining({
+      entityType: 'point_light', audio,
+    }));
   });
 });
 
@@ -941,8 +1164,16 @@ describe('export_game', () => {
     await invokeHandler(gameplayHandlers, 'export_game', { title: 'TestGame' }, { sceneName: 'G' });
     expect(mockDownloadBlob).toHaveBeenCalledTimes(1);
     const [, filename] = mockDownloadBlob.mock.calls[0] as [Blob, string];
-    expect(filename).toContain('TestGame');
-    expect(filename).toMatch(/\.html$/);
+    expect(filename).toBe('TestGame.html');
+  });
+
+  // exportGame returns a zip archive in zip mode, so the download and the name
+  // reported back to the chat must say .zip, not .html.
+  it('names a zip-mode export .zip, in the download and in the result', async () => {
+    const { result } = await invokeHandler(gameplayHandlers, 'export_game', { title: 'TestGame', mode: 'zip' }, { sceneName: 'G' });
+    const [, filename] = mockDownloadBlob.mock.calls[0] as [Blob, string];
+    expect(filename).toBe('TestGame.zip');
+    expect((result.result as { filename: string }).filename).toBe('TestGame.zip');
   });
 
   it('resets isExporting=false even on export failure', async () => {
@@ -1037,6 +1268,19 @@ describe('save_material_to_library', () => {
     expect(data.id).toBe('custom_red');
     expect(data.name).toBe('Red Material');
     expect(mockSaveCustomMaterial).toHaveBeenCalledWith('Red Material', mat);
+  });
+
+  it('treats a blank entityId from the model as not given and saves the selected entity (#9565)', async () => {
+    const mat = { baseColor: [0, 1, 0, 1] };
+    mockSaveCustomMaterial.mockReturnValue({ id: 'custom_green', name: 'Green' });
+    const { result } = await invokeHandler(
+      gameplayHandlers,
+      'save_material_to_library',
+      { name: 'Green', entityId: '' },
+      { primaryId: 'ent-1', primaryMaterial: mat },
+    );
+    expect(result.success).toBe(true);
+    expect(mockSaveCustomMaterial).toHaveBeenCalledWith('Green', mat);
   });
 });
 

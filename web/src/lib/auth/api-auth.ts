@@ -4,6 +4,8 @@ import { getUserByClerkId, syncUserFromClerk } from './user-service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import type { User } from '../db/schema';
+import { effectiveTier, spendableTokensOf } from '@/lib/ai/tierAccess';
+import type { Tier } from '@/lib/db/schema';
 
 export interface AuthContext {
   user: User;
@@ -43,7 +45,7 @@ export async function authenticateRequest(): Promise<
   } catch {
     // Expired token, malformed JWT, or Clerk transient error.
     // Fail closed with 401 instead of propagating a 500. The distinct
-    // `reason` lets on-call distinguish an auth-provider outage from a
+    // `reason` lets the owner distinguish an auth-provider outage from a
     // routine missing-session 401 in Sentry without leaking detail to
     // the client.
     return unauthorized('AUTH_PROVIDER_ERROR');
@@ -306,6 +308,16 @@ export function assertAdmin(clerkId: string): NextResponse | null {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   return null;
+}
+
+/**
+ * Tier gate for an AI surface (#7715). A `starter` account with spendable
+ * tokens passes as `TRIAL_ACCESS_TIER` (hobbyist); an account with none is
+ * gated exactly as `assertTier(user, ['hobbyist', 'creator', 'pro'])`.
+ */
+export function assertAiAccess(user: User): NextResponse | null {
+  const tier = effectiveTier(user.tier as Tier, spendableTokensOf(user));
+  return assertTier({ ...user, tier }, ['hobbyist', 'creator', 'pro']);
 }
 
 /** Check if user tier allows a specific action */

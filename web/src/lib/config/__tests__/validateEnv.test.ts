@@ -145,6 +145,7 @@ describe('validateEnv', () => {
     it('accepts test Clerk keys in the explicitly identified staging environment', async () => {
       stubAllRequired();
       vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_staging');
       vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_staging');
       vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_staging');
 
@@ -154,6 +155,34 @@ describe('validateEnv', () => {
       expect(result.valid).toBe(true);
       expect(result.missing).not.toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
       expect(result.warnings.every((warning) => !warning.includes('Clerk'))).toBe(true);
+    });
+
+    it.each([
+      ['sk_test_fixture', true], ['rk_test_fixture', true],
+      ['sk_live_fixture', false], ['rk_live_fixture', false], ['invalid_fixture', false],
+    ] as const)('requires a staging test-mode Stripe key: %s', async (key, valid) => {
+      stubAllRequired();
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      vi.stubEnv('STRIPE_SECRET_KEY', key);
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+      expect(result.valid).toBe(valid);
+      expect(result.missing.includes('STRIPE_SECRET_KEY')).toBe(!valid);
+    });
+
+    it('still requires payment and encryption secrets in an explicitly identified preview', async () => {
+      stubAllRequired();
+      vi.stubEnv('VERCEL_ENV', 'preview');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_preview');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_preview');
+      vi.stubEnv('STRIPE_SECRET_KEY', '');
+      vi.stubEnv('STRIPE_WEBHOOK_SECRET', '');
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', '');
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+      expect(result.valid).toBe(false);
+      expect(result.missing).toEqual(['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'ENCRYPTION_MASTER_KEY']);
     });
 
     it('flags pk_test_ Clerk key as invalid in production', async () => {
@@ -236,6 +265,59 @@ describe('validateEnv', () => {
         expect.stringContaining('ENCRYPTION_MASTER_KEY is set but is not a 64-character hex string')
       );
       consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Anthropic WIF all-three-or-none (#8858)', () => {
+    // Names derived from the config module, not restated (lessons-learned #18).
+    async function wifNames(): Promise<string[]> {
+      const { ANTHROPIC_WIF_REQUIRED_ENV_NAMES } = await import('../anthropicWif');
+      expect(ANTHROPIC_WIF_REQUIRED_ENV_NAMES).toHaveLength(3);
+      return [...ANTHROPIC_WIF_REQUIRED_ENV_NAMES];
+    }
+    const isPartialWarning = (w: string) => w.includes('partially configured');
+
+    it('registers every WIF variable, plus the workspace id, as OPTIONAL (never required)', async () => {
+      const names = await wifNames();
+      const { OPTIONAL_VARS, REQUIRED_VARS } = await import('../validateEnv');
+      const optional = OPTIONAL_VARS.map((v) => v.key);
+      for (const name of [...names, 'ANTHROPIC_WIF_WORKSPACE_ID']) {
+        expect(optional).toContain(name);
+        expect(REQUIRED_VARS.map((v) => v.key)).not.toContain(name);
+      }
+    });
+
+    it.each([1, 2])('warns (does not fail boot) when exactly %i of the 3 are set, naming the missing ones', async (setCount) => {
+      stubAllRequired();
+      const names = await wifNames();
+      for (const name of names) vi.stubEnv(name, '');
+      for (const name of names.slice(0, setCount)) vi.stubEnv(name, 'set-for-test');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.valid).toBe(true);
+      expect(result.missing).toEqual([]);
+      const partial = result.warnings.filter(isPartialWarning);
+      expect(partial).toHaveLength(1);
+      for (const name of names.slice(setCount)) expect(partial[0]).toContain(name);
+      expect(partial[0]).toContain('ANTHROPIC_API_KEY');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('partially configured'));
+      warnSpy.mockRestore();
+    });
+
+    it.each([0, 3])('does not emit the partial warning when %i of the 3 are set', async (setCount) => {
+      stubAllRequired();
+      const names = await wifNames();
+      for (const name of names) vi.stubEnv(name, '');
+      for (const name of names.slice(0, setCount)) vi.stubEnv(name, 'set-for-test');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.warnings.filter(isPartialWarning)).toEqual([]);
     });
   });
 

@@ -22,6 +22,7 @@ import { useEffect, useRef } from 'react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { getStatusEndpoint } from '@/lib/generation/statusEndpoints';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 import { analyzeModelQuality } from '@/lib/generate/modelQuality';
@@ -30,19 +31,64 @@ import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
 import { showPersistentError, showSuccess } from '@/lib/toast';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
+import { replaceDataUrlType, sniffImageMimeType } from '@/lib/engine/textureFormatGuard';
+import { defaultTextureSlot } from '@/lib/engine/textureSlot';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
 const MAX_POLL_DURATION_MS = 5 * 60 * 1000;
+/**
+ * Fallback source length for an async-generated music clip when neither the
+ * status route nor the post-process metadata reports one. Matches the music
+ * dialog's default request duration so a length-less job still yields a
+ * sensibly sized clip rather than a zero-length one.
+ */
+const DEFAULT_MUSIC_CLIP_SECONDS = 30;
 
 interface StatusResponse {
   jobId: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
-  resultUrl?: string;
-  maps?: Record<string, string>;
-  error?: string;
-  durationSeconds?: number;
+  resultUrl?: string | undefined;
+  maps?: Record<string, string> | undefined;
+  error?: string | undefined;
+  durationSeconds?: number | undefined;
+}
+
+/** A machine code such as `TIER_REQUIRED` or `SERVICE_DEGRADED`: never user-facing text. */
+const MACHINE_CODE = /^[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
+
+/**
+ * The user-facing sentence in a non-OK status-route body, or `null` when the
+ * body carries none. Status routes put two shapes on the wire: most write the
+ * sentence in `error` (`{ error: 'Could not read … Please try again.' }`,
+ * the 402 key errors, the 429 rate limit), while the tier gate and the auth
+ * layer put a CODE in `error` and the sentence in `message`
+ * (`{ error: 'TIER_REQUIRED', message: 'This feature requires … plan' }`,
+ * `SERVICE_DEGRADED`, `ACCOUNT_BANNED`). So `message` wins when it is a
+ * non-empty string, `error` is the fallback, and a bare code is never
+ * returned. Without the last rule, polling that gives up would leave a
+ * persistent toast reading "TIER_REQUIRED".
+ */
+function statusErrorText(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const { message, error } = body as { message?: unknown; error?: unknown };
+  for (const candidate of [message, error]) {
+    if (typeof candidate === 'string' && candidate.trim() !== '' && !MACHINE_CODE.test(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** The subset of GET /api/jobs/[id] the durable-completion path reads. */
+interface DurableJobRow {
+  status: string;
+  resultUrl: string | null;
+  resultMeta: unknown;
+  errorMessage: string | null;
 }
 
 export function useGenerationPolling() {
@@ -52,6 +98,12 @@ export function useGenerationPolling() {
   const startedAtRef = useRef<Record<string, number>>({});
   const durablePollsRef = useRef<Record<string, () => void>>({});
   const inFlightPollsRef = useRef<Record<string, true>>({});
+  /**
+   * Jobs whose hydrated-terminal sync (#8892) is in flight. `handleCompletion`
+   * mutates `jobs` mid-flight, which re-runs the `[jobs]` effect that started
+   * the sync; this is what stops it starting a second one for the same job.
+   */
+  const syncingRef = useRef<Set<string>>(new Set());
   /**
    * The most recent message a status route sent with a non-OK response.
    *
@@ -63,6 +115,10 @@ export function useGenerationPolling() {
    * Keeping the last message here is what actually puts the route's sentence in
    * front of the person. Polling still CONTINUES on a non-OK read — a single
    * 500 is usually transient — so this only surfaces once the job gives up.
+   * The one exception is a 404, which is the status route's ownership refusal
+   * (#10262) and is handled as terminal at the read site, never through here.
+   * A 503 from a FAILED ownership lookup is not an exception: it is transient
+   * like a 500 and keeps polling through here.
    */
   const lastStatusErrorRef = useRef<Record<string, string>>({});
 
@@ -132,6 +188,28 @@ export function useGenerationPolling() {
       if (inFlightPollsRef.current[id]) return;
       inFlightPollsRef.current[id] = true;
       try {
+      // Synchronous providers (the DALL-E sprite path, #9734) return the
+      // finished image in the POST response body, which the dialog stores as
+      // the job's `resultUrl`. Import it directly and skip the status
+      // round-trip entirely: a base64 `data:` URL (post background-removal, up
+      // to several MB) must never be threaded through the `?jobId=` query
+      // string, where `+` decodes to a space and the request-line size limit is
+      // exceeded. A normal pollable job carries no `resultUrl` until it
+      // completes, so its presence on a still-`pending` job is the marker for
+      // an inline synchronous result.
+      const inlineJob = useGenerationStore.getState().jobs[id];
+      if (inlineJob && inlineJob.status === 'pending' && inlineJob.resultUrl) {
+        updateJob(id, { status: 'downloading', progress: 100 });
+        await handleCompletion(id, type, {
+          jobId,
+          status: 'completed',
+          progress: 100,
+          resultUrl: inlineJob.resultUrl,
+        });
+        stopPolling(id);
+        return;
+      }
+
       const startedAt = startedAtRef.current[id] ?? Date.now();
       startedAtRef.current[id] = startedAt;
       // Keep the existing five-minute overall cap independent of focus events
@@ -157,18 +235,68 @@ export function useGenerationPolling() {
         return;
       }
 
+      // DURABLE COMPLETION, DB FIRST (#8892). When the QStash callback path is
+      // configured, the job's own row is finalized server-side with no tab
+      // open, so it is the authoritative source and the provider status route
+      // is only the fallback. A transient failure here never blocks: the poll
+      // falls through to the provider read below exactly as before.
+      if (durable && useGenerationStore.getState().durableCompletionEnabled) {
+        const durableJob = useGenerationStore.getState().jobs[id];
+        if (durableJob?.dbId) {
+          try {
+            const dbRes = await fetch(`/api/jobs/${encodeURIComponent(durableJob.dbId)}`);
+            if (dbRes.ok) {
+              const dbJob = (await dbRes.json()) as DurableJobRow;
+              if (await settleFromDurableRow(id, type, jobId, dbJob)) {
+                stopPolling(id);
+                return;
+              }
+            }
+          } catch (err) {
+            console.error('DB job status check error:', err);
+          }
+        }
+      }
+
       try {
         const endpoint = getStatusEndpoint(type);
-        const response = await fetch(`${endpoint}?jobId=${jobId}`);
+        // Encode the jobId: the status route reads it via
+        // `searchParams.get('jobId')`, which decodes `application/x-www-form-
+        // urlencoded`, so a raw `+`/`&`/`#`/space in a provider id would be
+        // corrupted or truncated. Provider prediction ids are url-safe today,
+        // but encoding is the correct contract and defends any id shape (#9734).
+        const response = await fetch(`${endpoint}?jobId=${encodeURIComponent(jobId)}`);
 
         if (!response.ok) {
           // Read the body BEFORE throwing. The route's message is written for
           // the user and is the only place that says what actually went wrong.
           const body: unknown = await response.json().catch(() => null);
-          const message =
-            body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
-              ? (body as { error: string }).error
-              : null;
+          const message = statusErrorText(body);
+
+          // A 404 is TERMINAL, not transient (#10262). The only 404 a status
+          // route sends is its ownership refusal after a lookup that
+          // SUCCEEDED: the polled job id is not bound to this account, and
+          // nothing about polling again changes that. Two legitimate owners
+          // hit it too — a job in flight when the ownership table shipped (no
+          // binding row) and a job whose bind write failed — and before this
+          // branch both were indistinguishable from a 500, so the poller
+          // retried every 3 s for five minutes before refunding. Stop now,
+          // refund now, and show the route's sentence. The fallback, for a
+          // body with no readable sentence, is the SAME constant the routes
+          // send, so both paths read alike.
+          //
+          // A lookup that FAILED is deliberately not a 404: the route answers
+          // 503, which falls through to the transient path below and keeps
+          // polling, so a DB blip never refunds a job the provider is still
+          // finishing.
+          if (response.status === 404) {
+            await triggerRefund(id);
+            failJob(id, message ?? JOB_NOT_FOUND_MESSAGE);
+            delete lastStatusErrorRef.current[id];
+            stopPolling(id);
+            return;
+          }
+
           if (message) lastStatusErrorRef.current[id] = message;
           throw new Error(`Status check failed: ${response.status}`);
         }
@@ -189,6 +317,7 @@ export function useGenerationPolling() {
           // Same rule as the timeout fallback above: the provider reported a
           // terminal failure with no message of its own, so the bare sentence
           // gets the next step appended.
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank job error is unset; falls back to a generated retry message
           failJob(id, data.error || withRetryGuidance('Generation failed'));
 
           // Stop polling
@@ -218,6 +347,95 @@ export function useGenerationPolling() {
 
     // Immediate first poll
     void poll();
+  }
+
+  /**
+   * Apply a DB row the durable callback finalized. Returns true when the row was
+   * terminal and has been reflected (imported or refunded + failed), false when
+   * it is still in flight and the caller should keep polling.
+   *
+   * `refundTokens` is idempotent on usageId (the webhook's own
+   * finalizeFailedAndRefund has usually run already), so the client-side refund
+   * here cannot double-refund; what it adds is the balance refresh and the
+   * toast, which only a live client can do.
+   */
+  async function settleFromDurableRow(
+    id: string,
+    type: string,
+    jobId: string,
+    dbJob: DurableJobRow,
+  ): Promise<boolean> {
+    if (dbJob.status === 'completed') {
+      // A hydrated row is already 'downloading' (hydrateFromServer). Writing it
+      // again would change nothing on screen and would PATCH the finalized row
+      // back to a live status: if the tab closed mid-import, the next load
+      // would hydrate a 'downloading' row that nothing ever settles.
+      if (useGenerationStore.getState().jobs[id]?.status !== 'downloading') {
+        updateJob(id, { status: 'downloading', progress: 100 });
+      }
+      // For a texture, resultMeta IS the { albedo: url, ... } maps object the
+      // completion branch iterates (pollProviderStatus stores status.maps there).
+      const maps =
+        type === 'texture' && dbJob.resultMeta && typeof dbJob.resultMeta === 'object'
+          ? (dbJob.resultMeta as Record<string, string>)
+          : undefined;
+      await handleCompletion(id, type, {
+        jobId,
+        status: 'completed',
+        progress: 100,
+        resultUrl: dbJob.resultUrl ?? undefined,
+        maps,
+      });
+      return true;
+    }
+    if (dbJob.status === 'failed') {
+      await triggerRefund(id);
+      // Same rule as the provider-failure branch: the message a server route
+      // wrote is passed through; the bare fallback gets the next step appended.
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank job error is unset; falls back to a generated retry message
+      failJob(id, dbJob.errorMessage || withRetryGuidance('Generation failed'));
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * The row read for a hydrated completed job failed, so its import has not
+   * started. Put it back to the terminal status the server reported rather
+   * than leave a 'downloading' spinner that nothing is working on. LOCAL ONLY:
+   * `updateJob` would PATCH `completed` + `imported: true`, marking the row
+   * reflected without importing it and dropping it from the next load's list.
+   * `needsCompletionSync` stays set, so the next sync attempt retries.
+   */
+  function restoreHydratedTerminal(id: string) {
+    const current = useGenerationStore.getState().jobs[id];
+    if (current?.status !== 'downloading' || current.needsCompletionSync !== true) return;
+    useGenerationStore.setState((state) => {
+      const job = state.jobs[id];
+      if (!job || job.status !== 'downloading' || job.needsCompletionSync !== true) return state;
+      return { jobs: { ...state.jobs, [id]: { ...job, status: 'completed' } } };
+    });
+  }
+
+  /**
+   * One confirmation for a job the durable callback finished while no tab was
+   * open (#8892). Without it the job's only trace is a spinner that appears on
+   * load and quietly disappears. Called only from the completion-sync effect,
+   * which runs once per hydrated job, so a job completed live in this session
+   * never gets it; a failed row gets the failure toast `failJob` already shows.
+   */
+  function announceFinishedWhileAway(id: string) {
+    const job = useGenerationStore.getState().jobs[id];
+    if (job?.status !== 'completed') return;
+    const label = ESTIMATED_TIMES[job.type]?.label ?? 'generation';
+    // Say "added to your project" only when the import actually placed it:
+    // with autoPlace off (or no target entity) the result is recorded, not used.
+    const placed = job.metadata?.autoPlaced === true || job.type === 'skybox';
+    showSuccess(
+      placed
+        ? `Your ${label} finished while you were away and was added to your project.`
+        : `Your ${label} finished while you were away.`,
+    );
   }
 
   async function handleCompletion(id: string, type: string, data: StatusResponse) {
@@ -273,13 +491,13 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
 
-        if (shouldPlace) {
-          // Pass the job's targetEntityId so a placeholder primitive (spawned by the
-          // orchestrator before generation) is replaced in place rather than leaving
-          // the model as a sibling root. Textures/audio already consume this id;
-          // models were the only generated type that dropped it.
-          useEditorStore.getState().importGltf(base64, assetName, job.targetEntityId);
-        }
+        // Pass the job's targetEntityId so a placeholder primitive (spawned by the
+        // orchestrator before generation) is replaced in place rather than leaving
+        // the model as a sibling root. Textures/audio already consume this id;
+        // models were the only generated type that dropped it.
+        const placement = shouldPlace
+          ? placementOf(useEditorStore.getState().importGltf(base64, assetName, job.targetEntityId))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -287,7 +505,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: shouldPlace,
+            ...placement,
             targetEntityId: job.targetEntityId,
             quality: {
               fileSize: qualityMetrics.fileSize,
@@ -326,15 +544,43 @@ export function useGenerationPolling() {
 
         // If a specific materialSlot was requested, only apply that map
         const targetSlot = job.materialSlot;
+        // A 2D sprite has one image and no material (#10399): the colour map
+        // becomes the sprite's image, and the material-only maps (normal,
+        // metallic-roughness, emissive, occlusion) have nowhere to go. They
+        // are skipped and named in the record, instead of each one reaching
+        // the engine and coming back as "the entity has no material".
+        const spriteTarget = defaultTextureSlot(entityId, useEditorStore.getState().sprites) === 'sprite';
+        const skippedMaps: string[] = [];
+        let appliedMaps = 0;
+        // One refused map means the material was not fully placed; every
+        // refusal is kept, named by its map, so the record says which.
+        const placementErrors: string[] = [];
         for (const [mapType, url] of Object.entries(data.maps)) {
-          const slot = slotMap[mapType];
-          if (!slot) continue;
+          const materialSlot = slotMap[mapType];
+          if (!materialSlot) continue;
           // When materialSlot is specified, only apply the matching slot
-          if (targetSlot && slot !== targetSlot) continue;
+          if (targetSlot && materialSlot !== targetSlot) continue;
+          if (spriteTarget && materialSlot !== 'base_color') {
+            skippedMaps.push(mapType);
+            continue;
+          }
+          const slot = spriteTarget ? 'sprite' : materialSlot;
+          appliedMaps += 1;
 
           const blob = await downloadBinary(url);
-          const base64 = await blobToBase64(blob);
-          useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot);
+          const base64 = await blobToTextureDataUrl(blob);
+          const placement = placementOf(
+            useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot),
+          );
+          if (placement.placementError !== undefined) {
+            placementErrors.push(`${mapType}: ${placement.placementError}`);
+          }
+        }
+        // On a sprite, a job whose every map was material-only placed nothing.
+        if (spriteTarget && appliedMaps === 0) {
+          placementErrors.push(
+            `a 2D sprite takes only the colour map, so ${skippedMaps.length > 0 ? skippedMaps.join(', ') : 'no map'} could not be applied`,
+          );
         }
 
         updateJob(id, {
@@ -342,7 +588,9 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: true,
+            autoPlaced: placementErrors.length === 0,
+            ...(placementErrors.length > 0 ? { placementError: placementErrors.join('; ') } : {}),
+            ...(skippedMaps.length > 0 ? { skippedMaps } : {}),
             targetEntityId: entityId,
             materialSlot: targetSlot,
           },
@@ -371,6 +619,25 @@ export function useGenerationPolling() {
         const assetName = (ppResult.metadata.assetName as string) ?? `Music_${job.prompt.slice(0, 20)}`;
         const store = useEditorStore.getState();
         store.importAudio(base64, assetName);
+
+        // Async/jobId path parity with the sync branch (#9854): a track that
+        // arrives via job polling (the durable QStash path, or any non-instant
+        // ElevenLabs response) must also land as an editable clip in the Music
+        // Arrangement editor, not only attach to an entity. Duration comes from
+        // the status route (`data.durationSeconds`) or the post-process
+        // metadata; `Number.isFinite`, not `||`, so a 0 cannot mask a real
+        // value — and a missing duration falls back to the arrangement default.
+        const clipDurationSeconds =
+          typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds) && data.durationSeconds > 0
+            ? data.durationSeconds
+            : typeof ppResult.metadata.durationSeconds === 'number' && Number.isFinite(ppResult.metadata.durationSeconds) && ppResult.metadata.durationSeconds > 0
+              ? ppResult.metadata.durationSeconds
+              : DEFAULT_MUSIC_CLIP_SECONDS;
+        useMusicArrangementStore.getState().addGeneratedClip({
+          sourceUrl: assetName,
+          durationSeconds: clipDurationSeconds,
+          name: assetName,
+        });
 
         // Attach looping music audio to target entity
         // Use targetEntityId (from autoPlace) or fall back to legacy entityId
@@ -405,15 +672,16 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? 'base_color';
+        // With no slot named, a 2D sprite target gets its own slot (#10399).
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId, useEditorStore.getState().sprites);
 
-        if (entityId && job.autoPlace !== false) {
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
-        }
+        const placement = entityId && job.autoPlace !== false
+          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -421,7 +689,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: !!entityId && job.autoPlace !== false,
+            ...placement,
             targetEntityId: entityId,
             materialSlot: slot,
           },
@@ -431,15 +699,24 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `SpriteSheet_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
         const shouldPlace = !!entityId && job.autoPlace !== false;
 
-        if (shouldPlace) {
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
-        }
+        // A sheet aimed at a 2D sprite goes to the sprite's own slot (#10399).
+        // It is still not cut into frames: the sheet names its texture by
+        // `assetName`, while the engine registers the texture under a fresh id
+        // that the atlas builder never sees (#10408).
+        const placement = shouldPlace
+          ? placementOf(useEditorStore.getState().loadTexture(
+              base64,
+              assetName,
+              entityId,
+              defaultTextureSlot(entityId, useEditorStore.getState().sprites),
+            ))
+          : { autoPlaced: false };
 
         // Slice the sprite sheet into individual frames
         const imgDims = await getImageDimensions(blob);
@@ -461,7 +738,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: shouldPlace,
+            ...placement,
             targetEntityId: entityId,
             spriteSheet: {
               columns: grid.columns,
@@ -477,16 +754,17 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Sprite_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? 'base_color';
+        // With no slot named, a 2D sprite target gets its own slot (#10399).
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId, useEditorStore.getState().sprites);
 
-        if (entityId && job.autoPlace !== false) {
-          // Apply as texture on the target entity
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
-        }
+        // Apply as texture on the target entity
+        const placement = entityId && job.autoPlace !== false
+          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -494,7 +772,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: !!entityId && job.autoPlace !== false,
+            ...placement,
             targetEntityId: entityId,
             materialSlot: slot,
           },
@@ -657,6 +935,22 @@ export function useGenerationPolling() {
     return response.blob();
   }
 
+  /**
+   * What handing a generated asset to the editor came to.
+   *
+   * A refusal - the engine, or the format gate in front of it, turning the
+   * file away, reachable since #10396 - is recorded against the job as NOT
+   * placed, with the reason, rather than reported as `autoPlaced: true`. The
+   * generation itself succeeded, so the job still completes and nothing is
+   * refunded; the slice has already shown the person the refusal.
+   */
+  function placementOf(
+    outcome: { success: boolean; error?: string } | void,
+  ): { autoPlaced: boolean; placementError?: string } {
+    if (!outcome || outcome.success !== false) return { autoPlaced: true };
+    return { autoPlaced: false, placementError: outcome.error ?? 'the engine rejected it' };
+  }
+
   async function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -667,6 +961,28 @@ export function useGenerationPolling() {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  }
+
+  /**
+   * A generated image as the data URL `loadTexture` reads its format from.
+   *
+   * The FileReader writes the blob's type into the header, and the blob's
+   * type is whatever Content-Type the result was served with. Storage that
+   * serves an image with no type, as `application/octet-stream`, as
+   * `binary/octet-stream`, or under any other wrong type yields a header the
+   * format gate refuses or the engine decodes with the wrong decoder - so a
+   * correctly generated image was recorded as not placed, or as placed and
+   * never shown (#10396). The image's own first bytes decide: a PNG or JPEG
+   * signature is declared on the header whatever the storage said, because
+   * the engine picks its decoder from that header. A blob with neither
+   * signature keeps the header it came with, and the gate judges it as
+   * before (a WebP or a KTX2 is still refused by name).
+   */
+  async function blobToTextureDataUrl(blob: Blob): Promise<string> {
+    const dataUrl = await blobToBase64(blob);
+    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    const sniffed = sniffImageMimeType(head);
+    return sniffed === null ? dataUrl : replaceDataUrlType(dataUrl, sniffed);
   }
 
   async function getImageDimensions(blob: Blob): Promise<{ width: number; height: number }> {
@@ -695,6 +1011,53 @@ export function useGenerationPolling() {
   // Moving the effect below the declarations is behaviour-identical: both of the
   // other effects have `[]` deps and register cleanup only, so the mount order
   // this changes is not observable.
+  // Hydrated-terminal jobs (#8892): the durable callback finished them while no
+  // tab was open, the list route returned them because imported = 0, and
+  // hydrateFromServer marked them. They are NOT active, so the polling effect
+  // below never sees them; this is the only path that runs their import or
+  // refund. The row is re-fetched rather than trusted from hydration so both
+  // this path and the poll fast path read one source, GET /api/jobs/[id].
+  useEffect(() => {
+    for (const job of Object.values(jobs)) {
+      if (job.needsCompletionSync !== true || !job.dbId) continue;
+      if (syncingRef.current.has(job.id)) continue;
+      syncingRef.current.add(job.id);
+      const { id, dbId, type, jobId } = job;
+      void (async () => {
+        try {
+          const res = await fetch(`/api/jobs/${encodeURIComponent(dbId)}`);
+          if (!res.ok) {
+            // Leave needsCompletionSync set so a later load retries.
+            console.error(`Durable completion sync failed: ${res.status}`);
+            restoreHydratedTerminal(id);
+            return;
+          }
+          const dbJob = (await res.json()) as DurableJobRow;
+          const settled = await settleFromDurableRow(id, type, jobId, dbJob);
+          updateJob(id, { needsCompletionSync: false });
+          if (settled) {
+            announceFinishedWhileAway(id);
+            // Mark the row reflected so the list route stops returning it.
+            // The failed branch's own status sync carries no `imported` (the
+            // store never sends false, and the route ignores false), so this
+            // and that unordered PATCH cannot race the row back to 0.
+            fetch(`/api/jobs/${encodeURIComponent(dbId)}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imported: true }),
+            }).catch((err) => console.error('Failed to mark job imported:', err));
+          }
+        } catch (err) {
+          console.error('Durable completion sync error:', err);
+          restoreHydratedTerminal(id);
+        } finally {
+          syncingRef.current.delete(id);
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
+
   useEffect(() => {
     const activeJobs = Object.values(jobs).filter(
       (j) => j.status === 'pending' || j.status === 'processing'

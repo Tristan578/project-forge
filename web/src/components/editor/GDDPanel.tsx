@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { FileText, ChevronDown, ChevronRight, Download, Loader2, Wand2 } from 'lucide-react';
+import { InlineAlert } from '@spawnforge/ui';
 import {
   generateGDD,
   gddToMarkdown,
@@ -143,6 +144,10 @@ const SCOPE_OPTIONS: Array<{ value: string; label: string }> = [
 // ---------------------------------------------------------------------------
 
 export function GDDPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [genre, setGenre] = useState('');
   const [scope, setScope] = useState('');
@@ -238,11 +243,11 @@ export function GDDPanel() {
         {/* Options */}
         <div className="flex gap-2">
           <div className="flex-1">
-            <label htmlFor="gdd-genre" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400 mb-1">
+            <label htmlFor={fieldId('gdd-genre')} className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400 mb-1">
               Genre
             </label>
             <select
-              id="gdd-genre"
+              id={fieldId('gdd-genre')}
               value={genre}
               onChange={(e) => setGenre(e.target.value)}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-amber-600 focus:outline-none"
@@ -255,11 +260,11 @@ export function GDDPanel() {
             </select>
           </div>
           <div className="flex-1">
-            <label htmlFor="gdd-scope" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400 mb-1">
+            <label htmlFor={fieldId('gdd-scope')} className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400 mb-1">
               Scope
             </label>
             <select
-              id="gdd-scope"
+              id={fieldId('gdd-scope')}
               value={scope}
               onChange={(e) => setScope(e.target.value)}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-amber-600 focus:outline-none"
@@ -295,11 +300,7 @@ export function GDDPanel() {
         </p>
 
         {/* Error */}
-        {error && (
-          <div role="alert" className="rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
-            {error}
-          </div>
-        )}
+        {error && <InlineAlert variant="error">{error}</InlineAlert>}
 
         {/* Result */}
         {gdd && !isGenerating && (

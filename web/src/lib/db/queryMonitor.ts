@@ -30,7 +30,7 @@ export interface QueryRecord {
   /** Whether the query exceeded SLOW_QUERY_THRESHOLD_MS */
   isSlow: boolean;
   /** Optional label — set by instrumented wrappers for human-readable context */
-  label?: string;
+  label?: string | undefined;
 }
 
 export interface DbMetrics {

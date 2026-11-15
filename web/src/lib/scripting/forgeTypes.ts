@@ -437,7 +437,7 @@ declare namespace forge {
   namespace camera {
     /** Set the camera mode */
     function setMode(mode: 'thirdPersonFollow' | 'firstPerson' | 'sideScroller' | 'topDown' | 'fixed' | 'orbital'): void;
-    /** Set camera follow target by entity ID */
+    /** Set the camera's target (the entity it tracks) by entity ID */
     function setTarget(entityId: string): void;
     /** Trigger camera shake */
     function shake(intensity: number, duration: number): void;

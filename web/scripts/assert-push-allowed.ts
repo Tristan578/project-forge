@@ -20,6 +20,8 @@
  * tool owns the schema. The journal answers exactly the right question.
  */
 
+import { pathToFileURL } from 'node:url';
+
 /** Flag that lets an operator push over a migrate-managed database anyway. */
 export const PUSH_CONFIRM_FLAG = '--confirm=PUSH_OVER_MIGRATIONS';
 
@@ -55,6 +57,7 @@ export function assertPushAllowed(state: PushGuardState): void {
 
 async function main(): Promise<void> {
   const { neon } = await import('@neondatabase/serverless');
+  const { applyE2eNeonEndpointOverride } = await import('../src/lib/db/e2eNeonEndpoint.ts');
 
   if (!process.env.DATABASE_URL) {
     throw new Error(
@@ -62,6 +65,9 @@ async function main(): Promise<void> {
     );
   }
 
+  // Reaches a per-run CI Postgres through its local Neon-protocol proxy; a
+  // no-op everywhere else (#10161).
+  applyE2eNeonEndpointOverride();
   const sql = neon(process.env.DATABASE_URL);
   const journalTable = (await sql.query(
     "SELECT to_regclass('drizzle.__drizzle_migrations')::text AS table_name",
@@ -81,12 +87,15 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ pushGuard: 'passed', journalRowCount }));
 }
 
-if (process.argv[1]) {
-  const { pathToFileURL } = await import('node:url');
-  if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-    main().catch((error: unknown) => {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exitCode = 1;
-    });
-  }
+// A STATIC import and a synchronous guard, deliberately. `npm run db:push`
+// runs this file through tsx, and `web/package.json` has no `"type":
+// "module"`, so tsx compiles it as CommonJS — where esbuild refuses a
+// top-level `await`. The previous `await import('node:url')` here made the
+// guard die at transform time, before `drizzle-kit push` could ever run,
+// while vitest (ESM) imported the module without complaint (#10190).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
 }

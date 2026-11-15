@@ -296,6 +296,22 @@ pub fn emit_asset_imported(asset_id: &str, name: &str, kind: &str, file_size: u6
     });
 }
 
+/// Emit a texture the engine accepted but could not apply (#10399).
+///
+/// `load_texture` answers when the request is queued; `apply_texture_load`
+/// decodes the image and assigns it a frame later, so a failure there - data
+/// that is not base64, an image that does not decode, a target with no sprite
+/// or material, a slot that does not exist - reaches the editor only through
+/// this event, which it shows naming the file.
+pub fn emit_texture_load_error(name: &str, entity_id: &str, slot: &str, reason: &str) {
+    emit_event("TEXTURE_LOAD_ERROR", &serde_json::json!({
+        "name": name,
+        "entityId": entity_id,
+        "slot": slot,
+        "reason": reason,
+    }));
+}
+
 /// Emit an asset deleted event.
 pub fn emit_asset_deleted(asset_id: &str) {
     #[derive(Serialize)]
@@ -1055,6 +1071,23 @@ pub fn emit_reverb_zone_removed(entity_id: &str) {
     emit_event("REVERB_ZONE_REMOVED", &ReverbZoneRemovedPayload { entity_id });
 }
 
+/// Emit the project's dimension after `apply_project_type_changes` processed a
+/// request (#10227). Flat payload, `{ projectType: "2d" | "3d" }` — the same
+/// spelling as the `set_project_type` command and the web store, so
+/// `spriteSlice.projectType` can take it verbatim.
+pub fn emit_project_type_changed(project_type: crate::core::project_type::ProjectType) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ProjectTypePayload<'a> {
+        project_type: &'a str,
+    }
+
+    emit_event(
+        "PROJECT_TYPE_CHANGED",
+        &ProjectTypePayload { project_type: project_type.wire_name() },
+    );
+}
+
 /// Emit a camera 2D state changed event.
 pub fn emit_camera_2d_changed(data: &crate::core::camera_2d::Camera2dData) {
     #[derive(Serialize)]
@@ -1135,4 +1168,11 @@ pub fn emit_performance_stats(
 /// Emit a custom WGSL source changed event.
 pub fn emit_custom_wgsl_source_changed(source: &crate::core::custom_wgsl::CustomWgslSource) {
     emit_event("CUSTOM_WGSL_SOURCE_CHANGED", source);
+}
+
+/// Emit a render-error report (#8887). The payload is
+/// `core::render_errors::RenderErrorReport`, serialized camelCase:
+/// `{ errorClass, outcome, detail, occurrence }`.
+pub fn emit_render_error(report: &crate::core::render_errors::RenderErrorReport) {
+    emit_event("RENDER_ERROR", report);
 }

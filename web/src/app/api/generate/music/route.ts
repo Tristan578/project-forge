@@ -24,6 +24,7 @@ const POST_impl = createGenerationHandler<
   { audioBase64: string; durationSeconds: number; provider: string }
 >({
   route: '/api/generate/music',
+  panel: 'generate-music',
   // Synchronous audio must leave time for a refund before the host stops the
   // request, even when the optional generation-agent flag is disabled.
   maxDurationSeconds: 180,

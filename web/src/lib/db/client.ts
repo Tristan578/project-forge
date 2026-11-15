@@ -16,6 +16,7 @@ import { withRetry, RetryOptions } from './withRetry';
 import { dbCircuitBreaker } from './circuitBreaker';
 import { checkDbRateLimit } from './dbRateLimit';
 import { setCurrentRoute } from './queryMonitor';
+import { applyE2eNeonEndpointOverride } from './e2eNeonEndpoint';
 
 // PF-525: Transaction support with neon-http driver.
 //
@@ -44,6 +45,9 @@ function createDb() {
   if (!databaseUrl) {
     throw new Error('DATABASE_URL environment variable is not set');
   }
+  // E2E-only: route the HTTP driver at a local Neon-protocol proxy. A no-op
+  // unless e2eHooksEnabled() AND E2E_NEON_HTTP_ENDPOINT are both set (#10161).
+  applyE2eNeonEndpointOverride();
   const sqlClient = neon(databaseUrl);
   return { db: drizzle(sqlClient, { schema }), sql: sqlClient };
 }
@@ -52,9 +56,7 @@ function createDb() {
 let _instance: ReturnType<typeof createDb> | null = null;
 
 function getInstance() {
-  if (!_instance) {
-    _instance = createDb();
-  }
+  _instance ??= createDb();
   return _instance;
 }
 

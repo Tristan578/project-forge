@@ -40,9 +40,18 @@ set -uo pipefail
 
 # GHSA ids waived for DEPENDABOT alerts only. Mirrors the npm-audit gate's
 # allowlist (scripts/check-npm-audit.sh — same advisories, same rationale):
-# transitive, dev-only, un-relockable via drizzle-kit's bundled old esbuild,
-# non-exploitable in this repo. Keep the two lists in lockstep; every entry is
-# a hole in the gate and needs a justification + removal path. Tracking: #8617.
+# transitive, dev-only, un-relockable, non-exploitable in this repo. Keep the
+# two lists in lockstep: adding a waiver there means adding its id here in the
+# same commit. Every entry is a hole in the gate and needs a justification +
+# removal path. Origin: #8617.
+#
+# Known drift: the two esbuild ids below were pruned from the
+# npm-audit list in PF-1002/#9007 and are still listed here (the suite uses
+# GHSA-gv7w-rqvm-qjhr as its allowlisted fixture). Pruning them is its own change.
+#
+# Keep the declaration's `(` and `)` at column 0 on their own lines, and its
+# elements plain double-quoted ids: check-npm-audit.test.sh reads this array
+# for its lockstep pin and refuses (fails) on any other shape.
 ALLOWED_GHSA=(
   # esbuild: Deno-module binary integrity RCE via NPM_CONFIG_REGISTRY.
   # Dev/install-time only; we never use esbuild's Deno install path.

@@ -6,7 +6,7 @@ describe('SliderInput', () => {
   it('renders label and value display', () => {
     render(<SliderInput label="Volume" value={50} onChange={() => {}} />);
     expect(screen.getByText('Volume')).not.toBeNull();
-    expect(screen.getByText('50')).not.toBeNull();
+    expect(screen.getByText('50')).toHaveStyle({ color: 'var(--sf-text-secondary)' });
   });
 
   it('calls onChange with numeric value', () => {

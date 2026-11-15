@@ -13,6 +13,7 @@ export const ALLOWED_TEMPLATES = new Set([
   'editSprite',
   'applyPalette',
   'exportSheet',
+  'drawFrames',
 ]);
 
 /** Escape a string value for safe inclusion in Lua source code. */
@@ -34,6 +35,15 @@ const NUMERIC_PARAMS = new Set([
 
 /** Params that are comma-separated hex color lists (e.g. "FF0000","00FF00"). */
 const HEX_COLOR_LIST_PARAMS = new Set(['paletteColors']);
+
+/**
+ * Params that are lowercase hex strings of palette indices, two characters per
+ * pixel (`drawFrames`). Only [0-9a-f] can pass, so the value can never close
+ * the Lua string it is placed in. Sized for the largest sprite the draw path
+ * accepts: 64 x 64 pixels x 16 frames x 2 characters (#10271).
+ */
+const PIXEL_DATA_PARAMS = new Set(['pixelData']);
+export const MAX_PIXEL_DATA_CHARS = 64 * 64 * 16 * 2;
 
 /**
  * Validate that a param value is safe for Lua template substitution.
@@ -59,6 +69,16 @@ function validateParamValue(key: string, value: string): string {
       }
     }
     return colors.map(c => `"${c}"`).join(', ');
+  }
+
+  if (PIXEL_DATA_PARAMS.has(key)) {
+    if (!/^[0-9a-f]*$/.test(value) || value.length % 2 !== 0) {
+      throw new Error(`Parameter "${key}" must be an even-length lowercase hex string`);
+    }
+    if (value.length > MAX_PIXEL_DATA_CHARS) {
+      throw new Error(`Parameter "${key}" exceeds maximum length (${MAX_PIXEL_DATA_CHARS} chars)`);
+    }
+    return value;
   }
 
   // Reject values that look like Lua code injection (dot and bracket notation)

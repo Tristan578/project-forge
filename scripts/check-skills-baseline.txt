@@ -29,7 +29,6 @@ troubleshoot
 # Not first-party authored; carry CRLF line endings / dangling sibling-skill links
 # from their source pack. Left as-is to avoid forking imported content.
 game-ui-design
-web-accessibility
 
 # --- Vendored / marketplace skills (externally managed) ------------------------
 # Stub/missing frontmatter descriptions or dangling sibling-doc links owned by

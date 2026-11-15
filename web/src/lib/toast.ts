@@ -25,7 +25,14 @@ export function showError(message: string): void {
  * identical ones. Optional, because most callers raise a one-off.
  */
 export function showPersistentError(message: string, options?: { id?: string }): void {
-  toast.error(message, { duration: Infinity, closeButton: true, id: options?.id });
+  // sonner's ExternalToast.id doesn't accept an explicit `undefined` under
+  // exactOptionalPropertyTypes; conditional spread omits the key when the
+  // caller passed none.
+  toast.error(message, {
+    duration: Infinity,
+    closeButton: true,
+    ...(options?.id !== undefined ? { id: options.id } : {}),
+  });
 }
 
 export function showSuccess(message: string): void {

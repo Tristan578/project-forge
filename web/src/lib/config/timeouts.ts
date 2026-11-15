@@ -85,6 +85,23 @@ export const WASM_FETCH_TIMEOUT_MS = 60_000;
 export const ENGINE_GLOBAL_TIMEOUT_MS = 30_000;
 
 /**
+ * Per-origin deadline for the `/play` engine loader's GLUE import (#7580).
+ *
+ * `/play` tries the engine CDN and then same-origin. Each origin's glue import
+ * (a few KB) gets this budget so a CDN that stalls rather than fails still
+ * leaves time for the same-origin fallback: two of these fit under
+ * ENGINE_GLOBAL_TIMEOUT_MS. The ~23 MiB binary is NOT bounded per origin — it
+ * runs under the global budget alone, as it did before the CDN was tried
+ * first, so a slow-but-working link keeps the time it always had.
+ *
+ * The "two fit" arithmetic assumes the WebGPU adapter probe, which runs inside
+ * the same global budget with its own GPU_INIT_TIMEOUT_MS cap, answers
+ * promptly (it does on every browser measured); a probe that takes seconds
+ * eats the slack.
+ */
+export const PLAY_ENGINE_ORIGIN_TIMEOUT_MS = 12_000;
+
+/**
  * Deadline for the published-game metadata fetch on `/play`.
  *
  * Bounds the "Loading game..." spinner. Deliberately much shorter than the
@@ -100,6 +117,33 @@ export const PLAY_GAME_FETCH_TIMEOUT_MS = 15_000;
  * `play` command is meaningful.
  */
 export const PLAY_ENGINE_SETTLE_MS = 500;
+
+/**
+ * Longest `/play` waits for the engine to accept `load_scene` after
+ * `init_engine` (#10196).
+ *
+ * The engine's command queue exists only after the Bevy app's first update,
+ * which measured ~1.3 s on the reference machine; a command sent before that
+ * answers "PendingCommands resource not initialized". Well under
+ * `ENGINE_GLOBAL_TIMEOUT_MS`, and long enough for a slow integrated GPU.
+ */
+export const PLAY_SCENE_LOAD_TIMEOUT_MS = 10_000;
+
+/** Poll interval while `/play` waits for the engine to accept commands. */
+export const PLAY_SCENE_LOAD_RETRY_MS = 50;
+
+/**
+ * Longest an exported game waits for the engine to accept `load_scene`.
+ *
+ * The engine's command queue only exists after the Bevy app's first update
+ * (about 1.3 s after `init_engine` on the #10013 reference machine), so the
+ * exported loader retries the "not initialized" refusal until this deadline
+ * (`lib/export/sceneLoadFragment.ts`).
+ */
+export const EXPORTED_SCENE_LOAD_TIMEOUT_MS = 30_000;
+
+/** Poll interval of that wait. */
+export const EXPORTED_SCENE_LOAD_RETRY_MS = 50;
 
 // ---------------------------------------------------------------------------
 // API / Server timeouts

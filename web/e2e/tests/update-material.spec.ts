@@ -36,6 +36,7 @@ test.describe('update_material dispatch @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
@@ -90,6 +91,7 @@ test.describe('update_material dispatch @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
@@ -152,6 +154,7 @@ test.describe('update_material dispatch @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 

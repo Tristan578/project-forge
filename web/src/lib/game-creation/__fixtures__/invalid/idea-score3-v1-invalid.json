@@ -1,0 +1,96 @@
+{
+  "briefVersion": 1,
+  "id": "idea-score3-v1-invalid",
+  "title": "Lantern Yard",
+  "description": "The failure case for idea.FR-1: a movement system with nothing to move, two scenes with the same name, and a dependsOn cycle between movement and camera.",
+  "projectType": "3d",
+  "completionMode": "win",
+  "systems": [
+    {
+      "id": "sys-movement",
+      "category": "movement",
+      "type": "walk",
+      "config": { "speed": 5 },
+      "priority": "core",
+      "dependsOn": ["camera"]
+    },
+    {
+      "id": "sys-camera",
+      "category": "camera",
+      "type": "follow",
+      "config": { "smoothing": 0.1 },
+      "priority": "core",
+      "dependsOn": ["movement"]
+    },
+    {
+      "id": "sys-world",
+      "category": "world",
+      "type": "walled-yard",
+      "config": { "size": "small" },
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene-yard",
+      "name": "Yard",
+      "purpose": "The yard, with no one in it to walk",
+      "systems": ["movement", "camera", "world"],
+      "entities": [
+        {
+          "id": "ent-lantern",
+          "name": "Lantern",
+          "role": "interactable",
+          "systems": [],
+          "appearance": "primitive:sphere"
+        },
+        {
+          "id": "ent-post",
+          "name": "LanternPost",
+          "role": "decoration",
+          "systems": [],
+          "appearance": "primitive:cylinder"
+        }
+      ],
+      "transitions": []
+    },
+    {
+      "id": "scene-yard-again",
+      "name": "Yard",
+      "purpose": "A second scene that reuses the first scene's name",
+      "systems": ["camera", "world"],
+      "entities": [
+        {
+          "id": "ent-lantern-2",
+          "name": "Lantern",
+          "role": "interactable",
+          "systems": [],
+          "appearance": "primitive:sphere"
+        }
+      ],
+      "transitions": []
+    }
+  ],
+  "assetManifest": [
+    {
+      "id": "asset-lantern",
+      "type": "3d-model",
+      "description": "A small iron lantern with a single glass pane",
+      "entityRef": "Lantern",
+      "styleDirective": "simple shapes, warm glass, soft edges",
+      "priority": "nice-to-have",
+      "fallback": "primitive:sphere"
+    }
+  ],
+  "estimatedScope": "small",
+  "styleDirective": "Soft dusk light over a tidy stone yard",
+  "feelDirective": {
+    "mood": "calm",
+    "pacing": "slow",
+    "weight": "medium",
+    "referenceGames": [],
+    "oneLiner": "Walk the yard and bring the lanterns to life"
+  },
+  "constraints": ["No enemies"]
+}

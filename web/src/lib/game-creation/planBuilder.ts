@@ -26,6 +26,8 @@ import { physicsProfileForRole } from './physicsRoles';
 import { planBehaviorSteps } from './behaviorSteps';
 import { resolveEntityShape } from './entityShape';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
+import { requiresWinCondition } from '@/lib/playMode/completionMode';
+import { findSystemDependencyCycle, formatDependencyCycle } from './systemDependencies';
 
 // --- Topological sort for system dependency ordering ---
 // Ensures systems are processed after their dependsOn categories.
@@ -38,6 +40,16 @@ function topoSortSystems(
   systems: GameSystem[],
   priorityOrder: Record<string, number>,
 ): GameSystem[] {
+  // The cycle check is the SAME function `validateBrief` reports through
+  // (`systemDependencies.ts`, #10174), so a brief the validator calls cyclic
+  // is one this sort refuses, and vice versa. It runs before the walk below,
+  // which is therefore over a graph already known to be acyclic and needs no
+  // in-stack guard of its own.
+  const cycle = findSystemDependencyCycle(systems);
+  if (cycle) {
+    throw new Error(`Cyclic system dependency detected: ${formatDependencyCycle(cycle)}`);
+  }
+
   // Sort by priority first so that within same dependency depth — and within
   // a single category — core comes before secondary before polish.
   const sorted = [...systems].sort(
@@ -62,24 +74,13 @@ function topoSortSystems(
   }
 
   const visited = new Set<SystemCategory>();
-  const stackPath: SystemCategory[] = []; // ordered path, for cycle reporting
-  const inStack = new Set<SystemCategory>(); // cycle detection
   const result: GameSystem[] = [];
 
   function visit(category: SystemCategory): void {
     if (visited.has(category)) return;
-    if (inStack.has(category)) {
-      const cycleStart = stackPath.indexOf(category);
-      const cyclePath = [...stackPath.slice(cycleStart), category];
-      throw new Error(
-        `Cyclic system dependency detected: ${cyclePath.join(' -> ')}`,
-      );
-    }
     const bucket = byCategory.get(category);
     if (!bucket) return;
 
-    stackPath.push(category);
-    inStack.add(category);
     // A category is ready only once the dependencies of EVERY system in it
     // have been emitted.
     for (const system of bucket) {
@@ -89,8 +90,6 @@ function topoSortSystems(
         }
       }
     }
-    stackPath.pop();
-    inStack.delete(category);
     visited.add(category);
     result.push(...bucket);
   }
@@ -536,7 +535,21 @@ export function buildPlan(
   //
   // This DEFERS to a real progression system: two win conditions on one scene
   // is a second rule the player was never told about.
-  if (!plansAWinCondition(steps)) {
+  //
+  // It also defers to the brief's completion mode (#9998). The guarantee exists
+  // because a `win` game with no goal cannot start; an endless, sandbox or
+  // narrative brief chose "no goal" on purpose, and the Play gate and verify
+  // both accept it. Inventing a goal there would silently override the mode the
+  // brief states. `requiresWinCondition` is the predicate the gate itself uses,
+  // so what is planned here and what Play accepts cannot drift apart. A goal
+  // the brief DOES declare (a progression system) is still planned above and
+  // still validated in every mode: the builder honours a declaration rather
+  // than second-guessing it. In a sandbox or endless brief that pairing is a
+  // contradiction for the brief's AUTHOR to resolve — `validateBrief` reports
+  // it to the editor as COMPLETION_MODE_CONFLICT (#10174) and the decomposer
+  // accepts it — so a brief can reach here carrying it, and what is built is
+  // what was declared.
+  if (requiresWinCondition(gdd.completionMode) && !plansAWinCondition(steps)) {
     // The condition is a rule about the game rather than about a particular
     // prop, so it rides on the player where there is one — that is where a user
     // opening the Inspector will look for it.
@@ -548,7 +561,7 @@ export function buildPlan(
         owner = candidate;
         break;
       }
-      if (!owner) owner = candidate;
+      owner ??= candidate;
     }
 
     if (owner) {

@@ -1,12 +1,16 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { Shuffle, HelpCircle } from 'lucide-react';
 import { useEditorStore, type TerrainDataState } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 export function TerrainInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const terrainDataStore = useEditorStore((s) => s.terrainData);
   const updateTerrain = useEditorStore((s) => s.updateTerrain);
@@ -74,11 +78,12 @@ export function TerrainInspector() {
 
       {/* Resolution and Size */}
       <div className="space-y-2">
-        <label className="text-xs text-zinc-400 flex items-center gap-1">
+        <label htmlFor={fieldId('resolution')} className="text-xs text-zinc-400 flex items-center gap-1">
           Resolution
           <InfoTooltip term="terrainResolution" />
         </label>
         <select
+          id={fieldId('resolution')}
           value={localData.resolution}
           onChange={(e) => handleChange('resolution', parseInt(e.target.value))}
           className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
@@ -110,11 +115,12 @@ export function TerrainInspector() {
         <h4 className="text-xs font-medium text-zinc-400 uppercase">Noise</h4>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400 flex items-center gap-1">
+          <label htmlFor={fieldId('noise-type')} className="text-xs text-zinc-400 flex items-center gap-1">
             Type
             <InfoTooltip term="terrainNoiseType" />
           </label>
           <select
+            id={fieldId('noise-type')}
             value={localData.noiseType}
             onChange={(e) => handleChange('noiseType', e.target.value)}
             className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
@@ -126,11 +132,12 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400 flex items-center gap-1">
+          <label htmlFor={fieldId('octaves')} className="text-xs text-zinc-400 flex items-center gap-1">
             Octaves: {localData.octaves}
             <InfoTooltip term="terrainOctaves" />
           </label>
           <input
+            id={fieldId('octaves')}
             type="range"
             min={1}
             max={8}
@@ -142,11 +149,12 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400 flex items-center gap-1">
+          <label htmlFor={fieldId('frequency')} className="text-xs text-zinc-400 flex items-center gap-1">
             Frequency: {localData.frequency.toFixed(3)}
             <InfoTooltip term="terrainFrequency" />
           </label>
           <input
+            id={fieldId('frequency')}
             type="range"
             min={0.001}
             max={0.2}
@@ -158,11 +166,12 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400 flex items-center gap-1">
+          <label htmlFor={fieldId('amplitude')} className="text-xs text-zinc-400 flex items-center gap-1">
             Amplitude: {localData.amplitude.toFixed(2)}
             <InfoTooltip term="terrainAmplitude" />
           </label>
           <input
+            id={fieldId('amplitude')}
             type="range"
             min={0.0}
             max={1.0}
@@ -174,11 +183,12 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400 flex items-center gap-1">
+          <label htmlFor={fieldId('height-scale')} className="text-xs text-zinc-400 flex items-center gap-1">
             Height Scale: {localData.heightScale.toFixed(1)}
             <InfoTooltip term="terrainHeightScale" />
           </label>
           <input
+            id={fieldId('height-scale')}
             type="range"
             min={0.1}
             max={50.0}

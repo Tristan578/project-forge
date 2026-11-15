@@ -3,20 +3,27 @@ import { cn } from "../utils/cn";
 export function Tabs({ tabs, activeTab, onChange, className }) {
     const activeIndex = tabs.findIndex((t) => t.id === activeTab);
     function handleKeyDown(e) {
+        if (tabs.length === 0)
+            return;
+        let nextIndex;
         if (e.key === "ArrowRight") {
-            const next = (activeIndex + 1) % tabs.length;
-            onChange(tabs[next].id);
+            nextIndex = (activeIndex + 1) % tabs.length;
         }
         else if (e.key === "ArrowLeft") {
-            const prev = (activeIndex - 1 + tabs.length) % tabs.length;
-            onChange(tabs[prev].id);
+            nextIndex = (activeIndex - 1 + tabs.length) % tabs.length;
         }
         else if (e.key === "Home") {
-            onChange(tabs[0].id);
+            nextIndex = 0;
         }
         else if (e.key === "End") {
-            onChange(tabs[tabs.length - 1].id);
+            nextIndex = tabs.length - 1;
         }
+        else {
+            return;
+        }
+        e.preventDefault();
+        onChange(tabs[nextIndex].id);
+        e.currentTarget.querySelectorAll('[role="tab"]')[nextIndex]?.focus();
     }
     return (_jsxs("div", { className: cn("w-full", className), children: [_jsx("div", { role: "tablist", onKeyDown: handleKeyDown, className: cn("flex gap-0.5", "bg-[var(--sf-bg-app)] p-1", "rounded-[var(--sf-radius-md)]", "border border-[var(--sf-border)]"), children: tabs.map((tab) => {
                     const isActive = tab.id === activeTab;

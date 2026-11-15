@@ -39,9 +39,7 @@ type LimiterInstance = {
 let _initPromise: Promise<LimiterInstance | null> | null = null;
 
 function getLimiter(): Promise<LimiterInstance | null> {
-  if (!_initPromise) {
-    _initPromise = initLimiter();
-  }
+  _initPromise ??= initLimiter();
   return _initPromise;
 }
 

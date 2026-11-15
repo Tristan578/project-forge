@@ -36,9 +36,13 @@ vi.mock('@/lib/keys/resolver', () => {
   return { resolveApiKey: vi.fn(), ApiKeyError };
 });
 
-vi.mock('@/lib/tokens/pricing', () => ({
-  getTokenCost: vi.fn(() => 100),
-}));
+// Spread the actual module: `createGenerationHandler` reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
+// via `@/lib/ai/tierAccess` / `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn(() => 100) };
+});
 
 vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 }),
@@ -268,6 +272,7 @@ describe('POST /api/generate/model — negative cases', () => {
         expect.any(Number),
         '3d_generation_standard',
         expect.objectContaining({ prompt: 'test', mode: 'text-to-3d', quality: 'standard' }),
+        'model3d', // capability forwarded for gateway/direct routing (#9523)
       );
     });
 
@@ -279,6 +284,7 @@ describe('POST /api/generate/model — negative cases', () => {
         expect.any(Number),
         '3d_generation_high',
         expect.objectContaining({ quality: 'high' }),
+        'model3d', // capability forwarded for gateway/direct routing (#9523)
       );
     });
 
@@ -294,6 +300,7 @@ describe('POST /api/generate/model — negative cases', () => {
         expect.any(Number),
         'image_to_3d',
         expect.objectContaining({ mode: 'image-to-3d' }),
+        'model3d', // capability forwarded for gateway/direct routing (#9523)
       );
     });
   });

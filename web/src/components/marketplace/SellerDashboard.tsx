@@ -39,9 +39,9 @@ export function SellerDashboard() {
         const data = await res.json();
         setProfile(data.profile);
         if (data.profile) {
-          setDisplayName(data.profile.displayName || '');
-          setBio(data.profile.bio || '');
-          setPortfolioUrl(data.profile.portfolioUrl || '');
+          setDisplayName(data.profile.displayName ?? '');
+          setBio(data.profile.bio ?? '');
+          setPortfolioUrl(data.profile.portfolioUrl ?? '');
         }
       }
     } catch {
@@ -55,7 +55,7 @@ export function SellerDashboard() {
       const res = await fetch('/api/marketplace/seller/assets');
       if (res.ok) {
         const data = await res.json();
-        setAssets(data.assets || []);
+        setAssets(data.assets ?? []);
       }
     } catch {
       // Silent fail
@@ -188,6 +188,7 @@ export function SellerDashboard() {
             <div className="space-y-2">
               <div>
                 <span className="text-sm text-zinc-400">Name: </span>
+                {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank seller displayName is unset; falls back to a display placeholder */}
                 <span className="text-sm text-zinc-200">{profile?.displayName || 'Not set'}</span>
               </div>
               {profile?.bio && (

@@ -18,6 +18,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { gameComponentExecutor } from '../gameComponentExecutor';
 import type { ExecutorContext } from '../../types';
+import { collectStepWarnings } from '../../stepWarnings';
+import { createSliceStore } from '@/stores/slices/__tests__/sliceTestTemplate';
+import { createGameSlice } from '@/stores/slices/gameSlice';
+import { componentAdjustmentsOf } from '@/lib/engine/gameComponentCorrections';
 
 /**
  * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
@@ -724,6 +728,62 @@ describe('gameComponentExecutor', () => {
 
       expect(result.success).toBe(false);
       expect(storeOf(ctx).addGameComponent).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // PF-1148: a planned value the engine will not hold is reported, not
+  // silently clamped. The schema accepts any finite number, so a GDD asking
+  // for a platform speed of 99999 gets 1000 — and now the run says so.
+  // -------------------------------------------------------------------------
+  describe('adjusted values', () => {
+    const platform = (speed: number) => ({
+      type: 'movingPlatform',
+      entityId: 'id-platform',
+      speed,
+      waypoints: [
+        [0, 0, 0],
+        [4, 0, 0],
+      ],
+      pauseDuration: 0.5,
+      loopMode: 'pingPong',
+      ...PLAN_INJECTED,
+    });
+
+    it('puts the corrections and their sentences on the step output', async () => {
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(platform(99999), ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output).toEqual({
+        entityId: 'id-platform',
+        componentType: 'movingPlatform',
+        corrections: [
+          { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+        ],
+        warnings: ['Moving Platform speed: you asked for 99999, it was capped at 1000.'],
+      });
+      // The pipeline's own reader surfaces exactly that sentence to the user.
+      expect(collectStepWarnings(result.output)).toEqual([
+        'Moving Platform speed: you asked for 99999, it was capped at 1000.',
+      ]);
+    });
+
+    it('adds nothing to the output when every planned value was in range', async () => {
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(platform(6), ctx);
+      expect(result.output).toEqual({ entityId: 'id-platform', componentType: 'movingPlatform' });
+      expect(collectStepWarnings(result.output)).toEqual([]);
+    });
+
+    it('leaves the field marked in the real store, where the inspector reads it', async () => {
+      const slice = createSliceStore(createGameSlice);
+      const ctx = makeCtx({ store: slice.getState() });
+      await gameComponentExecutor.execute(platform(99999), ctx);
+      expect(componentAdjustmentsOf(slice.getState().gameComponentAdjustments, 'id-platform', 'movingPlatform'))
+        .toEqual({
+          speed: { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+        });
     });
   });
 

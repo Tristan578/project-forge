@@ -15,6 +15,10 @@ import {
   buildMeasurementManifest,
   buildMeasurementManifestAsync,
   computeFixtureChecksum,
+  computeSceneFixtureChecksum,
+  canonicalSceneJson,
+  readExactBrowserVersion,
+  readGpuDriver,
   detectRenderBackend,
   parseOs,
   parseBrowserVersion,
@@ -245,5 +249,153 @@ describe('measurementManifest', () => {
       const manifest = await buildMeasurementManifestAsync({ nav, backend: 'webgl2' });
       expect(manifest.backend).toBe('webgl2');
     });
+  });
+});
+
+describe('fixture identity (performance.FR-3.OP-01, #10013)', () => {
+  const scene = {
+    formatVersion: 3,
+    metadata: { name: 'Fixture', createdAt: '2026-01-01T00:00:00Z', modifiedAt: '2026-01-02T00:00:00Z' },
+    environment: { clearColor: [0.1, 0.1, 0.12], fogEnabled: false },
+    entities: [
+      { entityId: 'b', name: 'B', transform: { position: [1, 2, 3] } },
+      { entityId: 'a', name: 'A', transform: { position: [0, 0, 0] } },
+    ],
+  };
+
+  it('is the same digest whatever order the keys and entities were serialized in', () => {
+    const reordered = {
+      entities: [
+        { transform: { position: [0, 0, 0] }, name: 'A', entityId: 'a' },
+        { name: 'B', entityId: 'b', transform: { position: [1, 2, 3] } },
+      ],
+      environment: { fogEnabled: false, clearColor: [0.1, 0.1, 0.12] },
+      metadata: { modifiedAt: '2026-01-02T00:00:00Z', name: 'Fixture', createdAt: '2026-01-01T00:00:00Z' },
+      formatVersion: 3,
+    };
+    expect(canonicalSceneJson(reordered)).toBe(canonicalSceneJson(scene));
+    expect(computeSceneFixtureChecksum(reordered)).toBe(computeSceneFixtureChecksum(scene));
+  });
+
+  it('ignores the save timestamps, which change on every export of the same scene', () => {
+    const resaved = { ...scene, metadata: { ...scene.metadata, createdAt: '', modifiedAt: '2027-05-05T00:00:00Z' } };
+    expect(computeSceneFixtureChecksum(resaved)).toBe(computeSceneFixtureChecksum(scene));
+  });
+
+  it('changes when the scene content changes', () => {
+    const moved = {
+      ...scene,
+      entities: [scene.entities[0], { ...scene.entities[1], transform: { position: [0, 0, 1] } }],
+    };
+    expect(computeSceneFixtureChecksum(moved)).not.toBe(computeSceneFixtureChecksum(scene));
+  });
+
+  it('is the djb2 digest of the canonical text, so either helper identifies the same fixture', () => {
+    expect(computeSceneFixtureChecksum(scene)).toBe(computeFixtureChecksum(canonicalSceneJson(scene)));
+    expect(computeSceneFixtureChecksum(scene)).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it('is unknown — never a digest of nothing — for a missing or non-object scene', () => {
+    expect(computeSceneFixtureChecksum(undefined)).toBe(UNKNOWN);
+    expect(computeSceneFixtureChecksum(null)).toBe(UNKNOWN);
+    expect(computeSceneFixtureChecksum('{"entities":[]}')).toBe(UNKNOWN);
+    expect(computeSceneFixtureChecksum([])).toBe(UNKNOWN);
+  });
+});
+
+describe('readExactBrowserVersion (performance.FR-3.OP-01)', () => {
+  it('prefers the full Chromium version from high-entropy client hints', async () => {
+    const nav: ManifestNavigator = {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+      userAgentData: {
+        getHighEntropyValues: async () => ({
+          fullVersionList: [
+            { brand: 'Not;A=Brand', version: '99.0.0.0' },
+            { brand: 'Chromium', version: '153.0.8010.53' },
+            { brand: 'Google Chrome', version: '153.0.8010.53' },
+          ],
+        }),
+      },
+    };
+    expect(await readExactBrowserVersion(nav)).toBe('Chrome 153.0.8010.53');
+  });
+
+  it('names Edge ahead of the Chromium brand it also reports', async () => {
+    const nav: ManifestNavigator = {
+      userAgentData: {
+        getHighEntropyValues: async () => ({
+          fullVersionList: [
+            { brand: 'Chromium', version: '153.0.4234.48' },
+            { brand: 'Microsoft Edge', version: '153.0.4234.48' },
+          ],
+        }),
+      },
+    };
+    expect(await readExactBrowserVersion(nav)).toBe('Edge 153.0.4234.48');
+  });
+
+  it('falls back to the user-agent string when client hints are absent or refuse', async () => {
+    expect(await readExactBrowserVersion({ userAgent: FIREFOX_WIN })).toBe('Firefox 130');
+    const refusing: ManifestNavigator = {
+      userAgent: CHROME_MAC,
+      userAgentData: { getHighEntropyValues: async () => { throw new Error('denied'); } },
+    };
+    expect(await readExactBrowserVersion(refusing)).toBe('Chrome 140');
+  });
+
+  it('is unknown with no navigator at all', async () => {
+    expect(await readExactBrowserVersion(undefined)).toBe(UNKNOWN);
+  });
+});
+
+describe('readGpuDriver (performance.FR-3.OP-01)', () => {
+  it('describes the WebGPU adapter the browser exposes', async () => {
+    const nav: ManifestNavigator = {
+      gpu: {
+        requestAdapter: async () => ({
+          info: { vendor: 'nvidia', architecture: 'turing', device: '', description: '' },
+        }),
+      },
+    };
+    expect(await readGpuDriver(nav, 'webgpu')).toBe('nvidia turing');
+  });
+
+  it('prefers the adapter description when the browser fills it in', async () => {
+    const nav: ManifestNavigator = {
+      gpu: {
+        requestAdapter: async () => ({
+          info: { vendor: 'nvidia', architecture: 'turing', device: '1e81', description: 'NVIDIA GeForce RTX 2080 SUPER' },
+        }),
+      },
+    };
+    expect(await readGpuDriver(nav, 'webgpu')).toBe('NVIDIA GeForce RTX 2080 SUPER');
+  });
+
+  it('reads the unmasked WebGL renderer for a WebGL2 run', async () => {
+    const lose = vi.fn();
+    const createContext = () => ({
+      getExtension: (name: string) =>
+        name === 'WEBGL_debug_renderer_info'
+          ? { UNMASKED_RENDERER_WEBGL: 0x9246 }
+          : name === 'WEBGL_lose_context'
+            ? { loseContext: lose }
+            : null,
+      getParameter: (p: number) => (p === 0x9246 ? 'ANGLE (NVIDIA, GeForce RTX 2080 SUPER Direct3D11)' : 'WebKit WebGL'),
+      RENDERER: 0x1f01,
+    });
+    expect(await readGpuDriver({}, 'webgl2', createContext)).toBe('ANGLE (NVIDIA, GeForce RTX 2080 SUPER Direct3D11)');
+    expect(lose).toHaveBeenCalledTimes(1);
+  });
+
+  it('is unknown when the adapter is missing, blank, or the probe throws', async () => {
+    expect(await readGpuDriver({ gpu: { requestAdapter: async () => null } }, 'webgpu')).toBe(UNKNOWN);
+    expect(
+      await readGpuDriver({ gpu: { requestAdapter: async () => ({ info: { vendor: '', architecture: '' } }) } }, 'webgpu'),
+    ).toBe(UNKNOWN);
+    expect(
+      await readGpuDriver({ gpu: { requestAdapter: async () => { throw new Error('lost'); } } }, 'webgpu'),
+    ).toBe(UNKNOWN);
+    expect(await readGpuDriver({}, 'webgl2', () => null)).toBe(UNKNOWN);
+    expect(await readGpuDriver({}, 'unknown')).toBe(UNKNOWN);
   });
 });

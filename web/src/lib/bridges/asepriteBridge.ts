@@ -116,7 +116,11 @@ function runAseprite(binaryPath: string, scriptPath: string): Promise<BridgeResu
       { timeout: 30000 },
       (err, stdout, stderr) => {
         if (err) {
-          const exitCode = (err as NodeJS.ErrnoException & { code?: number }).code ?? 1;
+          // `err` is already `ExecException`, which declares `code?: number`
+          // directly — no cast needed (the prior `NodeJS.ErrnoException &
+          // { code?: number }` intersection was wrong: ErrnoException's own
+          // `code` is `string`, so the two barely overlap).
+          const exitCode = err.code ?? 1;
           resolve(parseOutput(stdout, stderr || err.message, typeof exitCode === 'number' ? exitCode : 1));
           return;
         }

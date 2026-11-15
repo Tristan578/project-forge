@@ -6,6 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091  # dynamic $SCRIPT_DIR path; hook-utils.sh is linted on its own by the whole-tree glob
 source "$SCRIPT_DIR/hook-utils.sh"
 
 COMMAND=$(get_bash_command)

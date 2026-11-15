@@ -642,7 +642,11 @@ const OWN_QUEUE_ARMS: [(&str, &str); 2] = [
 ///   `spawn_from_snapshot` moves the whole entity, and the scene-graph event
 ///   plus `resyncs_for_snapshot` cover it — the latter pinned by
 ///   [`spawn_from_snapshot_queues_re_reports`] below.
-const EXEMPT_ARMS: [(&str, &str); 11] = [
+const EXEMPT_ARMS: [(&str, &str); 12] = [
+    (
+        "QualityChange",
+        "apply_undo_requests/apply_redo_requests write the global QualitySettings resource; bridge::query::emit_quality_on_change uses resource change detection without a selection gate",
+    ),
     (
         "Rename",
         "writes EntityName; scene_graph::detect_name_changed is Query<&EntityId, Changed<EntityName>>",

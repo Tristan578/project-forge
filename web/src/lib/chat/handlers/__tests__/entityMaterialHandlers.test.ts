@@ -1104,6 +1104,24 @@ describe('materialHandlers', () => {
       // unknownField is not in baseLightData, so won't be merged
       expect(call[1].unknownField).toBeUndefined();
     });
+
+    it('ignores JSON __proto__ and constructor keys without changing the base prototype', async () => {
+      const baseLight = Object.assign(Object.create({ inheritedOnly: 'do not copy' }), {
+        lightType: 'point', color: [1, 1, 1], intensity: 800, shadowsEnabled: false,
+        shadowDepthBias: 0.02, shadowNormalBias: 1.8, range: 20, radius: 0,
+        innerAngle: 0.4, outerAngle: 0.8,
+      });
+      const args = JSON.parse('{"entityId":"light1","intensity":1234,"__proto__":{"polluted":true},"constructor":{"polluted":true}}');
+      const { result, store } = await invokeHandler(materialHandlers, 'update_light', args, { primaryLight: baseLight });
+      expect(result.success).toBe(true);
+      const updated = (store.updateLight as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+      expect(updated).toMatchObject({ intensity: 1234, lightType: 'point' });
+      expect(Object.getPrototypeOf(updated)).toBe(Object.prototype);
+      expect(Object.hasOwn(updated, '__proto__')).toBe(false);
+      expect(Object.hasOwn(updated, 'constructor')).toBe(false);
+      expect((updated as { inheritedOnly?: unknown }).inheritedOnly).toBeUndefined();
+      expect((Object.prototype as { polluted?: unknown }).polluted).toBeUndefined();
+    });
   });
 
   // -----------------------------------------------------------------------

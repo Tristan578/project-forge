@@ -10,12 +10,12 @@ import { renderHook, act, cleanup } from '@testing-library/react';
 
 // Mock initLog before importing the hook
 vi.mock('@/lib/initLog', () => {
-  let events: Array<{ phase: string; timestamp: number; message?: string; error?: string }> = [];
+  let events: Array<{ phase: string; timestamp: number; message?: string | undefined; error?: string | undefined }> = [];
   let startTime: number | null = null;
   return {
     logInitEvent: vi.fn((phase: string, message?: string, error?: string) => {
       const now = Date.now();
-      if (startTime === null) startTime = now;
+      startTime ??= now;
       const event = { phase, timestamp: now - startTime, message, error };
       events.push(event);
       return event;

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 // Mock the editor store module
@@ -26,6 +26,7 @@ import * as autoSave from '@/lib/storage/autoSave';
 import { CHECKPOINT_EXPORT_PREFIX, SCENE_LOADED_EVENT } from '@/lib/scenes/checkpointRecovery';
 import { SCENE_EXPORTED_EVENT } from '@/lib/engine/sceneExportWire';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
 import { createSceneTestStore } from '@/stores/slices/__tests__/sceneSliceTestStore';
 import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
 import { createCheckpoint, saveProjectScenes } from '@/lib/scenes/sceneManager';
@@ -988,11 +989,73 @@ describe('handleTransformEvent', () => {
         dispatchSpy.mockRestore();
       });
     });
+
+    // #9998: the completion mode is frontend-only, so the engine export never
+    // carries it. This handler is the one choke point every persistence
+    // consumer reads — the `.forge` download and the cloud PUT (both
+    // `forge:scene-exported` listeners), localStorage autosave, the IndexedDB
+    // cache and the panic backup — so the fold happens here, once.
+    describe('completion-mode fold (#9998)', () => {
+      const RAW = '{"formatVersion":3,"sceneName":"S","entities":[]}';
+
+      function exportWith(completionMode: string | undefined, requestId?: string) {
+        savePrefabInstancesToStorage([]);
+        vi.mocked(useEditorStore.getState).mockReturnValue({
+          ...actions,
+          autoSaveEnabled: true,
+          sceneGraph: { nodes: {}, rootIds: [], completionMode },
+        } as unknown as StoreState);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+        const cacheWrite = vi.spyOn(autoSave, 'setLastExportedScene');
+        try {
+          handleTransformEvent('SCENE_EXPORTED', { json: RAW, name: 'S', requestId }, mockSetGet.set, mockSetGet.get);
+          const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === SCENE_EXPORTED_EVENT);
+          return {
+            detailJson: ((call?.[0] as CustomEvent).detail as { json: string }).json,
+            cachedJson: cacheWrite.mock.calls[0]?.[0],
+          };
+        } finally {
+          dispatchSpy.mockRestore();
+          cacheWrite.mockRestore();
+        }
+      }
+
+      afterEach(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
+
+      it.each(['win', 'endless', 'sandbox', 'narrative'])(
+        'writes the live %s mode into every consumer of the export',
+        (mode) => {
+          const { detailJson, cachedJson } = exportWith(mode);
+
+          expect(JSON.parse(detailJson).completionMode).toBe(mode);
+          expect(JSON.parse(cachedJson ?? '{}').completionMode).toBe(mode);
+          expect(JSON.parse(localStorage.getItem('forge:autosave') ?? '{}').completionMode).toBe(mode);
+          expect(JSON.parse(sessionStorage.getItem('forge:scene-last-json') ?? '{}').completionMode).toBe(mode);
+        },
+      );
+
+      it('leaves a scene whose mode was never chosen byte-identical (legacy resave)', () => {
+        const { detailJson } = exportWith(undefined);
+
+        expect(detailJson).toBe(RAW);
+        expect(localStorage.getItem('forge:autosave')).toBe(RAW);
+      });
+
+      it('does not touch a checkpoint read-back, which callers compare against the engine', () => {
+        const { detailJson } = exportWith('sandbox', `${CHECKPOINT_EXPORT_PREFIX}read-1`);
+
+        expect(detailJson).toBe(RAW);
+      });
+    });
   });
 
   describe('SCENE_LOADED', () => {
     beforeEach(() => {
       clearStagedSceneAudio();
+      takeStagedSceneCompletionMode();
     });
 
     it('notifies checkpoint recovery only after scene metadata and audio are adopted', () => {
@@ -1150,9 +1213,43 @@ describe('handleTransformEvent', () => {
         // completionMode gating (idea.FR-1.OP-04 / #9901): SCENE_LOADED is the
         // scene-replacement boundary, so it must clear a leftover mode rather
         // than let setFullGraph's preserve-across-rebuilds fallback carry the
-        // OUTGOING scene's mode into the incoming one.
+        // OUTGOING scene's mode into the incoming one. Nothing was staged, so
+        // the incoming scene is legacy `win` (#9998).
         sceneGraph: { completionMode: undefined },
+        // The outgoing scene's mode edits are not undo steps in this one.
+        completionModeHistory: { past: [], future: [] },
       });
+    });
+
+    // #9998: the incoming scene's own mode arrives through the same boundary
+    // that clears the outgoing one — staged by `dispatchSceneLoad`/`newScene`,
+    // taken here. Writing it any earlier would be wiped by this very handler.
+    it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
+      'adopts the %s mode the loading scene declared',
+      (mode) => {
+        vi.mocked(useEditorStore.getState).mockReturnValue({
+          ...actions,
+          sceneGraph: { nodes: {}, rootIds: [], completionMode: 'narrative' },
+        } as unknown as StoreState);
+        stageSceneCompletionMode(mode);
+
+        handleTransformEvent('SCENE_LOADED', { name: 'Reopened' }, mockSetGet.set, mockSetGet.get);
+
+        expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({
+          sceneGraph: { completionMode: mode },
+          completionModeHistory: { past: [], future: [] },
+        });
+      },
+    );
+
+    it('does not hand the same staged mode to a second load', () => {
+      stageSceneCompletionMode('sandbox');
+
+      handleTransformEvent('SCENE_LOADED', { name: 'First' }, mockSetGet.set, mockSetGet.get);
+      handleTransformEvent('SCENE_LOADED', { name: 'Second' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({ sceneGraph: { completionMode: 'sandbox' } });
+      expect(vi.mocked(useEditorStore.setState).mock.calls[1][0]).toMatchObject({ sceneGraph: { completionMode: undefined } });
     });
 
     it('clears a leftover completionMode so the incoming scene starts from the legacy default', () => {

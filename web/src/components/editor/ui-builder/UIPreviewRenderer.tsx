@@ -28,6 +28,7 @@ export function UIPreviewRenderer({
 
     const style: React.CSSProperties = {
       ...layout,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank background color string must collapse to undefined so the computed style never carries an empty CSS value
       backgroundColor: widget.style.backgroundColor || undefined,
       borderWidth: widget.style.borderWidth,
       borderColor: widget.style.borderColor,
@@ -76,6 +77,7 @@ export function UIPreviewRenderer({
         content = (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty src must become undefined so the <img> omits the attribute; leaving '' makes the browser re-request the current page
             src={widget.config.src || undefined}
             alt={widget.config.alt}
             style={{

@@ -110,6 +110,7 @@ async function GET_impl(req: NextRequest) {
           title: g.title,
           slug: g.slug,
           authorId: g.authorId,
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
           authorName: g.authorName || 'Unknown',
           authorEmail: g.authorEmail,
           reportCount: g.reportCount,
@@ -159,8 +160,10 @@ async function GET_impl(req: NextRequest) {
         type: 'comment' as const,
         content: c.content,
         gameId: c.gameId,
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored gameTitle is unset, same as absent; falls back to a display placeholder
         gameTitle: c.gameTitle || 'Unknown',
         authorId: c.authorId,
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
         authorName: c.authorName || 'Unknown',
         authorEmail: c.authorEmail,
         createdAt: c.createdAt.toISOString(),

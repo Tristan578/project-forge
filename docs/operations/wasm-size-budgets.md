@@ -25,10 +25,13 @@ the `CI` workflow whenever a PR touches `engine/`.
 
 | Package | Measured (post `wasm-opt -Oz`) | Threshold | Fails above (+10%) |
 |---|---:|---:|---:|
-| `pkg-webgl2` | 23,480,588 B (22.4 MiB) | 23 MiB | 25.3 MiB |
-| `pkg-webgpu` | 23,903,062 B (22.8 MiB) | 23 MiB | 25.3 MiB |
-| `pkg-webgl2-runtime` | 21.0 MiB | 22 MiB | 24.2 MiB |
-| `pkg-webgpu-runtime` | 21.4 MiB | 22 MiB | 24.2 MiB |
+| `pkg-webgl2` | 27,023,317 B (25.8 MiB) | 26 MiB | 28.6 MiB |
+| `pkg-webgpu` | 27,825,976 B (26.5 MiB) | 27 MiB | 29.7 MiB |
+| `pkg-webgl2-runtime` | 26,077,179 B (24.9 MiB) | 25 MiB | 27.5 MiB |
+| `pkg-webgpu-runtime` | 26,878,831 B (25.6 MiB) | 26 MiB | 28.6 MiB |
+
+Measured on Bevy 0.19.1 by the `WASM Build` job of PR #10268 at `d85796cd`.
+Why these are higher than before is recorded under [Budget history](#budget-history).
 
 Each threshold is the measured size rounded **up** to the next whole MiB. The
 step fails when a binary exceeds its threshold by more than 10%, and it checks
@@ -91,3 +94,47 @@ Reach for the alternatives first: feature-gate the dependency (see the `webgpu`
 and `runtime` features in `engine/Cargo.toml`), keep heavy data out of the
 binary, or check whether the growth landed in the runtime pair when it only
 needed to be in the editor pair.
+
+## Budget history
+
+Every raise is recorded here with what shipped, what it cost, and why the
+download is worth it, as [Raising a budget](#raising-a-budget) requires.
+
+### 2026-09-26: Bevy 0.18.1 -> 0.19.1 (#8887, PR #10268)
+
+**Owner-approved 2026-09-26.** The owner's decision was to take the migration
+because it is the current engine, and to have the gate measure against the new
+sizes rather than be bypassed.
+
+| Package | 0.18.1 (CI) | 0.19.1 (CI, `d85796cd`) | Growth | Threshold |
+|---|---:|---:|---:|---|
+| `pkg-webgl2` | 23,480,588 B | 27,023,317 B | +15.1% | 23 -> 26 MiB |
+| `pkg-webgpu` | 23,903,062 B | 27,825,976 B | +16.4% | 23 -> 27 MiB |
+| `pkg-webgl2-runtime` | ~21.0 MiB | 26,077,179 B | ~+18% | 22 -> 25 MiB |
+| `pkg-webgpu-runtime` | ~21.4 MiB | 26,878,831 B | ~+20% | 22 -> 26 MiB |
+
+- **What shipped.** Bevy 0.19.1 on wgpu 29, with its co-bumped ecosystem crates
+  (bevy_rapier 0.35, bevy_hanabi 0.19, bevy_panorbit_camera 0.35). 0.19.1 is
+  the floor because 0.19.0 corrupts transparent meshes on the WebGL2 path.
+- **What it cost.** 3.5 to 3.9 MB per binary, on all four, including the
+  runtime pair every published-game visitor downloads.
+- **Where it went.** Not into new dependencies: the graph gained 7 small crates
+  and lost `bevy_scene`, with the same bevy features active. Before
+  optimisation the growth is inside `bevy_ecs` (8.17 MB -> 11.74 MB), mostly
+  per-type code Bevy generates for every resource and component, such as about
+  642 KB of new `World::insert_resource_if_not_exists` instances (resources are
+  components in 0.19) and about 714 KB more `EntityWorldMut` code. No feature
+  flag we control removes it, and it lands in the runtime pair because the
+  runtime has the same ECS.
+- **Alternatives considered.** Feature-gating does not apply: the growth is in
+  the ECS core every build needs. Staying on 0.18.1 keeps the engine a release
+  behind and leaves 0.19's fixes out of reach. A dedicated size-reduction pass is
+  still worth doing on its own merits; it is not a precondition for this raise.
+- **Headroom.** Each threshold is the measured size rounded up to the next whole
+  MiB, so every package keeps 10.6% to 11.9% to its fail line, the same policy
+  as before.
+- **Second-run check.** Step 3 of [Re-measuring](#re-measuring) asks for two
+  runs of one commit to agree. Local builds with binaryen 108 (the package CI
+  installs) came out within 0.2% of the CI numbers above. The CI numbers on the
+  PR's final head, and a re-run of that job, are recorded in the PR.
+

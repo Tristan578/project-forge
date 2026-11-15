@@ -11,8 +11,8 @@ The engine is built in Rust, compiled to WebAssembly, and renders via WebGPU (wi
 ## Architecture
 
 - **Frontend**: React (Next.js 16), Zustand state management, Tailwind CSS
-- **Engine**: Bevy 0.18 ECS (Rust) compiled to WASM via wasm-bindgen
-- **Rendering**: WebGPU primary (wgpu 27), WebGL2 fallback — 4 binaries (2 editor + 2 runtime)
+- **Engine**: Bevy 0.19 ECS (Rust) compiled to WASM via wasm-bindgen
+- **Rendering**: WebGPU primary (wgpu 29), WebGL2 fallback — 4 binaries (2 editor + 2 runtime)
 - **Physics**: Rapier 3D and 2D simulation
 - **Communication**: JSON commands through `handle_command()` bridge, event callbacks from engine to UI
 - **Infrastructure**: Vercel (hosting), Neon (Postgres), Upstash (Redis), Clerk (auth), Stripe (payments), Cloudflare R2 (CDN)
@@ -105,10 +105,10 @@ Categories: animation, asset, audio, camera, compound, cutscene, dialogue, docs,
 
 ## Technology Stack
 
-- Rust, Bevy 0.18, wasm-bindgen 0.2.127
+- Rust, Bevy 0.19, wasm-bindgen 0.2.127
 - React, Next.js 16, TypeScript, Zustand, Tailwind CSS
 - Rapier 3D/2D physics
-- WebGPU (wgpu 27) / WebGL2
+- WebGPU (wgpu 29) / WebGL2
 - Drizzle ORM, Neon Postgres
 - Clerk authentication, Stripe payments
 - Sentry error tracking, PostHog analytics

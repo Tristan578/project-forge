@@ -20,6 +20,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const store = useEditorStore.getState();
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank export title is unset; falls back to the scene name (see #9565 issue text)
     const gameTitle = p.data.title || store.sceneName || 'Game';
     const presetConfig = p.data.preset ? getPreset(p.data.preset) : store.exportPreset?.config;
 
@@ -27,7 +28,9 @@ export const exportHandlers: Record<string, ToolHandler> = {
       const blob = await exportGame({
         title: gameTitle,
         mode: 'zip',
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank resolution is not a member of the resolution enum; treated as unset
         resolution: presetConfig?.resolution || 'responsive',
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank loading-screen background color is unset; falls back to the default swatch
         bgColor: presetConfig?.loadingScreen.backgroundColor || '#18181b',
         includeDebug: presetConfig?.includeDebug ?? false,
         preset: presetConfig,
@@ -56,6 +59,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const store = useEditorStore.getState();
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank export title is unset; falls back to the scene name (see #9565 issue text)
     const gameTitle = p.data.title || store.sceneName || 'Game';
     const presetConfig = p.data.preset ? getPreset(p.data.preset) : undefined;
 
@@ -63,7 +67,9 @@ export const exportHandlers: Record<string, ToolHandler> = {
       const blob = await exportGame({
         title: gameTitle,
         mode: 'pwa',
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank resolution is not a member of the resolution enum; treated as unset
         resolution: presetConfig?.resolution || 'responsive',
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank loading-screen background color is unset; falls back to the default swatch
         bgColor: presetConfig?.loadingScreen.backgroundColor || '#0f172a',
         includeDebug: presetConfig?.includeDebug ?? false,
         preset: presetConfig,

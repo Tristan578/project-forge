@@ -5,10 +5,17 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, zVec3, parseArgs } from './types';
+import { ownEntry, zEntityId, zVec3, parseArgs } from './types';
 import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
-import { buildStoreComponent, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
+import {
+  buildStoreComponentWithReport,
+  mergeStoreComponentPropsWithReport,
+  toStoreComponentType,
+  ENGINE_COMPONENT_TYPES,
+  ENGINE_COMPONENT_CATALOG,
+} from '@/lib/engine/gameComponentWire';
+import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
 import { NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
 import { LINKED_PREFAB_UNAVAILABLE_REASON } from '@/lib/prefabs/prefabAvailability';
 
@@ -24,6 +31,22 @@ const zPropertiesBag = z.record(z.string(), z.unknown()).optional();
 // Game camera mode enum
 const zGameCameraMode = z.enum(['thirdPersonFollow', 'firstPerson', 'sideScroller', 'topDown', 'fixed', 'orbital']);
 
+/**
+ * A component tool's result: what it did, and every value it did not apply as
+ * asked (PF-1148).
+ *
+ * `corrections` is always present, empty when nothing was adjusted, so an MCP
+ * client can read it without probing for the key. The chat card renders it
+ * from the structured list; `message` says the same thing in sentences for any
+ * reader that only has text.
+ */
+function correctionResult(
+  action: string,
+  corrections: readonly GameComponentFieldCorrection[],
+): { message: string; corrections: readonly GameComponentFieldCorrection[] } {
+  return { message: withCorrectionSummary(action, corrections), corrections };
+}
+
 export const gameplayHandlers: Record<string, ToolHandler> = {
   add_game_component: async (args, ctx) => {
     const p = parseArgs(z.object({
@@ -34,12 +57,15 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const props = p.data.properties ?? {};
-    const component = buildStoreComponent(p.data.componentType, props);
-    if (!component) {
+    // The report is taken HERE, at the first coercion: the store normalizes
+    // again, but by then it is handed a valid component and has nothing left
+    // to report (PF-1148).
+    const built = buildStoreComponentWithReport(p.data.componentType, props);
+    if (!built) {
       return { success: false, error: `Unknown component type: ${p.data.componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
     }
-    ctx.store.addGameComponent(p.data.entityId, component);
-    return { success: true, result: { message: `Added ${p.data.componentType}` } };
+    ctx.store.addGameComponent(p.data.entityId, built.component, built);
+    return { success: true, result: correctionResult(`Added ${p.data.componentType}`, built.corrections) };
   },
 
   update_game_component: async (args, ctx) => {
@@ -50,13 +76,30 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
 
-    const props = p.data.properties ?? {};
-    const component = buildStoreComponent(p.data.componentType, props);
-    if (!component) {
+    const storeType = toStoreComponentType(p.data.componentType);
+    if (storeType === null) {
       return { success: false, error: `Unknown component type: ${p.data.componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
     }
-    ctx.store.updateGameComponent(p.data.entityId, component);
-    return { success: true };
+    // A PARTIAL update: fields the caller does not name keep their current
+    // values. Building from the properties alone filled every unnamed field
+    // with its default and replaced the stored component with that, so "make
+    // the platform faster" also threw away its route (#10144).
+    const existing = (ownEntry(ctx.store.allGameComponents, p.data.entityId) ?? []).find((c) => c.type === storeType);
+    if (!existing) {
+      return {
+        success: false,
+        error: `Entity ${p.data.entityId} has no ${p.data.componentType} component to update. Use add_game_component to add one.`,
+      };
+    }
+    // The report is taken HERE, at the first coercion, as for add (PF-1148):
+    // it names the fields the caller wrote and what the engine's limits did to
+    // them; the carried fields are neither.
+    const built = mergeStoreComponentPropsWithReport(existing, p.data.properties ?? {});
+    if (!built) {
+      return { success: false, error: `Unknown component type: ${p.data.componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
+    }
+    ctx.store.updateGameComponent(p.data.entityId, built.component, built);
+    return { success: true, result: correctionResult(`Updated ${p.data.componentType}`, built.corrections) };
   },
 
   remove_game_component: async (args, ctx) => {
@@ -72,7 +115,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
   get_game_components: async (args, ctx) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    const components = ctx.store.allGameComponents[p.data.entityId] ?? [];
+    const components = ownEntry(ctx.store.allGameComponents, p.data.entityId) ?? [];
     return { success: true, result: { components, count: components.length } };
   },
 
@@ -137,7 +180,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     // a loaded scene file, and the translator owns which of its fields hold a
     // number. `Object.hasOwn` on the map because `entityId` is LLM-chosen.
     if (Object.hasOwn(ctx.store.allGameCameras, d.entityId)) {
-      const existing = ctx.store.allGameCameras[d.entityId];
+      const existing = ownEntry(ctx.store.allGameCameras, d.entityId);
       if (existing) {
         // The follow target is the field that decides whether the camera moves
         // AT ALL — `cameraModeNeedsTarget` lists five of the six modes as inert
@@ -202,7 +245,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     // `toString`/`constructor` walks the prototype chain and would report an
     // inherited function as this entity's camera.
     const camera = Object.hasOwn(ctx.store.allGameCameras, p.data.entityId)
-      ? ctx.store.allGameCameras[p.data.entityId]
+      ? ownEntry(ctx.store.allGameCameras, p.data.entityId)
       : undefined;
     const isActive = ctx.store.activeGameCameraId === p.data.entityId;
     return { success: true, result: { camera: camera ?? null, isActive } };
@@ -235,11 +278,11 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       // `Object.hasOwn` for the same reason as `get_audio`: `entityId` reaches
       // here from a tool call, and a bare index on a name like `"constructor"`
       // would put an inherited function into the snapshot.
-      audio: Object.hasOwn(ctx.store.entityAudio, entityId) ? ctx.store.entityAudio[entityId] : undefined,
+      audio: ownEntry(ctx.store.entityAudio, entityId),
       particle: ctx.store.primaryParticle ?? undefined,
     };
 
-    const node = ctx.store.sceneGraph.nodes[entityId];
+    const node = ownEntry(ctx.store.sceneGraph.nodes, entityId);
     if (node) {
       const components = node.components || [];
       if (components.includes('PointLight') || components.includes('DirectionalLight') || components.includes('SpotLight')) {
@@ -263,6 +306,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     const prefab = getPrefab(p.data.prefabId);
     if (!prefab) return { success: false, error: `Prefab not found: ${p.data.prefabId}` };
 
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank spawned-entity name is unset; falls back to the prefab's default name
     const entityId = ctx.store.spawnEntity(prefab.snapshot.entityType as EntityType, p.data.name || prefab.snapshot.name);
     if (!entityId) {
       // spawnEntity returns undefined for a non-spawnable entityType (imported prefabs
@@ -377,15 +421,19 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       }
 
       const title = p.data.title ?? ctx.store.sceneName;
+      const mode = p.data.mode ?? 'single-html';
       const blob = await exportGame({
         title,
-        mode: p.data.mode ?? 'single-html',
+        mode,
         resolution,
         bgColor: '#18181b',
         includeDebug: false,
       });
 
-      const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.html`;
+      // In zip mode exportGame returns a zip archive; naming it .html made the
+      // download open as a broken page. Same rule as ExportDialog.
+      const extension = mode === 'single-html' ? 'html' : 'zip';
+      const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.${extension}`;
       downloadBlob(blob, filename);
 
       return { success: true, result: { message: 'Game exported successfully', filename } };
@@ -419,6 +467,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       entityId: z.string().optional(),
     }), args);
     if (p.error) return p.error;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- entityId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the selected entity
     const entityId = p.data.entityId || ctx.store.primaryId;
     if (!entityId) return { success: false, error: 'No entity selected' };
     const mat = ctx.store.primaryMaterial;

@@ -1,6 +1,6 @@
 // Web Worker for sandboxed script execution.
 // Receives: init (scripts + entity states), tick (dt + states), stop
-// Sends: commands (engine commands), log (console output), error (runtime errors), ui (HUD updates)
+// Sends: commands, log, error, script_timeout, ui, the forge API's async_request / scene_* / ui_* / camera_* / dialogue_* / game_* messages, and init_done / tick_done (init or a tick finished; the watchdog's liveness signal)
 
 import { injectLoopGuards } from './loopGuards';
 import { SHADOWED_GLOBALS } from './sandboxGlobals';
@@ -157,7 +157,13 @@ let uiDirty = false;
 interface PendingAsyncRequest {
   resolve: (data: unknown) => void;
   reject: (error: Error) => void;
-  onProgress?: (progress: { percent: number; message?: string }) => void;
+  // | undefined (#10230): asyncRequest()'s own onProgress parameter is
+  // already `| undefined`, and every read of this field below is a `?.()`
+  // optional call — the omitted-vs-undefined distinction was never
+  // meaningful here. Unrelated to this file's Function(...) sandbox sink;
+  // see CLAUDE.md's SEC-2 section — this interface is pure async-channel
+  // progress-callback plumbing.
+  onProgress?: ((progress: { percent: number; message?: string }) => void) | undefined;
   channel: string;
   method: string;
 }
@@ -205,6 +211,7 @@ function processAsyncResponses(responses: Array<{
       pending.resolve(resp.data);
       pendingAsyncRequests.delete(resp.requestId);
     } else if (resp.status === 'error') {
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank async error message falls back to a generic one, same as an absent one
       pending.reject(new Error(resp.error || 'Unknown async error'));
       pendingAsyncRequests.delete(resp.requestId);
     } else if (resp.status === 'progress') {
@@ -1480,6 +1487,18 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
 
 const MAX_COMMANDS_PER_FRAME = 100;
 
+/**
+ * Says that a tick returned. The runner arms a 5 s watchdog on every tick and
+ * clears it only when the worker posts something, so a script that never
+ * calls forge.* made every tick silent and Play stopped as a "possible
+ * infinite loop" (#10286). A tick that never returns still posts nothing,
+ * which is exactly what the watchdog is there to catch. The runner ignores
+ * the message; it is not a command.
+ */
+function postTickDone() {
+  (self as unknown as Worker).postMessage({ type: 'tick_done' });
+}
+
 function flushCommands() {
   if (pendingCommands.length > MAX_COMMANDS_PER_FRAME) {
     (self as unknown as Worker).postMessage({
@@ -1511,13 +1530,13 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       spawnCounter = 0;
       clearPendingAsyncRequests('Script re-initialized');
-      entityStates = msg.entities || {};
-      entityInfos = msg.entityInfos || {};
-      currentInput = msg.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-      tilemapStates = msg.tilemapStates || {};
-      skeletonStates = msg.skeletonStates || {};
-      physics2dVelocities = msg.physics2dVelocities || {};
-      groundedStates = msg.groundedStates || {};
+      entityStates = msg.entities ?? {};
+      entityInfos = msg.entityInfos ?? {};
+      currentInput = msg.inputState ?? { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+      tilemapStates = msg.tilemapStates ?? {};
+      skeletonStates = msg.skeletonStates ?? {};
+      physics2dVelocities = msg.physics2dVelocities ?? {};
+      groundedStates = msg.groundedStates ?? {};
       prevEntityStates = {};
       // Main thread passes touch capability so the worker doesn't need navigator access
       isTouchDeviceFlag = typeof msg.isTouchDevice === 'boolean' ? msg.isTouchDevice : false;
@@ -1568,6 +1587,14 @@ self.onmessage = (e: MessageEvent) => {
       }
 
       flushCommands();
+      // Always say that init finished, even when no script called forge.* and
+      // nothing above posted. In the sandboxed-origin transport the frame
+      // decides whether a later uncaught error is a BOOT failure ("this browser
+      // can't run scripts", Play stops) or a RUNTIME one by whether the worker
+      // has posted anything yet (`started` in SANDBOX_BOOTSTRAP). Without this,
+      // a quiet script that throws from a timer reads as a browser that refused
+      // the worker. The runner ignores the message; it is not a command.
+      (self as unknown as Worker).postMessage({ type: 'init_done' });
       break;
     }
 
@@ -1607,7 +1634,7 @@ self.onmessage = (e: MessageEvent) => {
           }
         }
       } else {
-        newEntities = msg.entities || {};
+        newEntities = msg.entities ?? {};
       }
 
       // Apply entityInfos delta if present
@@ -1665,7 +1692,7 @@ self.onmessage = (e: MessageEvent) => {
 
       entityStates = newEntities;
       // entityInfos already updated above (delta or full)
-      currentInput = msg.inputState || currentInput;
+      currentInput = msg.inputState ?? currentInput;
       if (msg.tilemapStates) tilemapStates = msg.tilemapStates;
       if (msg.groundedStates) groundedStates = msg.groundedStates;
       if (msg.skeletonStates) skeletonStates = msg.skeletonStates;
@@ -1684,6 +1711,7 @@ self.onmessage = (e: MessageEvent) => {
       if (heapMb >= 0 && heapMb > memoryLimitMb) {
         terminateDueToMemory(heapMb);
         flushCommands();
+        postTickDone();
         break;
       }
 
@@ -1727,6 +1755,7 @@ self.onmessage = (e: MessageEvent) => {
       }
 
       flushCommands();
+      postTickDone();
       break;
     }
 

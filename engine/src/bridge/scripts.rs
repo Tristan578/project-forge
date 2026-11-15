@@ -18,23 +18,31 @@ use crate::bridge::events;
 #[cfg(not(feature = "runtime"))]
 use crate::bridge::{Selection, SelectionChangedEvent};
 
-/// Per-entity state cached from the previous play-tick frame.
-/// Used to compute deltas so only changed entities are emitted.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CachedEntityState {
-    pub position: [f32; 3],
-    pub rotation: [f32; 3],
-    pub scale: [f32; 3],
-    pub name: String,
-    pub entity_type: String,
-    pub collider_radius: f32,
+use crate::core::play_tick_delta::{CachedEntityState, PlayTickDeltaCache};
+
+/// Resource that holds the previous emitted play-tick frame.
+///
+/// A newtype over the `std`-only `PlayTickDeltaCache`, so the diff and the
+/// clear-on-transition rule live in `core/play_tick_delta.rs` where native
+/// tests run; this is only the Bevy `Resource` wrapper. Emptied on every frame
+/// outside Play by `emit_play_tick_system`, AND by
+/// `core_systems::apply_mode_change_requests` on every accepted transition out
+/// of Play — the module doc of `core/play_tick_delta.rs` says why the second
+/// clear exists (#10375).
+#[derive(Resource, Default)]
+pub(crate) struct PlayTickCache(pub PlayTickDeltaCache);
+
+impl std::ops::Deref for PlayTickCache {
+    type Target = PlayTickDeltaCache;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-/// Resource that holds the previous frame's play-tick state.
-/// Cleared automatically when leaving Play mode.
-#[derive(Resource, Default)]
-pub(crate) struct PlayTickCache {
-    pub states: HashMap<String, CachedEntityState>,
+impl std::ops::DerefMut for PlayTickCache {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 /// System that applies pending input binding updates (works in all modes).
@@ -102,8 +110,11 @@ pub(super) fn emit_play_tick_system(
 ) {
     if !matches!(*mode, EngineMode::Play) {
         // Clear cache when not in Play mode so next entry emits a full frame.
-        if !cache.states.is_empty() {
-            cache.states.clear();
+        // Not the only clear: a leave-and-return applied in ONE update never
+        // runs this system outside Play, so `apply_mode_change_requests`
+        // clears on the transition itself (`core/play_tick_delta.rs`).
+        if !cache.is_empty() {
+            cache.clear();
         }
         return;
     }
@@ -127,34 +138,17 @@ pub(super) fn emit_play_tick_system(
         })
         .collect();
 
-    // Compute delta: entities that are new or changed
-    let mut changed: Vec<(String, [f32; 3], [f32; 3], [f32; 3], String, String, f32)> = Vec::new();
-    for (id, state) in &current_frame {
-        let is_changed = cache.states.get(id.as_str()).map_or(true, |prev| prev != state);
-        if is_changed {
-            changed.push((
-                id.clone(),
-                state.position,
-                state.rotation,
-                state.scale,
-                state.name.clone(),
-                state.entity_type.clone(),
-                state.collider_radius,
-            ));
-        }
-    }
-
-    // Compute removed entities (were in cache, not in current frame)
-    let removed: Vec<String> = cache.states.keys()
-        .filter(|id| !current_frame.contains_key(id.as_str()))
-        .cloned()
+    // Diff against the previous emitted frame and adopt this one. The diff
+    // itself lives in `core/play_tick_delta.rs`, where it is tested natively.
+    let delta = cache.advance(current_frame);
+    let changed: Vec<(String, [f32; 3], [f32; 3], [f32; 3], String, String, f32)> = delta
+        .changed
+        .into_iter()
+        .map(|(id, s)| (id, s.position, s.rotation, s.scale, s.name, s.entity_type, s.collider_radius))
         .collect();
 
-    // Update cache for next frame
-    cache.states = current_frame;
-
     // Always emit (script runtime needs input state every frame even if no entity changed)
-    events::emit_play_tick_delta(&changed, &removed, &input_state);
+    events::emit_play_tick_delta(&changed, &delta.removed, &input_state);
 }
 
 /// System that applies pending script updates (always-active).

@@ -14,7 +14,7 @@
  */
 
 import { useCallback } from 'react';
-import { cn } from '@spawnforge/ui';
+import { Button, cn } from '@spawnforge/ui';
 import {
   Loader2,
   CheckCircle2,
@@ -28,8 +28,15 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import type { OrchestratorStatus } from '@/stores/slices/orchestratorSlice';
-import type { PlanStep, TokenEstimate, ExecutorName } from '@/lib/game-creation/types';
+import { useDiscardConfirm } from '@/hooks/useDiscardConfirm';
+import {
+  DiscardConfirmPrompt,
+  OrchestratorErrorNotice,
+  errorReportsShortBalance,
+} from './OrchestratorNotices';
+import type { PlanStep, ExecutorName } from '@/lib/game-creation/types';
 import { ApprovalGateDialog } from './ApprovalGateDialog';
+import { TokenCostBar } from './TokenCostBar';
 import { useQuickStartOwnsGate } from './quickStartGateOwner';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 
@@ -334,41 +341,6 @@ function StepItem({
 }
 
 // ---------------------------------------------------------------------------
-// TokenCostBar
-// ---------------------------------------------------------------------------
-
-function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
-  return (
-    <div className="rounded-md border border-[var(--sf-border)] bg-[var(--sf-bg-elevated)] p-3">
-      <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="font-medium text-[var(--sf-text)]">Estimated token cost</span>
-        <span className="font-mono text-[var(--sf-text)]">{estimate.totalEstimated}</span>
-      </div>
-      <div className="space-y-1">
-        {estimate.breakdown.map((item) => (
-          <div key={item.category} className="flex items-center justify-between text-[11px] text-[var(--sf-text)]">
-            <span>{item.category}</span>
-            <span className="font-mono">{item.estimatedTokens}</span>
-          </div>
-        ))}
-      </div>
-      {!estimate.sufficientBalance && (
-        <div className="mt-2 flex items-center gap-1.5 rounded bg-[var(--sf-destructive)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
-          <AlertTriangle className="h-3 w-3" />
-          Insufficient token balance
-        </div>
-      )}
-      {estimate.warningMessage && estimate.sufficientBalance && (
-        <div className="mt-2 flex items-center gap-1.5 rounded bg-[var(--sf-warning)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
-          <AlertTriangle className="h-3 w-3" />
-          {estimate.warningMessage}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // OrchestratorPanel
 // ---------------------------------------------------------------------------
 
@@ -399,9 +371,20 @@ export function OrchestratorPanel() {
     resolveGate('rejected');
   }, [resolveGate]);
 
+  // Two-step discard for a waiting plan (see the footer), shared with the
+  // quick-start plan review.
+  const {
+    armed: discardArmed,
+    arm: armDiscard,
+    disarm: disarmDiscard,
+    keep: keepPlan,
+    discardRef,
+  } = useDiscardConfirm(plan, status === 'awaiting_approval');
+
   const handleStartPipeline = useCallback(() => {
+    disarmDiscard();
     void runPipelineFromPlan();
-  }, [runPipelineFromPlan]);
+  }, [runPipelineFromPlan, disarmDiscard]);
 
   const handleCancel = useCallback(() => {
     cancelPipeline();
@@ -410,6 +393,11 @@ export function OrchestratorPanel() {
   const handleReset = useCallback(() => {
     resetOrchestrator();
   }, [resetOrchestrator]);
+
+  const handleDiscard = useCallback(() => {
+    disarmDiscard();
+    cancelPipeline();
+  }, [cancelPipeline, disarmDiscard]);
 
   // Idle state — nothing to show
   if (status === 'idle' && !plan) {
@@ -450,9 +438,10 @@ export function OrchestratorPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Error display */}
         {error && (
-          <div className={cn('rounded-md px-3 py-2 text-sm', ERROR_SURFACE_CLASSES)}>
-            {error}
-          </div>
+          <OrchestratorErrorNotice
+            error={error}
+            className={cn('rounded-md px-3 py-2 text-sm', ERROR_SURFACE_CLASSES)}
+          />
         )}
 
         {/* Partially-applied steps. Amber, not red, and never replaces a step's
@@ -491,7 +480,15 @@ export function OrchestratorPanel() {
         )}
 
         {/* Token estimate */}
-        {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
+        {tokenEstimate && (
+          // A short-balance refusal above already carries its own Buy tokens
+          // link, and the bar's "this MAY cost more" row would contradict it.
+          // For any other refusal that row is the only balance warning left.
+          <TokenCostBar
+            estimate={tokenEstimate}
+            hideBalanceWarning={status === 'awaiting_approval' && errorReportsShortBalance(error)}
+          />
+        )}
 
         {/* Approval gate */}
         {pendingGate && !quickStartOwnsGate && (
@@ -528,13 +525,27 @@ export function OrchestratorPanel() {
       {/* Footer actions */}
       <div className="border-t border-[var(--sf-border)] px-3 py-2">
         {status === 'awaiting_approval' && !pendingGate && (
-          <button
-            onClick={handleStartPipeline}
-            className="flex w-full items-center justify-center gap-2 rounded bg-[var(--sf-accent-hover)] px-3 py-2 text-sm font-medium text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)]"
-          >
-            <Play className="h-3.5 w-3.5" />
-            Start Building
-          </button>
+          <div className="space-y-2">
+            {discardArmed && <DiscardConfirmPrompt onKeep={keepPlan} />}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleStartPipeline} className="flex-1 gap-2">
+                <Play className="h-3.5 w-3.5" aria-hidden="true" />
+                Start Building
+              </Button>
+              {/* A plan waiting here (including one whose build was refused) is
+                  a live run, so without this the panel had no way to drop it.
+                  The design cost tokens, so dropping it asks once. One button
+                  whose label changes, so focus stays on it when it arms. */}
+              <Button
+                ref={discardRef}
+                variant={discardArmed ? 'destructive' : 'ghost'}
+                size="sm"
+                onClick={discardArmed ? handleDiscard : armDiscard}
+              >
+                {discardArmed ? 'Discard it' : 'Discard plan'}
+              </Button>
+            </div>
+          </div>
         )}
 
         {(status === 'executing' || status === 'decomposing' || status === 'planning') && (

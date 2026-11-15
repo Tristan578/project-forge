@@ -24,6 +24,8 @@ export function createSceneTestStore() {
     ...createSceneSlice(set, get, api),
     sceneGraph: { nodes: {}, rootIds: [] },
     nodeCount: 0,
+    // The engine's default; a test that models a 2D project sets '2d'.
+    projectType: '3d',
     setScript,
     setInputPreset,
     addGameComponent,
