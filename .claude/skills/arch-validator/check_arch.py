@@ -8,6 +8,15 @@ Enforces structural rules:
 5. pending/ mod.rs must not contain request structs
 6. editorStore.ts must compose slices (no inline state definitions)
 7. useEngineEvents.ts must delegate (no inline switch cases)
+
+Run it from the repository root. Every rule opens a path relative to the
+current directory; the check-arch hook and its fixture suite rely on that to
+point this script at a tree by cd-ing into it. From anywhere else the script
+exits 2 instead of walking an empty relative path and reporting a pass.
+
+Exit codes: 0 clean; 1 violations (always for rule 1, for every rule under
+--strict); 2 the scan could not run because engine/src or web/src is not
+under the cwd or holds no source files.
 """
 
 import os
@@ -30,6 +39,52 @@ def count_lines(path):
             return sum(1 for line in f)
     except Exception:
         return 0
+
+
+# Exit code for "the scan could not run" -- distinct from 1 (violations) so a
+# caller cannot read it as a verdict. The check-arch hook maps it to "refusing
+# to pass vacuously"; a direct caller gets the same code.
+EXIT_TOOLING_ERROR = 2
+
+# The trees the rules scan, each with the file suffixes that prove it is the
+# real tree and not an empty directory of the same name.
+RUST_TREE = ("engine/src", (".rs",))
+WEB_TREE = ("web/src", (".ts", ".tsx"))
+
+
+def has_file_with_suffix(root, suffixes):
+    """True when some file under `root` ends with one of `suffixes`."""
+    for _, _, files in os.walk(root):
+        if any(f.endswith(suffixes) for f in files):
+            return True
+    return False
+
+
+def require_trees(*trees):
+    """Exit 2 unless every tree in `trees` is a non-empty directory under the cwd.
+
+    Every rule walks or opens a path relative to the current directory, and
+    os.walk over a path that does not exist yields nothing. Without this guard
+    a run from engine/ (one level below the root) scanned zero files and
+    printed "Architecture Check Passed. (7 rules, 0 violations)" with exit 0
+    -- the verdict a commit on #10399 quoted as evidence while the root-level
+    run reported 134 violations. A gate that scanned nothing must say so.
+    """
+    missing = []
+    for directory, suffixes in trees:
+        if not os.path.isdir(directory):
+            missing.append(f"{directory} is not a directory")
+        elif not has_file_with_suffix(directory, suffixes):
+            wanted = " or ".join(suffixes)
+            missing.append(f"{directory} holds no {wanted} file")
+    if missing:
+        detail = "; ".join(missing)
+        print(
+            f"check_arch: cannot scan from cwd {os.getcwd()}: {detail}."
+            " Run it from the repository root; refusing to pass vacuously.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_TOOLING_ERROR)
 
 
 def check_no_js_interop_in_core():
@@ -172,12 +227,16 @@ def main():
     # Scoped mode for the PostToolUse hook (.claude/hooks/check-arch.sh):
     # run ONLY the bridge-isolation rule so this file stays the single source
     # of truth for what counts as JS interop, without walking web/src on
-    # every edit. Exit 1 on violations, 0 when clean.
+    # every edit. Exit 1 on violations, 0 when clean, 2 when engine/src is
+    # not under the cwd (only that tree: the hook's fixtures have no web/src).
     if "--js-interop-only" in sys.argv:
+        require_trees(RUST_TREE)
         violations = check_no_js_interop_in_core()
         for v in violations:
             print(v)
         sys.exit(1 if violations else 0)
+
+    require_trees(RUST_TREE, WEB_TREE)
 
     rules = [
         ("No JS interop in core/", check_no_js_interop_in_core),
