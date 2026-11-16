@@ -130,12 +130,14 @@ export async function refundRestrictedPayment(
 ): Promise<void> {
   const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge'] });
   const charge = chargeOf(pi);
-  if (charge && !charge.refunded && !isSanctionsRefund(charge)) {
+  // No charge yet (nothing was taken) or already refunded: nothing to do, and
+  // a refund call would fail on every redelivery.
+  if (!charge || charge.refunded) return;
+  if (!isSanctionsRefund(charge)) {
     await stripe.charges.update(charge.id, {
       metadata: { [SANCTIONS_REFUND_METADATA_KEY]: match.jurisdiction.country },
     });
   }
-  if (charge?.refunded) return;
   try {
     await stripe.refunds.create(
       {

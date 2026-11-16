@@ -283,3 +283,21 @@ describe('charge.refunded', () => {
     expect(h.handleChargeRefunded).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('refund edge cases', () => {
+  it('does not refund (or fail) when the PaymentIntent has no charge yet', async () => {
+    h.paymentIntentsRetrieve.mockResolvedValue({ id: 'pi_tok', latest_charge: null });
+    const res = await deliver('checkout.session.completed', tokenSession({ country: 'IR', state: null }));
+    expect(res.status).toBe(200);
+    expect(h.refundsCreate).not.toHaveBeenCalled();
+    expect(h.creditAddonTokens).not.toHaveBeenCalled();
+  });
+
+  it('does not refund a charge that is already refunded', async () => {
+    h.paymentIntentsRetrieve.mockResolvedValue(piWithCard('US', { refunded: true }));
+    await deliver('checkout.session.completed', tokenSession({ country: 'IR', state: null }));
+    expect(h.refundsCreate).not.toHaveBeenCalled();
+    expect(h.chargesUpdate).not.toHaveBeenCalled();
+    expect(h.creditAddonTokens).not.toHaveBeenCalled();
+  });
+});
