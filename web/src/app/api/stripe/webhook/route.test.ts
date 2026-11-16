@@ -136,7 +136,7 @@ describe('POST /api/stripe/webhook', () => {
     const res = await POST(req);
 
     expect(res.status).toBe(200);
-    expect(lifecycle.handleSubscriptionUpdated).toHaveBeenCalledWith('cus_123', 'sub_123', 'pro', 'active');
+    expect(lifecycle.handleSubscriptionUpdated).toHaveBeenCalledWith('cus_123', 'sub_123', 'pro', 'active', { refuseUpgrade: expect.any(Function) });
   });
 
   it('processes entitlements.active_entitlement_summary.updated (PF-911 / #8821)', async () => {

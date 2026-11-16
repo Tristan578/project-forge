@@ -21,6 +21,7 @@ import { isStripeTaxEnabled } from '@/lib/billing/stripe-tax';
 import { checkBotIdGate } from '@/lib/security/botId';
 import type Stripe from 'stripe';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { sanctionsPurchaseBlock } from '@/lib/security/sanctionsGeoBlock';
 
 const checkoutSchema = z.object({
   tier: z.enum(['hobbyist', 'creator', 'pro']),
@@ -40,6 +41,12 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * Body: { tier: 'hobbyist' | 'creator' | 'pro' }
  */
 async function POST_impl(req: NextRequest) {
+  // Sanctions (#9331): no sale to a buyer whose location is known to be in a
+  // listed jurisdiction. An unknown location is not refused here: Checkout
+  // collects the billing address and the webhook refuses a listed one.
+  const geoBlocked = sanctionsPurchaseBlock(req);
+  if (geoBlocked) return geoBlocked;
+
   // BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
   // step-up/auth work, so a blocked bot never spends that budget.
   const botIdResponse = await checkBotIdGate();
@@ -98,6 +105,12 @@ async function POST_impl(req: NextRequest) {
       },
       success_url: `${APP_URL}/dashboard?upgraded=true`,
       cancel_url: `${APP_URL}/pricing`,
+      // Sanctions (#9331): always collect the billing address, and save it on
+      // the customer, so the webhook can refuse a buyer in a listed
+      // jurisdiction (it reads `customer_details.address` and the customer's
+      // saved address before granting the plan).
+      billing_address_collection: 'required',
+      customer_update: { address: 'auto' },
     };
 
     // Stripe Tax (S2 compliance, PF-912): when enabled in the dashboard, collect
@@ -111,7 +124,7 @@ async function POST_impl(req: NextRequest) {
       // automatic_tax requires a billing address. For an existing/saved customer,
       // Stripe also requires customer_update.address so the collected address is
       // persisted back onto the customer (otherwise session.create rejects).
-      sessionParams.billing_address_collection = 'required';
+      // Both are already set above for the sanctions check (#9331).
       // tax_id_collection (below) also requires customer_update.name: 'auto' for an
       // existing/saved customer — the business name Stripe collects alongside the tax
       // ID needs somewhere to be written back. Without name: 'auto', sessions.create
