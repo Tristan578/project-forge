@@ -6,7 +6,7 @@ import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
-import { clearSceneLoadRefusal, describeSceneLoadRefusal, showSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
+import { describeSceneLoadRefusal, showSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { showError } from '@/lib/toast';
 import {
   loadAutoSaveEntry,
@@ -125,7 +125,6 @@ export function AutoSaveRecovery() {
       );
       return;
     }
-    clearSceneLoadRefusal();
     setSceneName(entry.sceneName);
 
     // Only delete the auto-save entry after successfully dispatching the load.

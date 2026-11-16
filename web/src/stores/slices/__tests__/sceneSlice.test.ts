@@ -1583,8 +1583,6 @@ describe('sceneSlice', () => {
       expect(persisted().activeSceneId).toBe(target!.id);
       expect(store.getState().activeSceneId).toBe(target!.id);
       expect(mockDispatch).toHaveBeenCalledWith('load_scene', expect.anything());
-      // A refusal toast from an earlier switch would now say something false.
-      expect(toastModule.dismissToast).toHaveBeenCalledWith('scene-load-refused');
     });
 
     it('switchScene leaves state untouched for an unknown scene', async () => {
@@ -1700,6 +1698,49 @@ describe('sceneSlice', () => {
         'The scene could not be opened, so the switch was cancelled. The engine refused it: Missing field `entities`. You are still on the current scene, which is unchanged.',
         { id: 'scene-load-refused' },
       );
+    });
+
+    // The refusal toast says "the current scene is unchanged". Any later
+    // successful load or new scene makes that false, whichever caller ran it
+    // (a chat tool included), so the slice clears it, not the callers.
+    it('closes a raised refusal toast when any later loadScene or newScene succeeds, and only then', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const refuseLoads = (command: string, payload: unknown) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(new CustomEvent('forge:scene-exported', { detail: { json: JSON.stringify(sceneFixture('Live')) } }));
+        }
+        if (command === 'load_scene') return { success: false, error: 'missing field `entities`' };
+        return { success: true };
+      };
+      const json = JSON.stringify(sceneFixture('Level'));
+
+      // Settle any toast an earlier test left raised, then start clean.
+      setSceneDispatcher(mockDispatch);
+      store.getState().loadScene(json, { rejectionStrandsEditor: false });
+      vi.mocked(toastModule.dismissToast).mockClear();
+
+      // A plain success with nothing raised does not touch the toast system.
+      expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(true);
+      expect(toastModule.dismissToast).not.toHaveBeenCalled();
+
+      // Refused Scene Browser switch raises it; a later load (as a chat tool would) closes it.
+      setSceneDispatcher(refuseLoads);
+      await store.getState().switchScene(target!.id);
+      expect(toastModule.showPersistentError).toHaveBeenCalledWith(expect.any(String), { id: 'scene-load-refused' });
+      setSceneDispatcher(mockDispatch);
+      expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(true);
+      expect(toastModule.dismissToast).toHaveBeenCalledExactlyOnceWith('scene-load-refused');
+
+      // Raised again; an accepted newScene closes it too.
+      vi.mocked(toastModule.dismissToast).mockClear();
+      setSceneDispatcher(refuseLoads);
+      await store.getState().switchScene(target!.id);
+      setSceneDispatcher(mockDispatch);
+      expect(store.getState().newScene()).toBe(true);
+      expect(toastModule.dismissToast).toHaveBeenCalledExactlyOnceWith('scene-load-refused');
     });
 
     it('names the newScene() refusal when the fallback for a data-less target is refused', async () => {

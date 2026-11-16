@@ -8,7 +8,7 @@ import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
 import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
-import { clearSceneLoadRefusal, describeSceneLoadRefusal, showSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
+import { describeSceneLoadRefusal, showSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { showError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
@@ -168,9 +168,7 @@ export function SceneToolbar() {
       // `sceneLoadRefusal()` says which of those it was.
       const refusal = sceneLoadRefusal();
       showSceneLoadRefusal(`The scene was not loaded. ${describeSceneLoadRefusal(refusal)} The current scene is unchanged.`, refusal);
-      return;
     }
-    clearSceneLoadRefusal();
   }, [loadScene, sceneLoadRefusal]);
 
   /**

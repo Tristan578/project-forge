@@ -57,7 +57,7 @@ vi.mock('@/lib/projects/cloudSave', () => ({
 
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
-import { showError, showPersistentError, dismissToast } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
 import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
@@ -344,7 +344,6 @@ describe('SceneToolbar', () => {
 
       expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
       expect(vi.mocked(showError)).not.toHaveBeenCalled();
-      expect(vi.mocked(dismissToast)).toHaveBeenCalledWith('scene-load-refused');
     });
 
     it('shows an error when newScene is rejected via the New Scene button', async () => {

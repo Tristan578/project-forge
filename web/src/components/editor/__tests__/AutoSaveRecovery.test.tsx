@@ -36,7 +36,7 @@ vi.mock('@/lib/toast', () => ({
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { loadAutoSaveEntry, deleteAutoSaveEntry } from '@/lib/storage/autoSave';
-import { showError, showPersistentError, dismissToast } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
 import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // ---------------------------------------------------------------------------
@@ -336,8 +336,6 @@ describe('AutoSaveRecovery', () => {
       expect(setSceneName).toHaveBeenCalledWith('Test Scene');
       expect(vi.mocked(deleteAutoSaveEntry)).toHaveBeenCalledWith('proj-1');
       expect(vi.mocked(showError)).not.toHaveBeenCalled();
-      // A refusal toast from an earlier attempt would now say something false.
-      expect(vi.mocked(dismissToast)).toHaveBeenCalledWith('scene-load-refused');
     });
   });
 

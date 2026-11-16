@@ -71,15 +71,27 @@ export const SCENE_LOAD_REFUSED_TOAST_ID = 'scene-load-refused';
  * @param refusal What `sceneLoadRefusal()` returned, to choose the toast.
  */
 export function showSceneLoadRefusal(message: string, refusal: SceneLoadRefusal | null): void {
-  if (refusal === null) showError(message);
-  else showPersistentError(message, { id: SCENE_LOAD_REFUSED_TOAST_ID });
+  if (refusal === null) {
+    showError(message);
+    return;
+  }
+  showPersistentError(message, { id: SCENE_LOAD_REFUSED_TOAST_ID });
+  refusalToastShown = true;
 }
 
+/** Whether {@link showSceneLoadRefusal} has raised a persistent toast not yet cleared. */
+let refusalToastShown = false;
+
 /**
- * Close a refusal toast that is still up. Called when a later load of the same
- * kind succeeds, since its "the current scene is unchanged" would then be false.
+ * Close the persistent refusal toast, if one was raised. `sceneSlice` calls
+ * this whenever `loadScene` or `newScene` succeeds, from any caller (the chat
+ * tools included), because the toast's "the current scene is unchanged" is
+ * false from then on. Does nothing when no refusal toast was raised, so a
+ * normal load never touches the toast system.
  */
 export function clearSceneLoadRefusal(): void {
+  if (!refusalToastShown) return;
+  refusalToastShown = false;
   dismissToast(SCENE_LOAD_REFUSED_TOAST_ID);
 }
 

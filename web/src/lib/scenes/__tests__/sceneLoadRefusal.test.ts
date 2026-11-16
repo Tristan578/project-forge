@@ -75,7 +75,19 @@ describe('showSceneLoadRefusal / clearSceneLoadRefusal', () => {
     expect(vi.mocked(showPersistentError)).not.toHaveBeenCalled();
   });
 
-  it('closes the refusal toast by the same id', () => {
+  it('closes the refusal toast by the same id, and only when one was raised', () => {
+    clearSceneLoadRefusal(); // settles anything an earlier case raised
+    vi.mocked(dismissToast).mockClear();
+
+    clearSceneLoadRefusal();
+    expect(vi.mocked(dismissToast)).not.toHaveBeenCalled();
+
+    showSceneLoadRefusal('msg', null); // ordinary toast: nothing to close later
+    clearSceneLoadRefusal();
+    expect(vi.mocked(dismissToast)).not.toHaveBeenCalled();
+
+    showSceneLoadRefusal('msg', { kind: 'prefab_invalid' });
+    clearSceneLoadRefusal();
     clearSceneLoadRefusal();
     expect(vi.mocked(dismissToast)).toHaveBeenCalledExactlyOnceWith('scene-load-refused');
   });

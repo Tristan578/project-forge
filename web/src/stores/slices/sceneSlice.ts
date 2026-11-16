@@ -1209,6 +1209,9 @@ export const createSceneSlice: StateCreator<
     // rejection: the engine has now accepted a scene, so serializing it is
     // once again describing the project rather than overwriting it.
     set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+    // A refusal toast from an earlier load says "the current scene is
+    // unchanged", which stops being true here, whichever caller loaded.
+    clearSceneLoadRefusal();
     // Swap in this scene's own arrangement (or clear it) — see
     // `syncArrangementFromLoadedScene` (#10058). A deferred replay is the one
     // exception: its caller hydrated from this same data when it deferred,
@@ -1324,6 +1327,7 @@ export const createSceneSlice: StateCreator<
     // again from here (#10056). A REJECTED new_scene leaves any existing
     // `sceneLoadError` standing, because the untrustworthy scene is still up.
     set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+    clearSceneLoadRefusal();
     // A blank scene has no saved arrangement — clear whatever the previous
     // scene left behind (#10058).
     useMusicArrangementStore.getState().hydrate(null);
@@ -1694,7 +1698,6 @@ export const createSceneSlice: StateCreator<
       }
       return;
     }
-    clearSceneLoadRefusal();
     saveProjectScenes(result.project, get().projectId);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
