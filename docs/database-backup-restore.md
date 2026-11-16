@@ -408,8 +408,12 @@ WHERE u.id = '<user_uuid>';
 | Generation job records | Anonymized on account deletion | Foreign key set to NULL or deleted |
 | Published games | Unpublished and removed on account deletion | Cascade |
 
-For the Right to Erasure (`DELETE /api/user/delete`), confirm the cascading deletes cover all tables with `user_id` foreign keys:
-- `api_keys`, `provider_keys`, `token_usage`, `token_purchases`, `projects`, `cost_log`, `credit_transactions`, `published_games`, `generation_jobs`, `feedback`, `moderation_appeals`, `seller_profiles`, `game_ratings`, `game_comments`, `game_likes`, `user_follows`, `asset_purchases`, `asset_reviews`
+For the Right to Erasure (`DELETE /api/user/delete`), most foreign keys to `users` do not cascade. `deleteUserAccount` (`web/src/lib/auth/user-service.ts`) deletes the user's rows explicitly, in one transaction, before the `users` row. Confirm it covers every table with a foreign key to `users`:
+- By `user_id`: `api_keys`, `provider_keys`, `token_usage`, `token_purchases`, `projects`, `cost_log`, `credit_transactions`, `published_games`, `generation_jobs`, `provider_job_owners` (#10262), `feedback`, `moderation_appeals`, `seller_profiles`, `game_ratings`, `game_comments`, `game_likes`, `game_forks`, `asset_reviews`
+- By another column: `user_follows` (`follower_id` and `following_id`), `asset_purchases` (`buyer_id`), `game_reports` (`reporter_id`), `marketplace_assets` (`seller_id`)
+- By `ON DELETE CASCADE`, with no explicit delete: `graph_nodes`, `graph_edges`
+
+The schema-driven test in `web/src/lib/auth/__tests__/user-service.test.ts` reads every foreign key to `users` from `schema.ts` and fails when a non-cascading one has no matching `DELETE`. This list is for review; that test is the check.
 
 ---
 
