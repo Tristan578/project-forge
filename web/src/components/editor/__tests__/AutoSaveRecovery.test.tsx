@@ -59,6 +59,7 @@ function mockStore(overrides: Record<string, unknown> = {}) {
     projectId: 'proj-1',
     lastCloudSave: null,
     loadScene: vi.fn(),
+    sceneLoadRefusal: vi.fn(() => null),
     setSceneName: vi.fn(),
     ...overrides,
   };
@@ -214,6 +215,26 @@ describe('AutoSaveRecovery', () => {
       expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
     });
 
+    // `rejectionStrandsEditor: false` sets no `sceneLoadError`, so the toast is
+    // the whole report: it must name the cause the slice recorded, not guess.
+    it.each([
+      [{ kind: 'engine_refused', details: 'Invalid type: null, expected f32.' }, 'The saved scene could not be restored. The engine refused to load it. Details: Invalid type: null, expected f32.'],
+      [{ kind: 'prefab_invalid' }, 'The saved scene could not be restored. Its prefab data is invalid or its prefab references form a cycle.'],
+      [null, 'The saved scene could not be restored. The engine is not ready yet — try again in a moment.'],
+    ])('names the cause sceneLoadRefusal() recorded (%j)', async (refusal, message) => {
+      vi.mocked(loadAutoSaveEntry).mockResolvedValue(makeEntry());
+      vi.mocked(getWasmModule).mockReturnValue({} as never);
+      mockStore({ loadScene: vi.fn(() => false), sceneLoadRefusal: vi.fn(() => refusal) });
+      render(<AutoSaveRecovery />);
+      await flushPromises();
+      await flushPromises();
+
+      fireEvent.click(screen.getByRole('button', { name: /restore/i }));
+
+      expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith(message);
+      expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
+    });
+
     // #10202 review, M2: `loadScene` re-raises a dispatch the engine threw on,
     // after locking saving (#10079, #10202). `handleRecover` had no catch, so
     // the throw escaped the click handler as an uncaught error, the banner
@@ -304,7 +325,12 @@ describe('AutoSaveRecovery', () => {
       vi.mocked(getWasmModule).mockReturnValue({} as never);
       mockStore({ lastCloudSave: null });
       render(<AutoSaveRecovery />);
-      await vi.runAllTimersAsync();
+      // Two flushes, like every other test here. `runAllTimersAsync()` used to
+      // be here and returned before the entry promise and React's re-render had
+      // settled, so this passed only when an earlier test had already warmed
+      // the scheduler — run alone, or after an added test, it failed.
+      await flushPromises();
+      await flushPromises();
       // With no cloud save to compare against, the dialog should show
       expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
     });
@@ -315,7 +341,10 @@ describe('AutoSaveRecovery', () => {
       mockStore({ lastCloudSave: cloudSave });
       const { container } = render(<AutoSaveRecovery />);
       await flushPromises();
+      await flushPromises();
       expect(container.firstChild).toBeNull();
+      // Proof the comparison ran, so the null above is not just an unsettled render.
+      expect(vi.mocked(deleteAutoSaveEntry)).toHaveBeenCalledWith('proj-1');
     });
   });
 });

@@ -35,6 +35,7 @@ import {
   sceneDispatchFailureMessage,
 } from '@/lib/scenes/engineDispatchThrew';
 import type { NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import type { SceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
   loadPrefabInstances,
@@ -286,6 +287,19 @@ export interface SceneSlice {
    */
   newSceneRefusal: () => NewSceneRefusal | null;
   /**
+   * Why the most recent {@link loadScene} call answered `false`, or `null` if
+   * it answered `true`, threw, found no engine attached, or has not been
+   * called.
+   *
+   * Recorded on every refusal, whether or not `rejectionStrandsEditor` locked
+   * saving. A caller that opted out of the lockout (the auto-save restore, the
+   * toolbar import, the `load_scene` and `switch_scene` tools) gets no
+   * `sceneLoadError`, so without this it had nothing but a guess to tell the
+   * person. Read it immediately after the call, since both are synchronous,
+   * and put it through `describeSceneLoadRefusal`.
+   */
+  sceneLoadRefusal: () => SceneLoadRefusal | null;
+  /**
    * Is the engine's command dispatcher attached to this slice yet?
    *
    * The disambiguator for `loadScene`'s boolean, which is `false` for two
@@ -448,6 +462,12 @@ let dispatchCommand: SceneDispatcher | null = null;
  * a store snapshot as off the live store.
  */
 let lastNewSceneRefusal: NewSceneRefusal | null = null;
+
+/**
+ * Why the latest `loadScene()` answered `false` — see `SceneSlice.sceneLoadRefusal`.
+ * Module state for the same reason as `lastNewSceneRefusal`.
+ */
+let lastSceneLoadRefusal: SceneLoadRefusal | null = null;
 
 /**
  * The one scene load that arrived while no engine was attached, held until
@@ -1066,8 +1086,14 @@ export const createSceneSlice: StateCreator<
     // viewport is untrustworthy and saving must lock regardless of
     // `rejectionStrandsEditor` (#10079). Defaults on independently.
     const strandOnThrow = opts?.strandOnThrow ?? true;
+    // Each refusal below records its cause for `sceneLoadRefusal()`; `true`, a
+    // throw and a missing engine leave it null.
+    lastSceneLoadRefusal = null;
     const setLockout = (reason: string) => set({ sceneLoadError: { reason, at: Date.now() } });
-    const rejectEditor = (reason: string) => {
+    const rejectEditor = (reason: string, refusal: SceneLoadRefusal) => {
+      // Recorded on EVERY refusal, lockout or not: a caller that opted out of
+      // the lockout still needs the cause to tell the person.
+      lastSceneLoadRefusal = refusal;
       // A non-replacing rejection cannot make a previously wrecked viewport
       // trustworthy or downgrade the provenance used by checkpoint retries.
       if (strandOnReject && !isEngineLoadThrewLockout(get().sceneLoadError)) setLockout(reason);
@@ -1118,7 +1144,7 @@ export const createSceneSlice: StateCreator<
     // desync it from what is actually rendered.
     const snapshot = restorePrefabInstances(json);
     if (!snapshot) {
-      rejectEditor(PREFAB_LOAD_REJECTION);
+      rejectEditor(PREFAB_LOAD_REJECTION, { kind: 'prefab_invalid' });
       return false;
     }
     let outcome: SceneLoadOutcome;
@@ -1163,7 +1189,10 @@ export const createSceneSlice: StateCreator<
       // and the next save would persist the wrong instances onto the scene
       // that is actually still active.
       rollbackPrefabState(snapshot);
-      rejectEditor(engineLoadRejectionReason(outcome.error));
+      rejectEditor(engineLoadRejectionReason(outcome.error), {
+        kind: 'engine_refused',
+        details: outcome.error ? describeSceneRefusal(outcome.error) : null,
+      });
       return false;
     }
     // A rejected request must not invalidate an unrelated recovery operation.
@@ -1292,6 +1321,7 @@ export const createSceneSlice: StateCreator<
     return true;
   },
   newSceneRefusal: () => lastNewSceneRefusal,
+  sceneLoadRefusal: () => lastSceneLoadRefusal,
   isEngineAttached: () => dispatchCommand !== null,
   setSceneName: (name) => set({ sceneName: name }),
   setSceneModified: (modified) => set({ sceneModified: modified }),

@@ -212,6 +212,18 @@ describe('load_scene', () => {
     expect(result.error).toContain('not loaded');
   });
 
+  it.each([
+    [{ kind: 'engine_refused', details: 'Invalid type: null, expected f32 at attenuationDistance.' }, 'The scene was not loaded. The engine refused to load it. Details: Invalid type: null, expected f32 at attenuationDistance.'],
+    [{ kind: 'prefab_invalid' }, 'The scene was not loaded. Its prefab data is invalid or its prefab references form a cycle.'],
+    [null, 'The scene was not loaded. The engine is not ready yet — try again in a moment.'],
+  ])('names the cause sceneLoadRefusal() recorded (%j)', async (refusal, message) => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json: '{}' }, {
+      loadScene: vi.fn(() => false),
+      sceneLoadRefusal: vi.fn(() => refusal),
+    });
+    expect(result).toEqual({ success: false, error: message });
+  });
+
   it('calls loadScene with provided json and returns success message', async () => {
     const json = JSON.stringify({ entities: [] });
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json });
@@ -625,6 +637,27 @@ describe('switch_scene', () => {
     // a viewport the throw may have wrecked (#10079).
     expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData), { rejectionStrandsEditor: false, strandOnThrow: true });
     expect(store.setScenes).toHaveBeenCalled();
+  });
+
+  it('names the cause sceneLoadRefusal() recorded when the target scene is refused', async () => {
+    const sceneData = { formatVersion: 1, sceneName: 'Level 2', entities: [] };
+    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: sceneData });
+
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      {
+        loadScene: vi.fn(() => false),
+        sceneLoadRefusal: vi.fn(() => ({ kind: 'engine_refused', details: 'Missing field `entities`.' })),
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: 'The scene switch was refused. The engine refused to load it. Details: Missing field `entities`. The current scene is unchanged.',
+    });
+    expect(store.setScenes).not.toHaveBeenCalled();
   });
 
   it('resolves scene by name when getSceneByName returns a match', async () => {

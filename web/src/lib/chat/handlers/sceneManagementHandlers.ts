@@ -10,6 +10,7 @@ import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
 import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import { describeSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
 import { validateSceneFile, type SceneValidation } from '@/lib/scenes/sceneValidation';
 import { COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
@@ -101,7 +102,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       return sceneDispatchThrewResult('The scene could not be opened', error);
     }
     if (accepted === false) {
-      return { success: false, error: 'The scene was not loaded. Check its prefab metadata and engine readiness, then try again.' };
+      return { success: false, error: `The scene was not loaded. ${describeSceneLoadRefusal(ctx.store.sceneLoadRefusal())}` };
     }
     return { success: true, result: { message: 'Scene load triggered' } };
   },
@@ -281,11 +282,12 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       saveProjectScenes(project, ctx.store.projectId);
       // The `newScene()` fallback refuses for reasons that are not the
       // engine's (no engine attached, a storage write refused), so its `false`
-      // is reported by cause; a refused `loadScene` is the engine's answer.
+      // is reported by cause, and so is a refused `loadScene`: its prefab data,
+      // the engine's own reason, or no engine yet (`sceneLoadRefusal()`).
       return {
         success: false,
         error: result.sceneToLoad
-          ? 'The engine rejected the scene switch. The current scene is unchanged.'
+          ? `The scene switch was refused. ${describeSceneLoadRefusal(ctx.store.sceneLoadRefusal())} The current scene is unchanged.`
           : `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The scene switch was cancelled, and the current scene is unchanged.`,
       };
     }

@@ -314,6 +314,73 @@ describe('sceneSlice', () => {
       });
     });
 
+    // A caller that passes `rejectionStrandsEditor: false` gets no
+    // `sceneLoadError`, so `sceneLoadRefusal()` is its only way to name the
+    // cause (the engine's bounded reason, or the prefab data) instead of a guess.
+    describe('sceneLoadRefusal() names why the last loadScene() answered false', () => {
+      it('is engine_refused with the bounded, worded engine reason, recorded even when saving is not locked', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'invalid type: null, expected f32 at line 1 column 120' })));
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')), { rejectionStrandsEditor: false })).toBe(false);
+
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(store.getState().sceneLoadRefusal()).toEqual({
+          kind: 'engine_refused',
+          details: 'Invalid type: null, expected f32.',
+        });
+      });
+
+      it('carries the same reason the lockout shows when saving IS locked', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'missing field `entities`' })));
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')))).toBe(false);
+
+        const refusal = store.getState().sceneLoadRefusal();
+        expect(refusal).toEqual({ kind: 'engine_refused', details: 'Missing field `entities`.' });
+        expect(store.getState().sceneLoadError?.reason).toContain('Details: Missing field `entities`.');
+      });
+
+      it('is engine_refused with null details when the engine gave no reason', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false })));
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')), { rejectionStrandsEditor: false })).toBe(false);
+        expect(store.getState().sceneLoadRefusal()).toEqual({ kind: 'engine_refused', details: null });
+      });
+
+      it('is prefab_invalid when the embedded prefab data is refused, and the engine was never asked', () => {
+        const bad = JSON.stringify({ ...sceneFixture('Bad prefabs'), prefabDefinitions: {} });
+
+        expect(store.getState().loadScene(bad, { rejectionStrandsEditor: false })).toBe(false);
+
+        expect(store.getState().sceneLoadRefusal()).toEqual({ kind: 'prefab_invalid' });
+        expect(mockDispatch).not.toHaveBeenCalledWith('load_scene', expect.anything());
+      });
+
+      it('is null when no engine is attached', () => {
+        setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Cold open')), { rejectionStrandsEditor: false })).toBe(false);
+        expect(store.getState().sceneLoadRefusal()).toBeNull();
+      });
+
+      it('is cleared by an accepted load and by a throw, which is not a refusal', () => {
+        const json = JSON.stringify(sceneFixture('Level'));
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(false);
+        expect(store.getState().sceneLoadRefusal()).not.toBeNull();
+
+        setSceneDispatcher(mockDispatch);
+        expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(true);
+        expect(store.getState().sceneLoadRefusal()).toBeNull();
+
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(false);
+        setSceneDispatcher(vi.fn(() => { throw new Error('engine trapped'); }));
+        expect(() => store.getState().loadScene(json, { rejectionStrandsEditor: false })).toThrow(EngineDispatchThrewError);
+        expect(store.getState().sceneLoadRefusal()).toBeNull();
+      });
+    });
+
     // #10202 review, round 2: `dispatchSceneLoad`'s catch ran the audio and
     // mode rollbacks bare before rethrowing. A rollback that threw would have
     // left the catch with ITS error instead of the typed one — a plain error

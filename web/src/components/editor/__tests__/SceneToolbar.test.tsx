@@ -72,6 +72,7 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
     // as the engine refusing — what every pre-existing `newScene: () => false`
     // here means; the deferral and storage cases override it.
     newSceneRefusal: vi.fn(() => null),
+    sceneLoadRefusal: vi.fn(() => null),
     setSceneName: vi.fn(),
     engineMode: 'edit',
     undo: vi.fn(),
@@ -298,6 +299,22 @@ describe('SceneToolbar', () => {
 
       expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
       expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      [{ kind: 'engine_refused', details: 'Invalid type: null, expected f32 at attenuationDistance.' }, 'The scene was not loaded. The engine refused to load it. Details: Invalid type: null, expected f32 at attenuationDistance.'],
+      [{ kind: 'prefab_invalid' }, 'The scene was not loaded. Its prefab data is invalid or its prefab references form a cycle.'],
+      [null, 'The scene was not loaded. The engine is not ready yet — try again in a moment.'],
+    ])('names the cause sceneLoadRefusal() recorded for a rejected import (%j)', async (refusal, message) => {
+      vi.mocked(openSceneFilePicker).mockResolvedValue('{"entities":[]}');
+      mockEditorStore({ loadScene: vi.fn(() => false), sceneLoadRefusal: vi.fn(() => refusal) });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /load scene/i }).click();
+      });
+
+      expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith(message);
     });
 
     it('does not show an error when a picked scene loads successfully', async () => {
