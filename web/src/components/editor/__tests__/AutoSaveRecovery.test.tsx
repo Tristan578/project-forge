@@ -30,12 +30,13 @@ vi.mock('lucide-react', async () => {
 vi.mock('@/lib/toast', () => ({
   showError: vi.fn(),
   showPersistentError: vi.fn(),
+  dismissToast: vi.fn(),
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { loadAutoSaveEntry, deleteAutoSaveEntry } from '@/lib/storage/autoSave';
-import { showError, showPersistentError } from '@/lib/toast';
+import { showError, showPersistentError, dismissToast } from '@/lib/toast';
 import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // ---------------------------------------------------------------------------
@@ -226,7 +227,11 @@ describe('AutoSaveRecovery', () => {
       expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
       expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
       expect(setSceneName).not.toHaveBeenCalled();
-      expect(vi.mocked(showPersistentError)).toHaveBeenCalledTimes(1);
+      // No refusal recorded (engine not attached): an ordinary, self-closing toast.
+      expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith(
+        'The saved scene could not be restored. The engine is not ready yet — try again in a moment. Your backup is kept, and the current scene is unchanged.',
+      );
+      expect(vi.mocked(showPersistentError)).not.toHaveBeenCalled();
       expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
     });
 
@@ -236,8 +241,7 @@ describe('AutoSaveRecovery', () => {
       [{ kind: 'engine_refused', details: 'Invalid type: null, expected f32.' }, 'The engine refused it: Invalid type: null, expected f32.'],
       [{ kind: 'engine_refused', details: null }, 'The engine refused it and gave no reason.'],
       [{ kind: 'prefab_invalid' }, 'Its prefab data is invalid, or its prefabs reference each other in a loop.'],
-      [null, 'The engine is not ready yet — try again in a moment.'],
-    ])('names the cause sceneLoadRefusal() recorded after the load (%j)', async (refusal, cause) => {
+    ])('names the cause sceneLoadRefusal() recorded after the load, in a toast that stays up (%j)', async (refusal, cause) => {
       vi.mocked(loadAutoSaveEntry).mockResolvedValue(makeEntry());
       vi.mocked(getWasmModule).mockReturnValue({} as never);
       mockStore(refusingLoad(refusal));
@@ -332,6 +336,8 @@ describe('AutoSaveRecovery', () => {
       expect(setSceneName).toHaveBeenCalledWith('Test Scene');
       expect(vi.mocked(deleteAutoSaveEntry)).toHaveBeenCalledWith('proj-1');
       expect(vi.mocked(showError)).not.toHaveBeenCalled();
+      // A refusal toast from an earlier attempt would now say something false.
+      expect(vi.mocked(dismissToast)).toHaveBeenCalledWith('scene-load-refused');
     });
   });
 

@@ -18,6 +18,8 @@
  * its pre-call value.
  */
 
+import { dismissToast, showError, showPersistentError } from '@/lib/toast';
+
 /** The reasons `loadScene()` answers `false` after it tried to load. */
 export type SceneLoadRefusal =
   /**
@@ -54,6 +56,31 @@ export function describeSceneLoadRefusal(refusal: SceneLoadRefusal | null): stri
         ? `The engine refused it: ${endSentence(refusal.details)}`
         : 'The engine refused it and gave no reason.';
   }
+}
+
+/** One id for every refusal toast, so a later one replaces an earlier one. */
+export const SCENE_LOAD_REFUSED_TOAST_ID = 'scene-load-refused';
+
+/**
+ * Show a refusal message built from {@link describeSceneLoadRefusal}.
+ *
+ * A refusal with a recorded cause stays up until dismissed, because the
+ * engine's reason can run to 512 characters. `null` (no engine attached yet)
+ * fixes itself in a moment, so it gets an ordinary toast that goes away.
+ * @param message The full sentence to show.
+ * @param refusal What `sceneLoadRefusal()` returned, to choose the toast.
+ */
+export function showSceneLoadRefusal(message: string, refusal: SceneLoadRefusal | null): void {
+  if (refusal === null) showError(message);
+  else showPersistentError(message, { id: SCENE_LOAD_REFUSED_TOAST_ID });
+}
+
+/**
+ * Close a refusal toast that is still up. Called when a later load of the same
+ * kind succeeds, since its "the current scene is unchanged" would then be false.
+ */
+export function clearSceneLoadRefusal(): void {
+  dismissToast(SCENE_LOAD_REFUSED_TOAST_ID);
 }
 
 /**

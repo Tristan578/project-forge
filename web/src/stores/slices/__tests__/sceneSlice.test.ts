@@ -19,6 +19,7 @@ import type { SceneLoadError } from '../sceneSlice';
 vi.mock('@/lib/toast', () => ({
   showError: vi.fn(),
   showPersistentError: vi.fn(),
+  dismissToast: vi.fn(),
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
 }));
@@ -1582,6 +1583,8 @@ describe('sceneSlice', () => {
       expect(persisted().activeSceneId).toBe(target!.id);
       expect(store.getState().activeSceneId).toBe(target!.id);
       expect(mockDispatch).toHaveBeenCalledWith('load_scene', expect.anything());
+      // A refusal toast from an earlier switch would now say something false.
+      expect(toastModule.dismissToast).toHaveBeenCalledWith('scene-load-refused');
     });
 
     it('switchScene leaves state untouched for an unknown scene', async () => {
@@ -1722,13 +1725,15 @@ describe('sceneSlice', () => {
         return { success: true };
       });
 
+      vi.mocked(toastModule.showError).mockClear();
       await store.getState().switchScene(target!.id);
 
       expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
-      expect(toastModule.showPersistentError).toHaveBeenCalledExactlyOnceWith(
+      // The same ordinary toast the toolbar's New Scene shows for this refusal.
+      expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(
         'The scene could not be opened, so the switch was cancelled. The engine did not accept a new scene. You are still on the current scene, which is unchanged.',
-        { id: 'scene-load-refused' },
       );
+      expect(toastModule.showPersistentError).not.toHaveBeenCalled();
     });
 
     // Sentry (#10079 follow-up): when the TARGET scene's stored `data` is
@@ -1834,13 +1839,12 @@ describe('sceneSlice', () => {
 
         expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
         expect(store.getState().sceneLoadError).toBeNull();
-        expect(toastModule.showPersistentError).toHaveBeenCalledExactlyOnceWith(
+        expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(
           expect.stringContaining('the browser refused to update its local storage'),
-          { id: 'scene-load-refused' },
         );
-        expect(toastModule.showPersistentError).toHaveBeenCalledWith(expect.stringContaining('unchanged'), expect.anything());
-        expect(toastModule.showPersistentError).not.toHaveBeenCalledWith(expect.stringContaining('engine error'), expect.anything());
-        expect(toastModule.showError).not.toHaveBeenCalled();
+        expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining('unchanged'));
+        expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('engine error'));
+        expect(toastModule.showPersistentError).not.toHaveBeenCalled();
       } finally {
         write.mockRestore();
         errorLog.mockRestore();

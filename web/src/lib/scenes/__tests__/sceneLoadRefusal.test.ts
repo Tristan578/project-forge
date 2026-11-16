@@ -1,11 +1,25 @@
 /**
  * The words for each reason `loadScene()` answers `false`. Pinned
- * byte-for-byte: the auto-save restore, the toolbar import and the
- * `load_scene` / `switch_scene` tools all compose their sentence from this
- * clause, so a change here changes what four surfaces tell the person.
+ * byte-for-byte: the Scene Browser switch, the auto-save restore, the toolbar
+ * import and the `load_scene` / `switch_scene` tools all compose their
+ * sentence from this clause, so a change here changes what five surfaces
+ * tell the person.
  */
-import { describe, it, expect } from 'vitest';
-import { describeSceneLoadRefusal, type SceneLoadRefusal } from '../sceneLoadRefusal';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  clearSceneLoadRefusal,
+  describeSceneLoadRefusal,
+  showSceneLoadRefusal,
+  type SceneLoadRefusal,
+} from '../sceneLoadRefusal';
+
+vi.mock('@/lib/toast', () => ({
+  showError: vi.fn(),
+  showPersistentError: vi.fn(),
+  dismissToast: vi.fn(),
+}));
+
+import { dismissToast, showError, showPersistentError } from '@/lib/toast';
 
 describe('describeSceneLoadRefusal', () => {
   it('relays the engine reason it was given', () => {
@@ -41,5 +55,28 @@ describe('describeSceneLoadRefusal', () => {
       null,
     ];
     for (const refusal of refusals) expect(describeSceneLoadRefusal(refusal)).toMatch(/\.$/);
+  });
+});
+
+describe('showSceneLoadRefusal / clearSceneLoadRefusal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('keeps a message with a recorded cause up until dismissed, under one id', () => {
+    showSceneLoadRefusal('msg', { kind: 'prefab_invalid' });
+    expect(vi.mocked(showPersistentError)).toHaveBeenCalledExactlyOnceWith('msg', { id: 'scene-load-refused' });
+    expect(vi.mocked(showError)).not.toHaveBeenCalled();
+  });
+
+  it('uses an ordinary toast when no engine was attached, which fixes itself', () => {
+    showSceneLoadRefusal('msg', null);
+    expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith('msg');
+    expect(vi.mocked(showPersistentError)).not.toHaveBeenCalled();
+  });
+
+  it('closes the refusal toast by the same id', () => {
+    clearSceneLoadRefusal();
+    expect(vi.mocked(dismissToast)).toHaveBeenCalledExactlyOnceWith('scene-load-refused');
   });
 });

@@ -35,7 +35,7 @@ import {
   sceneDispatchFailureMessage,
 } from '@/lib/scenes/engineDispatchThrew';
 import { describeNewSceneRefusal, type NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
-import { describeSceneLoadRefusal, type SceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
+import { clearSceneLoadRefusal, describeSceneLoadRefusal, showSceneLoadRefusal, type SceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
   loadPrefabInstances,
@@ -57,7 +57,7 @@ import {
   stageSceneCompletionMode,
   withCompletionMode,
 } from '@/lib/scenes/sceneCompletionMode';
-import { showError, showPersistentError } from '@/lib/toast';
+import { showError } from '@/lib/toast';
 import {
   buildTemplateSceneFile,
   buildTemplateGameComponents,
@@ -1680,18 +1680,21 @@ export const createSceneSlice: StateCreator<
       // toast (the Scene Browser has no other channel) rather than the save-
       // locking banner `sceneLoadError` would raise.
       // Name the cause: no `sceneLoadError` is set here, so the recorded
-      // refusal is the only place the engine's reason survives. Persistent,
-      // because that reason can run to 512 characters.
+      // refusal is the only place the engine's reason survives. The
+      // `newScene()` fallback keeps the ordinary toast the toolbar's New Scene
+      // uses for the same refusal.
       saveProjectScenes(project, get().projectId);
-      const cause = result.sceneToLoad
-        ? describeSceneLoadRefusal(get().sceneLoadRefusal())
-        : describeNewSceneRefusal(get().newSceneRefusal());
-      showPersistentError(
-        `The scene could not be opened, so the switch was cancelled. ${cause} You are still on the current scene, which is unchanged.`,
-        { id: 'scene-load-refused' },
-      );
+      const lead = 'The scene could not be opened, so the switch was cancelled.';
+      const tail = 'You are still on the current scene, which is unchanged.';
+      if (result.sceneToLoad) {
+        const refusal = get().sceneLoadRefusal();
+        showSceneLoadRefusal(`${lead} ${describeSceneLoadRefusal(refusal)} ${tail}`, refusal);
+      } else {
+        showError(`${lead} ${describeNewSceneRefusal(get().newSceneRefusal())} ${tail}`);
+      }
       return;
     }
+    clearSceneLoadRefusal();
     saveProjectScenes(result.project, get().projectId);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },

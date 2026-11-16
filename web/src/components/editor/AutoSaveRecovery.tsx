@@ -6,8 +6,8 @@ import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
-import { describeSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
-import { showError, showPersistentError } from '@/lib/toast';
+import { clearSceneLoadRefusal, describeSceneLoadRefusal, showSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
+import { showError } from '@/lib/toast';
 import {
   loadAutoSaveEntry,
   deleteAutoSaveEntry,
@@ -117,14 +117,15 @@ export function AutoSaveRecovery() {
     if (accepted === false) {
       // No `sceneLoadError` was set (`rejectionStrandsEditor: false`), so the
       // cause comes from `sceneLoadRefusal()`: it names the field the engine
-      // refused, already bounded, instead of guessing between three causes.
-      // Persistent: that reason can run to 512 characters.
-      showPersistentError(
-        `The saved scene could not be restored. ${describeSceneLoadRefusal(sceneLoadRefusal())} Your backup is kept, and the current scene is unchanged.`,
-        { id: 'scene-load-refused' },
+      // refused, already bounded, instead of guessing.
+      const refusal = sceneLoadRefusal();
+      showSceneLoadRefusal(
+        `The saved scene could not be restored. ${describeSceneLoadRefusal(refusal)} Your backup is kept, and the current scene is unchanged.`,
+        refusal,
       );
       return;
     }
+    clearSceneLoadRefusal();
     setSceneName(entry.sceneName);
 
     // Only delete the auto-save entry after successfully dispatching the load.
