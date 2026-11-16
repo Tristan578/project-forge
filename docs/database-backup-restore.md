@@ -403,7 +403,7 @@ WHERE u.id = '<user_uuid>';
 |-----------|-----------------|-----------------|
 | User profile | Until account deletion | `DELETE /api/user/delete` or manual admin action |
 | Projects | Until account deletion | Explicit delete in `deleteUserAccount` |
-| Token usage logs | 7 years (billing audit), or until account deletion | Manual purge after the retention period; explicit delete in `deleteUserAccount` |
+| Billing records (`token_usage`, `token_purchases`, `cost_log`, `credit_transactions`) | Until account deletion | Explicit delete in `deleteUserAccount` |
 | Webhook idempotency records | 48 hours (TTL) | Automatic expiry |
 | Generation job records | Until account deletion | Explicit delete in `deleteUserAccount` |
 | Published games | Unpublished and removed on account deletion | Explicit delete in `deleteUserAccount` |
@@ -415,7 +415,7 @@ For the Right to Erasure (`DELETE /api/user/delete`), most foreign keys to `user
 
 The schema-driven test in `web/src/lib/auth/__tests__/user-service.test.ts` reads every foreign key to `users` from `schema.ts` and fails when a non-cascading one has no matching `DELETE`. This list is for review; that test is the check.
 
-Account deletion also removes the user's billing records (`token_usage`, `token_purchases`, `cost_log`, `credit_transactions`), so the 7-year billing-audit retention applies only while the account exists.
+Billing records have no exception: an erasure request deletes them with the rest of the account, and nothing is kept for billing audit afterwards. Stripe keeps its own records of the user's payments; they are outside this database, and `deleteUserAccount` does not change them.
 
 ---
 

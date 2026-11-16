@@ -31,7 +31,7 @@ export default async function PrivacyPolicyPage() {
   return (
     <LegalLayout
       title="Privacy Policy"
-      lastUpdated="February 27, 2026"
+      lastUpdated="November 16, 2026"
       tableOfContents={tableOfContents}
     >
       {/* 1. Introduction */}
@@ -273,8 +273,10 @@ export default async function PrivacyPolicyPage() {
             content before it is permanently deleted.
           </li>
           <li>
-            <strong>Payment records:</strong> Retained for a minimum of 7 years to
-            comply with tax and financial regulations.
+            <strong>Payment records:</strong> Your billing history, token purchases,
+            and credit transactions are retained for the duration of your account and
+            deleted with it. Stripe, our payment processor, keeps its own records of
+            your payments under its own privacy policy (see section 4.2).
           </li>
           <li>
             <strong>Usage and analytics data:</strong> Retained in aggregate,

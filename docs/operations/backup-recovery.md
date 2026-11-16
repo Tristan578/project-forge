@@ -103,13 +103,13 @@ Neon branching allows restoring to any point within the retention window by crea
 
 ### Data Retention
 - User data: Retained until account deletion or explicit request
-- Token usage logs: Retained for billing audit purposes (7 years recommended)
-- Generation job records: Retained indefinitely (anonymized after account deletion)
+- Billing records (token usage, token purchases, cost log, credit transactions): Retained until account deletion, then deleted with the account. There is no billing-audit exception.
+- Generation job records: Retained until account deletion, then deleted with the account
 - Webhook idempotency records: Auto-expire (TTL set at creation)
 
 ### Right to Erasure
 - Account deletion endpoint: `DELETE /api/user/delete`
-- Cascading deletes configured via foreign key constraints
+- `deleteUserAccount` deletes the user's rows explicitly; only `graph_nodes` and `graph_edges` cascade. The full list is in `docs/database-backup-restore.md` § Data Retention and Deletion
 - Published games are unpublished and removed on account deletion
 
 #### Object storage (Cloudflare R2)

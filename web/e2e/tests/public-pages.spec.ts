@@ -151,7 +151,17 @@ test.describe('Public Pages @ui', () => {
       await page.waitForLoadState('domcontentloaded');
 
       await expect(page.getByText('Privacy Policy').first()).toBeVisible();
-      await expect(page.getByText(/February 27, 2026/)).toBeVisible();
+      await expect(page.getByText(/November 16, 2026/)).toBeVisible();
+    });
+
+    test('says payment records are deleted with the account', async ({ page }) => {
+      await page.goto('/privacy');
+      await page.waitForLoadState('domcontentloaded');
+
+      const retention = page.locator('#data-retention');
+      const payment = retention.locator('li').filter({ hasText: 'Payment records' });
+      await expect(payment).toContainText('deleted with it');
+      await expect(retention).not.toContainText('7 years');
     });
 
     test('has all 12 sections with correct headings', async ({ page }) => {
