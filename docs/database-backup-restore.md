@@ -324,7 +324,7 @@ pg_dump "$DATABASE_URL" \
 # e.g., S3 bucket, Backblaze B2, or a second R2 bucket in a different region
 ```
 
-Retention for manual exports: keep the last 4 weekly snapshots (28 days of coverage beyond PITR window).
+Retention for manual exports: keep the last 4 weekly snapshots (28 days of coverage beyond PITR window), and delete each one within 28 days of when it was made. This limit is what lets the Privacy Policy promise that erased data leaves every backup within 35 days.
 
 ### Manual On-Demand Export
 
@@ -339,7 +339,7 @@ pg_dump "$DATABASE_URL" \
   --file="spawnforge-pre-$(date +%Y%m%d-%H%M%S).sql"
 ```
 
-The dump is a plaintext copy of user data (see § 7). Store it in a durable, access-controlled location that is not a developer laptop, and delete it once the migration is confirmed.
+The dump is a plaintext copy of user data (see § 7). Store it in a durable, access-controlled location that is not a developer laptop, and delete it once the migration is confirmed, and no later than 28 days after it was made.
 
 ---
 
@@ -418,8 +418,8 @@ For the Right to Erasure (`POST /api/user/delete`), most foreign keys to `users`
 The schema-driven test in `web/src/lib/auth/__tests__/user-service.test.ts` reads every foreign key to `users` from `schema.ts` and fails when a non-cascading one has no matching `DELETE`. This list is for review; that test is the check.
 
 Billing records have no exception: an erasure request deletes them with the rest of the account, and nothing is kept for billing audit afterwards. Two places are outside the `deleteUserAccount` transaction:
-- **Backups.** Deleted rows stay in Neon's PITR history and retained WAL (up to 30 days, Section 4.4) and in the weekly exports (the last 4 are kept, Section 6) until those expire: 35 days at most. The Privacy Policy states this limit. Before promoting a restored branch (Section 3), list the `users` rows it has that production no longer has. Those are accounts deleted after the restore point; run `deleteUserAccount` for each one on the restored branch, so a restore never brings an erased account back.
-- **Stripe.** `deleteUserAccount` does not call Stripe. The Stripe customer, its invoices and any active subscription stay there, and deleting the `users` row removes the app's only link to them (`stripe_customer_id`, `stripe_subscription_id`). Before running an erasure by hand, find the user's subscription in the Stripe Dashboard and cancel it, so the deleted account is not charged again.
+- **Backups.** Deleted rows stay in Neon's PITR history and retained WAL (up to 30 days, Section 4.4) and in exports (deleted within 28 days, Section 6) until those expire. 35 days is the ceiling, and the Privacy Policy promises it, so do not keep any copy longer. A restore brings back every account deleted after the restore point. Every erasure path (self-service `POST /api/user/delete`, the Clerk `user.deleted` webhook, an admin deleting the user in Clerk) deletes the Clerk user, which sends a `user.deleted` webhook. Right after promoting a restored branch, open the Clerk Dashboard → Webhooks → the production endpoint's message log, filter to `user.deleted` messages sent after the restore point, and resend each one. `web/src/app/api/auth/webhook/route.ts` runs `deleteUserAccount` for each account the restore brought back; a resend for an account that is already gone does nothing.
+- **Stripe.** No erasure path calls Stripe. On every path the Stripe customer, its invoices and any active subscription stay there, so a user who deletes their account while subscribed keeps being charged. This is a known gap until the code cancels the subscription; update this bullet when it does. Deleting the `users` row also removes the app's only link (`stripe_customer_id`, `stripe_subscription_id`). Reconcile weekly: export the active subscriptions from the Stripe Dashboard (Subscriptions → Active → Export) and compare their customer IDs with `SELECT stripe_customer_id FROM users WHERE stripe_customer_id IS NOT NULL`. Cancel any active subscription whose customer is not in that list and was created more than a day ago (a newer one can be a checkout still in flight).
 
 ---
 

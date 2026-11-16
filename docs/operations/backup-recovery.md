@@ -110,7 +110,9 @@ Neon branching allows restoring to any point within the retention window by crea
 ### Right to Erasure
 - Account deletion endpoint: `POST /api/user/delete`
 - `deleteUserAccount` deletes the user's rows explicitly; only `graph_nodes` and `graph_edges` cascade from `users`. The full list is in `docs/database-backup-restore.md` § Data Retention and Deletion
-- Backups keep deleted rows until they expire (35 days at most), and Stripe is not touched. The same section says what to do about each, including re-applying erasures after a restore
+- Backups keep deleted rows until they expire (35 days at most): after promoting a restored branch, resend the Clerk `user.deleted` webhooks sent since the restore point
+- Stripe is not touched: a deleted user's subscription stays active until someone cancels it. Run the weekly reconciliation
+- Both steps are spelled out in `docs/database-backup-restore.md` § Data Retention and Deletion
 - Published games are unpublished and removed on account deletion
 
 #### Object storage (Cloudflare R2)
