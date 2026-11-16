@@ -1,8 +1,14 @@
 // @vitest-environment node
 /**
- * The sanctions geo-block runs in the live `proxy` export, before auth (#9331).
- * With no Clerk keys in the test environment `proxy` uses the passthrough
- * branch, which is the branch CI's E2E runs; the block sits ahead of either.
+ * Site content is open to every country (#9331, owner decision 2026-11-16):
+ * the live `proxy` export never refuses a request by country. Only the
+ * purchase routes do (`src/app/api/__tests__/paymentGeoBlock.test.ts`). With
+ * no Clerk keys in the test environment `proxy` uses the passthrough branch,
+ * which is the branch CI's E2E runs.
+ *
+ * The matcher half of this file pins the proxy matcher fix made in the same
+ * PR, which stands on its own: an extension-shaped dynamic page must still
+ * reach the proxy (auth, header stripping).
  */
 import { readdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -31,48 +37,40 @@ function req(pathname: string, headers: Record<string, string> = {}, method = 'G
   return new NextRequest(`https://www.spawnforge.ai${pathname}`, { method, headers });
 }
 
-describe('proxy sanctions geo-block (#9331)', () => {
-  it.each(['/', '/pricing', '/dashboard', '/community/games/1', '/api/projects', '/api/billing/checkout'])(
-    'answers 451 for %s from a blocked country',
+describe('proxy serves every country (#9331: content open to all)', () => {
+  it.each(['/', '/pricing', '/dashboard', '/community/games/1', '/blog/x.html', '/api/projects', '/api/marketplace/assets', '/play'])(
+    'forwards %s from a listed country to the app',
     async (pathname) => {
-      const res = await proxy(req(pathname, { 'x-vercel-ip-country': 'IR' }));
-      expect(res.status).toBe(451);
-      expect(res.headers.get('cache-control')).toBe('private, no-store');
-      // Not forwarded to the app: no Next.js passthrough marker.
-      expect(res.headers.get('x-middleware-next')).toBeNull();
+      for (const [country, region] of [['IR'], ['RU'], ['KP'], ['UA', '43']] as const) {
+        const headers: Record<string, string> = { 'x-vercel-ip-country': country };
+        if (region) headers['x-vercel-ip-country-region'] = region;
+        const res = await proxy(req(pathname, headers));
+        expect(res.status, `${pathname} from ${country}`).not.toBe(451);
+        expect(res.headers.get('x-middleware-next'), `${pathname} from ${country}`).toBe('1');
+      }
     },
   );
 
-  it('blocks a listed region and not the rest of its country', async () => {
-    expect((await proxy(req('/', { 'x-vercel-ip-country': 'UA', 'x-vercel-ip-country-region': '43' }))).status).toBe(451);
-    const kyiv = await proxy(req('/', { 'x-vercel-ip-country': 'UA', 'x-vercel-ip-country-region': '30' }));
-    expect(kyiv.status).toBe(200);
-    expect(kyiv.headers.get('x-middleware-next')).toBe('1');
-  });
-
-  it('passes an allowed country through to the app', async () => {
-    const res = await proxy(req('/pricing', { 'x-vercel-ip-country': 'US' }));
-    expect(res.status).toBe(200);
+  it('does not refuse a purchase route in the proxy either (the route itself decides)', async () => {
+    const res = await proxy(req('/api/billing/checkout', { 'x-vercel-ip-country': 'IR' }, 'POST'));
+    expect(res.status).not.toBe(451);
     expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 
-  it.each(['/api/health', '/api/status', '/api/stripe/webhook', '/api/auth/webhook', '/api/cron/health-monitor', '/api/webhooks/generation-complete'])(
-    'never blocks the bypass path %s by country',
-    async (pathname) => {
-      const res = await proxy(req(pathname, { 'x-vercel-ip-country': 'IR' }, 'POST'));
-      expect(res.status).not.toBe(451);
-    },
-  );
+  it('forwards a request with no country header', async () => {
+    const res = await proxy(req('/pricing'));
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+  });
 });
 
 /**
- * A request the matcher excludes never reaches `proxy()`, so it is never
- * geo-blocked. The first matcher entry used to exclude any path containing
+ * A request the matcher excludes never reaches `proxy()`: no auth redirect,
+ * no client-header stripping. The first matcher entry used to exclude any path containing
  * `.html`, `.js`, ... anywhere, which let `/editor/abc.html` and every other
  * dynamic page with an extension-shaped parameter render with no proxy at all.
  * The routes and the public files are derived from the tree on every run.
  */
-describe('proxy matcher reaches every page the geo-block must cover (#9331)', () => {
+describe('proxy matcher reaches every page, extension-shaped ones included', () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const appDir = path.resolve(here, '../app');
   const publicDir = path.resolve(here, '../../public');
@@ -132,8 +130,9 @@ describe('proxy matcher reaches every page the geo-block must cover (#9331)', ()
     for (const f of extensionFiles) expect(runsProxy(`/${f}`), f).toBe(false);
   });
 
-  it('geo-blocks an extension-shaped dynamic page end to end', async () => {
+  it('serves an extension-shaped dynamic page through the proxy from a listed country', async () => {
     const res = await proxy(req('/editor/abc.html', { 'x-vercel-ip-country': 'IR' }));
-    expect(res.status).toBe(451);
+    expect(res.status).not.toBe(451);
+    expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 });

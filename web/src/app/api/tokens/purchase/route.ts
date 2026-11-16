@@ -8,7 +8,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
 import { getStripe } from '@/lib/billing/stripe-client';
 import { withEgressGuard } from '@/lib/security/egressGuard';
-import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
+import { sanctionsPurchaseBlock } from '@/lib/security/sanctionsGeoBlock';
 
 const purchaseSchema = z.object({
   package: z.enum(['spark', 'blaze', 'inferno']),
@@ -21,9 +21,10 @@ const PACKAGE_PRICE_IDS: Record<string, string | undefined> = {
 };
 
 async function POST_impl(req: NextRequest) {
-  // Sanctions geo-block (#9331): refuse payment from a blocked jurisdiction
-  // here too, so it holds even on a path the proxy matcher stops covering.
-  const geoBlocked = sanctionsGeoBlock(req);
+  // Sanctions (#9331): no sale to a buyer whose location is known to be in a
+  // listed jurisdiction. An unknown location is not refused here: Checkout
+  // collects the billing address and the webhook refunds a listed one.
+  const geoBlocked = sanctionsPurchaseBlock(req);
   if (geoBlocked) return geoBlocked;
 
   const mid = await withApiMiddleware(req, {
@@ -59,6 +60,11 @@ async function POST_impl(req: NextRequest) {
         ? { customer: user.stripeCustomerId }
         : { customer_email: user.email }),
       line_items: [{ price: priceId, quantity: 1 }],
+      // Sanctions (#9331): always collect the billing address so the webhook
+      // can refund, instead of credit, a buyer in a listed jurisdiction. Saved
+      // onto an existing customer too (`customer_update` needs `customer`).
+      billing_address_collection: 'required',
+      ...(user.stripeCustomerId ? { customer_update: { address: 'auto' as const } } : {}),
       metadata: {
         userId: user.id,
         package: pkg,

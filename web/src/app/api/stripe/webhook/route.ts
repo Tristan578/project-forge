@@ -30,7 +30,13 @@ import {
   handleChargeRefunded,
   handleEntitlementsUpdated,
 } from '@/lib/billing/subscription-lifecycle';
-import { customerIdFromSummary } from '@/lib/billing/entitlements';
+import { customerIdFromSummary, featuresFromSummary } from '@/lib/billing/entitlements';
+import {
+  customerBillingRestriction,
+  isSanctionsRefund,
+  logRefusedFulfilment,
+  refuseRestrictedCheckout,
+} from '@/lib/billing/sanctionsFulfilment';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
 import {
@@ -136,6 +142,15 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const tier = priceId ? tierFromPriceId(priceId) : null;
       if (!tier) break;
 
+      // Sanctions (#9331): grant no paid plan to a customer whose saved billing
+      // address is in a listed jurisdiction. `checkout.session.completed`
+      // cancels and refunds the subscription itself.
+      const restricted = await customerBillingRestriction(getStripe(), customerId);
+      if (restricted) {
+        logRefusedFulfilment('subscription.created not granted', restricted, { customerId, subscriptionId: subscription.id });
+        break;
+      }
+
       await handleSubscriptionCreated(customerId, subscription.id, tier);
       try { const { trackSubscriptionStarted } = await import('@/lib/analytics/events.server'); await trackSubscriptionStarted(tier); } catch { /* analytics non-critical */ }
       break;
@@ -157,7 +172,19 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         customerId,
         subscription.id,
         tier,
-        subscription.status
+        subscription.status,
+        {
+          // Sanctions (#9331): an upgrade (e.g. a plan switch in the billing
+          // portal) is a new sale; refuse it for a listed billing address.
+          // Looked up only when the update is an upgrade.
+          refuseUpgrade: async () => {
+            const restricted = await customerBillingRestriction(getStripe(), customerId);
+            if (!restricted) return false;
+            // TODO(#9331): refund the proration charged for the refused upgrade.
+            logRefusedFulfilment('subscription upgrade not granted', restricted, { customerId, subscriptionId: subscription.id });
+            return true;
+          },
+        }
       );
       break;
     }
@@ -184,6 +211,16 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const summary = event.data.object as unknown;
       const customerId = customerIdFromSummary(summary);
       if (!customerId) break;
+
+      // Sanctions (#9331): grant no paid feature to a listed billing address.
+      // An empty summary (features removed) always applies.
+      if (featuresFromSummary(summary).length > 0) {
+        const restricted = await customerBillingRestriction(getStripe(), customerId);
+        if (restricted) {
+          logRefusedFulfilment('entitlements not granted', restricted, { customerId });
+          break;
+        }
+      }
 
       await handleEntitlementsUpdated(customerId, summary);
       break;
@@ -243,6 +280,10 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const customerId = resolveCustomerId(charge.customer);
       if (!customerId) break;
 
+      // A refund of a purchase refused under the sanctions policy (#9331):
+      // nothing was granted, so there is nothing to claw back.
+      if (isSanctionsRefund(charge)) break;
+
       const paymentIntentId =
         typeof charge.payment_intent === 'string'
           ? charge.payment_intent
@@ -286,10 +327,18 @@ async function processEvent(event: Stripe.Event): Promise<void> {
     }
 
     // -----------------------------------------------------------
-    // One-time payment completed (token add-on purchase)
+    // Checkout completed: sanctions check (both modes), then the one-time
+    // payment (token add-on purchase) is credited
     // -----------------------------------------------------------
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
+
+      // Sanctions (#9331): a buyer whose billing address (or, for a one-time
+      // payment, card) is in a listed jurisdiction gets nothing; the payment
+      // is refunded and a subscription cancelled.
+      if (session.mode === 'payment' || session.mode === 'subscription') {
+        if (await refuseRestrictedCheckout(getStripe(), session)) break;
+      }
       if (session.mode !== 'payment') break;
 
       const userId = session.metadata?.userId;

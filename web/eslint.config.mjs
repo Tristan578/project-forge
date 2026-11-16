@@ -375,7 +375,7 @@ const eslintConfig = defineConfig([
       'src/lib/apiValidation.ts',
       'src/lib/security/botId.ts',
       'src/lib/security/egressGuard.ts',
-      // Builds the 451 the proxy and every payment route return (#9331).
+      // Builds the 451 every purchase route returns (#9331).
       'src/lib/security/sanctionsGeoBlock.ts',
       'src/proxy.ts',
     ],

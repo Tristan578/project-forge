@@ -4,7 +4,6 @@ import type { NextRequest } from 'next/server';
 import { loadPublishedGameMetadata } from '@/lib/play/gameMetadata';
 import { gameNotFoundResponse, gameUnavailableResponse } from '@/lib/play/notFoundDocument';
 import { stripNeverCarriedParams } from '@/lib/navigation/authRoutes';
-import { sanctionsGeoBlock } from '@/lib/security/sanctionsGeoBlock';
 import {
   buildPlayContentSecurityPolicy,
   isPlayPath,
@@ -436,19 +435,15 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
 const authProxy = buildProxy();
 
 /**
- * Apply the sanctions geo-block, then preflight exact play documents after
- * normal proxy auth/CORS/CSP handling.
+ * Preflight exact play documents after normal proxy auth/CORS/CSP handling.
+ * No country check runs here: site content is open to every country, and only
+ * the purchase routes refuse a sanctioned buyer (#9331).
  * Missing published metadata returns a direct404 before root Suspense can stream.
  * Lookup failures return a retryable503; other routes/methods and redirects retain their response.
  * @param req Incoming Next.js request.
  * @returns Existing proxy response, a missing-game404, or a temporary-failure503.
  */
 export async function proxy(req: NextRequest): Promise<NextResponse> {
-  // Sanctions geo-block (#9331) runs first, before auth, so a blocked visitor
-  // never reaches Clerk or the app. Bypass paths (health, webhooks, cron) are
-  // exempt inside sanctionsGeoBlock().
-  const blocked = sanctionsGeoBlock(req);
-  if (blocked) return blocked;
   return preflightPublishedGame(req, await authProxy(req));
 }
 
@@ -492,15 +487,17 @@ export const config = {
     // Skip Next.js internals, Vercel's own `/_vercel/*` endpoints (the Web
     // Analytics and Speed Insights scripts and their beacons, which the layout
     // loads on every page and which must not meet the auth redirect), engine
-    // WASM, and the static files in public/, which all sit at the top level. The extension exclusion is anchored to a
-    // SINGLE top-level segment (`[^/?]*` ... `$`): it used to be `[^?]*`, which
-    // skipped ANY path containing `.html`, `.js`, ... anywhere, so a dynamic page
-    // such as `/editor/abc.html` or `/blog/x.html` rendered with no proxy at all:
-    // no sanctions geo-block (#9331), no auth, no header stripping. No dynamic
-    // route sits at the top level (proxyGeoBlock.test.ts fails if one appears),
-    // so a top-level extension-suffixed path is only ever a public file or a 404.
-    // proxyGeoBlock.test.ts evaluates this array with Next.js's own matcher
-    // compiler against every dynamic route and every file in public/.
+    // WASM, and the static files in public/, which all sit at the top level.
+    // The extension exclusion is anchored to a SINGLE top-level segment
+    // (`[^/?]*` ... `$`): it used to be `[^?]*`, which skipped ANY path
+    // containing `.html`, `.js`, ... anywhere, so a dynamic page such as
+    // `/editor/abc.html` or `/blog/x.html` rendered with no proxy at all: no
+    // auth redirect for the editor and no client-header stripping. That fix
+    // stands on its own; the sanctions check (#9331) no longer runs here. No
+    // dynamic route sits at the top level (proxyGeoBlock.test.ts fails if one
+    // appears), so a top-level extension-suffixed path is only ever a public
+    // file or a 404. proxyGeoBlock.test.ts evaluates this array with Next.js's
+    // own matcher compiler against every dynamic route and every file in public/.
     '/((?!_next|_vercel|monitoring|engine-pkg-webgl2|engine-pkg-webgpu|[^/?]*\\.(?:html?|css|js|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)$).*)',
     // Always run for API routes
     '/(api|trpc)/:path*',

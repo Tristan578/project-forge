@@ -1,16 +1,23 @@
 /**
- * Sanctions geo-block (#9331): refuse use of, and payment for, SpawnForge from
- * sanctioned countries and regions. Spec: `specs/2026-11-04-sanctions-geo-block.md`.
+ * Sanctions purchase block (#9331): refuse to SELL or LICENSE anything to a
+ * buyer in a sanctioned country or region. Spec:
+ * `specs/2026-11-04-sanctions-geo-block.md`.
+ *
+ * SCOPE (owner decision, Tristan Nolan, 2026-11-16): "I'm okay with anyone
+ * seeing my site content. What I don't want is to SELL/license anything to
+ * someone in these countries." So nothing here refuses a page, a `/play` URL
+ * or a read-only API call. Only the flows that sell or license something call
+ * it: starting a Checkout (subscription or token pack), opening the billing
+ * portal outside its cancel flow, and buying a marketplace asset. The Stripe
+ * webhook re-checks the buyer's billing country before it grants anything
+ * (`web/src/lib/billing/sanctionsFulfilment.ts`).
  *
  * THIS IS A POLICY LIST, NOT LEGAL ADVICE. It records the owner's business
- * decision (Tristan Nolan, 2026-11-04): "any OFAC/Sanctioned country should
- * not be paying me for anything or using my products." It is deliberately
- * broader than what US sanctions law requires of a US person, and it is not a
- * substitute for screening against the SDN list or for counsel's review.
+ * decision (2026-11-04): "any OFAC/Sanctioned country should not be paying me
+ * for anything". It is deliberately broader than what US sanctions law
+ * requires of a US person, and it is not a substitute for screening against
+ * the SDN list or for counsel's review.
  *
- * Last reviewed: 2026-11-05 (see {@link SANCTIONS_POLICY_LAST_REVIEWED}). On
- * 2026-11-05 the owner added Ukraine's Zaporizhzhia and Kherson regions (an EU
- * measure, not an OFAC one) and chose to refuse a visitor Vercel cannot place.
  * Sources, fetched 2026-11-04:
  *  - OFAC, Sanctions Programs and Country Information:
  *    https://ofac.treasury.gov/sanctions-programs-and-country-information
@@ -21,15 +28,17 @@
  * its own. To change the list: edit {@link BLOCKED_JURISDICTIONS}, bump the
  * review date, and update the table in the spec. The suite pins the two together.
  *
- * Source of truth for location: Vercel's `x-vercel-ip-country` (ISO 3166-1
- * alpha-2) and `x-vercel-ip-country-region` (the region portion of the ISO
- * 3166-2 code, e.g. `43` for UA-43 Crimea), documented at
- * https://vercel.com/docs/headers/request-headers. IP geolocation is a
- * good-faith control: a visitor on a VPN is not stopped by it.
+ * Country signals, in order of preference: the buyer's Stripe billing country
+ * (the Checkout Session's `customer_details.address`, the saved customer
+ * address, the card's issuing country), then Vercel's `x-vercel-ip-country` /
+ * `x-vercel-ip-country-region` (https://vercel.com/docs/headers/request-headers).
+ * A buyer is refused when ANY known signal is listed. An unknown country is
+ * never a reason to refuse on its own: Checkout collects the billing address
+ * and the webhook refuses to fulfil (and refunds) a listed one.
  */
 import { NextResponse } from 'next/server';
 
-export const SANCTIONS_POLICY_LAST_REVIEWED = '2026-11-05';
+export const SANCTIONS_POLICY_LAST_REVIEWED = '2026-11-16';
 
 /** Why a jurisdiction is on the list. */
 export type BlockBasis =
@@ -103,32 +112,12 @@ export const BLOCKED_JURISDICTIONS: readonly BlockedJurisdiction[] = [
 ];
 
 /**
- * What to do when Vercel sends no usable country header: `'block'` (fail
- * closed), the owner's decision of 2026-11-05. A visitor Vercel cannot place
- * gets the 451.
- *
- * It applies only where Vercel geolocates requests at all, i.e. on a Vercel
- * deployment ({@link geolocationExpected}). Off Vercel (`next dev`, CI's
- * `next start`, Playwright, Lighthouse) no request ever carries the header, so
- * failing closed there would refuse every request and decide nothing.
- */
-export const MISSING_COUNTRY_POLICY: 'allow' | 'block' = 'block';
-
-/**
- * True on a Vercel deployment, the only place `x-vercel-ip-country` exists.
- * Vercel sets `VERCEL=1` at build and at runtime (the same signal
- * `app/layout.tsx` uses to mount Analytics). Written as a literal member
- * expression so Next.js can substitute it in the Edge bundle.
- */
-export function geolocationExpected(): boolean {
-  return process.env.VERCEL === '1';
-}
-
-/**
  * Paths no country rule applies to: machine callers that carry their own
  * authentication and must not depend on where the caller's IP geolocates.
  * Health probes, Stripe and Clerk webhooks, Vercel cron, and the QStash
- * generation callback. Matched as whole path segments.
+ * generation callback. Matched as whole path segments. The purchase check is
+ * only called from purchase routes, so this is a guard against one of these
+ * ever calling it by mistake, not a list of exemptions from a site-wide block.
  */
 export const GEO_BLOCK_BYPASS_PATHS: readonly string[] = [
   '/api/health',
@@ -141,10 +130,6 @@ export const GEO_BLOCK_BYPASS_PATHS: readonly string[] = [
 
 export const COUNTRY_HEADER = 'x-vercel-ip-country';
 export const REGION_HEADER = 'x-vercel-ip-country-region';
-
-export type GeoBlockDecision =
-  | { blocked: false; reason: 'allowed' | 'bypass' | 'missing-country' | 'not-geolocated' }
-  | { blocked: true; reason: 'jurisdiction' | 'missing-country'; jurisdiction?: BlockedJurisdiction };
 
 function segmentsOf(pathname: string): string[] | null {
   try {
@@ -172,12 +157,6 @@ export function isGeoBlockBypassPath(pathname: string): boolean {
   );
 }
 
-function normalizeCode(value: string | null, pattern: RegExp): string | null {
-  if (value === null) return null;
-  const v = value.trim().toUpperCase();
-  return pattern.test(v) ? v : null;
-}
-
 /** Find the list entry for a country/region pair, if any. */
 export function findBlockedJurisdiction(
   country: string,
@@ -189,52 +168,114 @@ export function findBlockedJurisdiction(
   );
 }
 
+/** Where a country signal came from. */
+export type CountrySource =
+  | 'stripe-checkout-address'
+  | 'stripe-customer-address'
+  | 'stripe-card'
+  | 'ip';
+
+/** One piece of evidence about where the buyer is. Raw values; normalised on use. */
+export interface CountrySignal {
+  readonly source: CountrySource;
+  readonly country: string | null | undefined;
+  /** ISO 3166-2 region code, or (for a Stripe address) the free-text `state`. */
+  readonly region?: string | null | undefined;
+}
+
 /**
- * Decide whether a request is geo-blocked. Pure: reads only the path and the
- * two Vercel headers.
+ * Free-text spellings of the listed Ukrainian regions, for a Stripe address
+ * whose `state` is a name rather than an ISO code. Matched as a substring of
+ * the lower-cased, letters-only state, so "Respublika Krym", "Sevastopol' city"
+ * and "Zaporizhzhia Oblast" all resolve.
  */
-export function geoBlockDecision(
+const UA_REGION_NAMES: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['40', ['sevastopol', 'sebastopol']],
+  ['43', ['crimea', 'krym']],
+  ['14', ['donetsk']],
+  ['09', ['luhansk', 'lugansk']],
+  ['23', ['zaporizh', 'zaporozh']],
+  ['65', ['kherson', 'cherson']],
+];
+
+function normalizeCountry(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const v = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(v) ? v : null;
+}
+
+/**
+ * The ISO 3166-2 region part for `country`: a bare code (`43`), a full code
+ * (`UA-43`), or, for Ukraine, a region name from a Stripe address.
+ */
+export function normalizeRegion(country: string, value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  let v = value.trim().toUpperCase();
+  if (v.startsWith(`${country}-`)) v = v.slice(country.length + 1);
+  if (/^[A-Z0-9]{1,3}$/.test(v)) return v;
+  if (country === 'UA') {
+    const letters = value.toLowerCase().replace(/[^a-z]/g, '');
+    for (const [code, names] of UA_REGION_NAMES) {
+      if (names.some((n) => letters.includes(n))) return code;
+    }
+  }
+  return null;
+}
+
+/** The IP signal Vercel attaches to every request it serves. */
+export function ipCountrySignal(headers: Headers): CountrySignal {
+  return { source: 'ip', country: headers.get(COUNTRY_HEADER), region: headers.get(REGION_HEADER) };
+}
+
+/** A restricted signal and the list entry it matched. */
+export interface RestrictedMatch {
+  readonly source: CountrySource;
+  readonly jurisdiction: BlockedJurisdiction;
+}
+
+/**
+ * The first signal that places the buyer in a listed jurisdiction, or `null`.
+ * Signals with no usable country are ignored: unknown is not restricted.
+ */
+export function findRestrictedSignal(
+  signals: readonly CountrySignal[],
+  list: readonly BlockedJurisdiction[] = BLOCKED_JURISDICTIONS,
+): RestrictedMatch | null {
+  for (const s of signals) {
+    const country = normalizeCountry(s.country);
+    if (country === null) continue;
+    const jurisdiction = findBlockedJurisdiction(country, normalizeRegion(country, s.region), list);
+    if (jurisdiction) return { source: s.source, jurisdiction };
+  }
+  return null;
+}
+
+export type PurchaseGeoDecision =
+  | { blocked: false; reason: 'allowed' | 'unknown' | 'bypass' }
+  | { blocked: true; reason: 'jurisdiction'; source: CountrySource; jurisdiction: BlockedJurisdiction };
+
+/**
+ * Decide whether a purchase request is refused up front. Pure: reads the path,
+ * the two Vercel headers and any Stripe signals the caller already holds.
+ * Refused only when a KNOWN signal is listed; no signal at all is `unknown`
+ * and allowed (the webhook checks the billing address Checkout collects).
+ */
+export function purchaseGeoDecision(
   pathname: string,
   headers: Headers,
-  options: {
-    list?: readonly BlockedJurisdiction[];
-    missingCountryPolicy?: 'allow' | 'block';
-    /** Whether a country header is expected here; defaults to {@link geolocationExpected}. */
-    geolocated?: boolean;
-  } = {},
-): GeoBlockDecision {
+  stripeSignals: readonly CountrySignal[] = [],
+  list: readonly BlockedJurisdiction[] = BLOCKED_JURISDICTIONS,
+): PurchaseGeoDecision {
   if (isGeoBlockBypassPath(pathname)) return { blocked: false, reason: 'bypass' };
-  const country = normalizeCode(headers.get(COUNTRY_HEADER), /^[A-Z]{2}$/);
-  if (country === null) {
-    if (!(options.geolocated ?? geolocationExpected())) return { blocked: false, reason: 'not-geolocated' };
-    return (options.missingCountryPolicy ?? MISSING_COUNTRY_POLICY) === 'block'
-      ? { blocked: true, reason: 'missing-country' }
-      : { blocked: false, reason: 'missing-country' };
-  }
-  const region = normalizeCode(headers.get(REGION_HEADER), /^[A-Z0-9]{1,3}$/);
-  const jurisdiction = findBlockedJurisdiction(country, region, options.list);
-  return jurisdiction
-    ? { blocked: true, reason: 'jurisdiction', jurisdiction }
-    : { blocked: false, reason: 'allowed' };
+  const signals = [...stripeSignals, ipCountrySignal(headers)];
+  const match = findRestrictedSignal(signals, list);
+  if (match) return { blocked: true, reason: 'jurisdiction', ...match };
+  const known = signals.some((s) => normalizeCountry(s.country) !== null);
+  return { blocked: false, reason: known ? 'allowed' : 'unknown' };
 }
 
 export const SANCTIONS_BLOCK_CODE = 'SANCTIONS_GEO_BLOCK';
-
-const BLOCKED_HTML = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>Not available in your region</title>
-</head>
-<body>
-<h1>SpawnForge is not available in your region</h1>
-<p>We do not offer SpawnForge, or accept payment for it, in countries and regions subject to sanctions.</p>
-<p>If you think this is a mistake, contact us at support@spawnforge.ai.</p>
-</body>
-</html>
-`;
+export const PURCHASE_BLOCKED_MESSAGE = 'Purchases are not available in your region.';
 
 const BLOCK_HEADERS = {
   // A geo-dependent answer must never be cached and served to another visitor.
@@ -244,30 +285,23 @@ const BLOCK_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 } as const;
 
-/**
- * The 451 a blocked visitor gets. A plain, self-contained page for a document
- * request (no scripts, styles or images to fetch), JSON for an API request.
- */
-export function sanctionsBlockedResponse(pathname: string, method: string): NextResponse {
-  const isApi = pathname === '/api' || pathname.startsWith('/api/');
-  if (isApi) {
-    return NextResponse.json(
-      { error: 'This service is not available in your region.', code: SANCTIONS_BLOCK_CODE },
-      { status: 451, headers: BLOCK_HEADERS },
-    );
-  }
-  return new NextResponse(method === 'HEAD' ? null : BLOCKED_HTML, {
-    status: 451,
-    headers: { ...BLOCK_HEADERS, 'Content-Type': 'text/html; charset=utf-8' },
-  });
+/** The 451 JSON a refused purchase gets. Says nothing about which signal matched. */
+export function purchaseBlockedResponse(): NextResponse {
+  return NextResponse.json(
+    { error: PURCHASE_BLOCKED_MESSAGE, code: SANCTIONS_BLOCK_CODE },
+    { status: 451, headers: BLOCK_HEADERS },
+  );
 }
 
 /**
- * The proxy's entry point: the 451 response for a blocked request, or `null`
- * to carry on. Payment routes call it too, so a payment is refused even if a
- * future matcher change stops the proxy running on that path.
+ * The purchase routes' entry point: the 451 for a refused purchase, or `null`
+ * to carry on. Call it first in any route that sells or licenses something.
  */
-export function sanctionsGeoBlock(req: { nextUrl: { pathname: string }; method: string; headers: Headers }): NextResponse | null {
-  const decision = geoBlockDecision(req.nextUrl.pathname, req.headers);
-  return decision.blocked ? sanctionsBlockedResponse(req.nextUrl.pathname, req.method) : null;
+export function sanctionsPurchaseBlock(
+  req: { nextUrl: { pathname: string }; headers: Headers },
+  stripeSignals: readonly CountrySignal[] = [],
+): NextResponse | null {
+  return purchaseGeoDecision(req.nextUrl.pathname, req.headers, stripeSignals).blocked
+    ? purchaseBlockedResponse()
+    : null;
 }
