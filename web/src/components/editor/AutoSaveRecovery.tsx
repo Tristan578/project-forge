@@ -98,7 +98,14 @@ export function AutoSaveRecovery() {
     // save-locking `sceneLoadError` banner over a working editor — the toast
     // below is the whole report and the current scene stays savable (#10056).
     if (loadScene(entry.sceneJson, { rejectionStrandsEditor: false }) === false) {
-      showError('The saved scene could not be restored. Its data may be invalid or the engine is not ready — try again.');
+      // `rejectionStrandsEditor: false` means no `sceneLoadError`, so the
+      // engine's reason (which names the field the scene failed on, already
+      // bounded) is read from the slice's rejection record instead. Read via
+      // getState(): a subscribed value would still be the pre-click one here.
+      const rejection = useEditorStore.getState().lastSceneLoadRejection;
+      showError(rejection
+        ? `The saved scene could not be restored. ${rejection.reason}`
+        : 'The saved scene could not be restored. Its data may be invalid or the engine is not ready — try again.');
       return;
     }
     setSceneName(entry.sceneName);

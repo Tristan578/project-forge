@@ -162,6 +162,17 @@ export interface SceneSlice {
   sceneLoadError: SceneLoadError | null;
 
   /**
+   * The most recent CLEAN rejection `loadScene` answered `false` with, whether
+   * or not it locked saving — a caller that passed `rejectionStrandsEditor:
+   * false` (the autosave restore prompt, the AI `load_scene` tool) gets no
+   * `sceneLoadError` and would otherwise have nothing to tell the person but
+   * a hedge. Same sentence the lockout would carry, engine reason included
+   * and already bounded (#10267). Cleared when the engine accepts a scene; a
+   * deferred (no-dispatcher) load neither sets nor clears it.
+   */
+  lastSceneLoadRejection: SceneLoadError | null;
+
+  /**
    * Ask the engine to serialize the current scene.
    *
    * The result arrives asynchronously as the `forge:scene-exported` DOM event.
@@ -839,6 +850,7 @@ export const createSceneSlice: StateCreator<
   cloudSaveStatus: 'idle',
   lastCloudSave: null,
   sceneLoadError: null,
+  lastSceneLoadRejection: null,
 
   saveScene: (requestId) => {
     // A rejected load leaves the engine holding something that is NOT this
@@ -866,6 +878,9 @@ export const createSceneSlice: StateCreator<
     const strandOnThrow = opts?.strandOnThrow ?? true;
     const setLockout = (reason: string) => set({ sceneLoadError: { reason, at: Date.now() } });
     const rejectEditor = (reason: string) => {
+      // Recorded on EVERY clean rejection, lockout or not, so a caller that
+      // opted out of stranding can still name the field the scene failed on.
+      set({ lastSceneLoadRejection: { reason, at: Date.now() } });
       // A non-replacing rejection cannot make a previously wrecked viewport
       // trustworthy or downgrade the provenance used by checkpoint retries.
       if (strandOnReject && !isEngineLoadThrewLockout(get().sceneLoadError)) setLockout(reason);
@@ -959,7 +974,7 @@ export const createSceneSlice: StateCreator<
     // Clearing `sceneLoadError` here is the ONLY way saving comes back after a
     // rejection: the engine has now accepted a scene, so serializing it is
     // once again describing the project rather than overwriting it.
-    set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+    set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null, lastSceneLoadRejection: null }));
     // Swap in this scene's own arrangement (or clear it) — see
     // `syncArrangementFromLoadedScene` (#10058). A deferred replay is the one
     // exception: its caller hydrated from this same data when it deferred,
@@ -1007,7 +1022,7 @@ export const createSceneSlice: StateCreator<
       // so this is a recovery route out of a rejected load: saving is allowed
       // again from here (#10056). A REJECTED new_scene leaves any existing
       // `sceneLoadError` standing, because the untrustworthy scene is still up.
-      set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+      set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null, lastSceneLoadRejection: null }));
       // A blank scene has no saved arrangement — clear whatever the previous
       // scene left behind (#10058).
       useMusicArrangementStore.getState().hydrate(null);

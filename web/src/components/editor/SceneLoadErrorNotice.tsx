@@ -29,7 +29,11 @@ export function SceneLoadErrorNotice() {
         aria-hidden="true"
       />
       <div className="flex flex-col gap-2">
-        <p>{sceneLoadError.reason}</p>
+        {/* `break-words`: the reason can carry the engine's serde error, which
+            quotes the offending value as ONE unbroken token (up to 512 chars,
+            see `boundEngineError`). Default overflow-wrap would lay that out at
+            several thousand px inside this max-w-xl notice (#10267). */}
+        <p className="break-words">{sceneLoadError.reason}</p>
         <p className="text-[var(--sf-text-secondary)]">
           Saving is turned off because the viewport may be incomplete or corrupted.
           Your stored scene is protected. Reload to try again, or start a new scene to re-enable saving.
