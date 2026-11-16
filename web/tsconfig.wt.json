@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@spawnforge/ui": ["../packages/ui/src/index.ts"],
+      "@spawnforge/ui/internal": ["../packages/ui/src/internal.ts"],
+      "@spawnforge/ui/tokens": ["../packages/ui/src/tokens/index.ts"]
+    }
+  }
+}
