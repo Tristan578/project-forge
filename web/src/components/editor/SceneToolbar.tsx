@@ -9,7 +9,7 @@ import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefab
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
 import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import { describeSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
-import { showError } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
 import { SceneBrowser } from './SceneBrowser';
@@ -165,8 +165,12 @@ export function SceneToolbar() {
       // Parity with the AI/MCP `load_scene` handler, which surfaces the same
       // rejection: without this the scene silently vanishes into a no-op when
       // its embedded prefab graph is rejected or the engine is not ready.
-      // `sceneLoadRefusal()` says which of those it was.
-      showError(`The scene was not loaded. ${describeSceneLoadRefusal(sceneLoadRefusal())}`);
+      // `sceneLoadRefusal()` says which of those it was. Persistent: the
+      // engine's reason can run to 512 characters.
+      showPersistentError(
+        `The scene was not loaded. ${describeSceneLoadRefusal(sceneLoadRefusal())} The current scene is unchanged.`,
+        { id: 'scene-load-refused' },
+      );
     }
   }, [loadScene, sceneLoadRefusal]);
 

@@ -29,12 +29,13 @@ vi.mock('lucide-react', async () => {
 
 vi.mock('@/lib/toast', () => ({
   showError: vi.fn(),
+  showPersistentError: vi.fn(),
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { loadAutoSaveEntry, deleteAutoSaveEntry } from '@/lib/storage/autoSave';
-import { showError } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
 import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,20 @@ function mockStore(overrides: Record<string, unknown> = {}) {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => selector(state));
+}
+
+/**
+ * A `loadScene` that refuses, and a `sceneLoadRefusal` that only knows the
+ * refusal once that load has run — as in the real slice, which resets the
+ * record at the top of every `loadScene`. A caller that read the cause BEFORE
+ * loading would get `null` here.
+ */
+function refusingLoad(refusal: unknown) {
+  let loaded = false;
+  return {
+    loadScene: vi.fn(() => { loaded = true; return false; }),
+    sceneLoadRefusal: vi.fn(() => (loaded ? refusal : null)),
+  };
 }
 
 // Advance time enough for the async loadAutoSaveEntry promise to resolve and
@@ -211,27 +226,32 @@ describe('AutoSaveRecovery', () => {
       expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
       expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
       expect(setSceneName).not.toHaveBeenCalled();
-      expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showPersistentError)).toHaveBeenCalledTimes(1);
       expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
     });
 
     // `rejectionStrandsEditor: false` sets no `sceneLoadError`, so the toast is
     // the whole report: it must name the cause the slice recorded, not guess.
     it.each([
-      [{ kind: 'engine_refused', details: 'Invalid type: null, expected f32.' }, 'The saved scene could not be restored. The engine refused to load it. Details: Invalid type: null, expected f32.'],
-      [{ kind: 'prefab_invalid' }, 'The saved scene could not be restored. Its prefab data is invalid or its prefab references form a cycle.'],
-      [null, 'The saved scene could not be restored. The engine is not ready yet — try again in a moment.'],
-    ])('names the cause sceneLoadRefusal() recorded (%j)', async (refusal, message) => {
+      [{ kind: 'engine_refused', details: 'Invalid type: null, expected f32.' }, 'The engine refused it: Invalid type: null, expected f32.'],
+      [{ kind: 'engine_refused', details: null }, 'The engine refused it and gave no reason.'],
+      [{ kind: 'prefab_invalid' }, 'Its prefab data is invalid, or its prefabs reference each other in a loop.'],
+      [null, 'The engine is not ready yet — try again in a moment.'],
+    ])('names the cause sceneLoadRefusal() recorded after the load (%j)', async (refusal, cause) => {
       vi.mocked(loadAutoSaveEntry).mockResolvedValue(makeEntry());
       vi.mocked(getWasmModule).mockReturnValue({} as never);
-      mockStore({ loadScene: vi.fn(() => false), sceneLoadRefusal: vi.fn(() => refusal) });
+      mockStore(refusingLoad(refusal));
       render(<AutoSaveRecovery />);
       await flushPromises();
       await flushPromises();
 
       fireEvent.click(screen.getByRole('button', { name: /restore/i }));
 
-      expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith(message);
+      expect(vi.mocked(showPersistentError)).toHaveBeenCalledExactlyOnceWith(
+        `The saved scene could not be restored. ${cause} Your backup is kept, and the current scene is unchanged.`,
+        { id: 'scene-load-refused' },
+      );
+      expect(vi.mocked(showError)).not.toHaveBeenCalled();
       expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
     });
 

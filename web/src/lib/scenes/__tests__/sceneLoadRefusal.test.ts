@@ -10,22 +10,27 @@ import { describeSceneLoadRefusal, type SceneLoadRefusal } from '../sceneLoadRef
 describe('describeSceneLoadRefusal', () => {
   it('relays the engine reason it was given', () => {
     expect(describeSceneLoadRefusal({ kind: 'engine_refused', details: 'Missing field `entities`.' }))
-      .toBe('The engine refused to load it. Details: Missing field `entities`.');
+      .toBe('The engine refused it: Missing field `entities`.');
   });
 
   it('says the engine gave no detail rather than inventing one', () => {
     expect(describeSceneLoadRefusal({ kind: 'engine_refused', details: null }))
-      .toBe('The engine refused to load it and gave no further detail.');
+      .toBe('The engine refused it and gave no reason.');
   });
 
   it('names the prefab data, not the engine, when the prefab data was refused', () => {
     const sentence = describeSceneLoadRefusal({ kind: 'prefab_invalid' });
-    expect(sentence).toBe('Its prefab data is invalid or its prefab references form a cycle.');
+    expect(sentence).toBe('Its prefab data is invalid, or its prefabs reference each other in a loop.');
     expect(sentence).not.toContain('engine');
   });
 
   it('reads a missing refusal as no engine attached yet', () => {
     expect(describeSceneLoadRefusal(null)).toBe('The engine is not ready yet — try again in a moment.');
+  });
+
+  it('closes a truncated engine reason with a full stop, so the next sentence does not run on', () => {
+    expect(describeSceneLoadRefusal({ kind: 'engine_refused', details: 'Unknown variant `x…` … [truncated]' }))
+      .toBe('The engine refused it: Unknown variant `x…` … [truncated].');
   });
 
   it('ends every clause in a full stop, so callers can append their next step', () => {
