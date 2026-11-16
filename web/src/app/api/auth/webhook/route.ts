@@ -4,7 +4,9 @@
  * Processes user.created, user.updated, and user.deleted events.
  * On user.created, upserts the user row and grants the one-time trial tokens.
  * On user.updated, upserts the user row only.
- * On user.deleted, removes user data and cancels any active subscriptions.
+ * On user.deleted, removes user data via `deleteUserAccount`. It does NOT cancel
+ * the user's Stripe subscription; see docs/database-backup-restore.md
+ * § Data Retention and Deletion for the reconciliation that covers this.
  *
  * Signature verification is Clerk's own `verifyWebhook()` (#9629): it reads
  * the `svix-*` headers and the raw body itself, verifies through
