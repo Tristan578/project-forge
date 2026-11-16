@@ -402,18 +402,20 @@ WHERE u.id = '<user_uuid>';
 | Data Type | Retention Period | Deletion Trigger |
 |-----------|-----------------|-----------------|
 | User profile | Until account deletion | `DELETE /api/user/delete` or manual admin action |
-| Projects | Until account deletion | Cascade on user delete |
-| Token usage logs | 7 years (billing audit) | Manual purge after retention period |
+| Projects | Until account deletion | Explicit delete in `deleteUserAccount` |
+| Token usage logs | 7 years (billing audit), or until account deletion | Manual purge after the retention period; explicit delete in `deleteUserAccount` |
 | Webhook idempotency records | 48 hours (TTL) | Automatic expiry |
-| Generation job records | Anonymized on account deletion | Foreign key set to NULL or deleted |
-| Published games | Unpublished and removed on account deletion | Cascade |
+| Generation job records | Until account deletion | Explicit delete in `deleteUserAccount` |
+| Published games | Unpublished and removed on account deletion | Explicit delete in `deleteUserAccount` |
 
 For the Right to Erasure (`DELETE /api/user/delete`), most foreign keys to `users` do not cascade. `deleteUserAccount` (`web/src/lib/auth/user-service.ts`) deletes the user's rows explicitly, in one transaction, before the `users` row. Confirm it covers every table with a foreign key to `users`:
-- By `user_id`: `api_keys`, `provider_keys`, `token_usage`, `token_purchases`, `projects`, `cost_log`, `credit_transactions`, `published_games`, `generation_jobs`, `provider_job_owners` (#10262), `feedback`, `moderation_appeals`, `seller_profiles`, `game_ratings`, `game_comments`, `game_likes`, `game_forks`, `asset_reviews`
+- By `user_id`: `api_keys`, `provider_keys`, `token_usage`, `token_purchases`, `projects`, `cost_log`, `credit_transactions`, `published_games`, `generation_jobs`, `provider_job_owners`, `feedback`, `moderation_appeals`, `seller_profiles`, `game_ratings`, `game_comments`, `game_likes`, `game_forks`, `asset_reviews`
 - By another column: `user_follows` (`follower_id` and `following_id`), `asset_purchases` (`buyer_id`), `game_reports` (`reporter_id`), `marketplace_assets` (`seller_id`)
 - By `ON DELETE CASCADE`, with no explicit delete: `graph_nodes`, `graph_edges`
 
 The schema-driven test in `web/src/lib/auth/__tests__/user-service.test.ts` reads every foreign key to `users` from `schema.ts` and fails when a non-cascading one has no matching `DELETE`. This list is for review; that test is the check.
+
+Account deletion also removes the user's billing records (`token_usage`, `token_purchases`, `cost_log`, `credit_transactions`), so the 7-year billing-audit retention applies only while the account exists.
 
 ---
 
