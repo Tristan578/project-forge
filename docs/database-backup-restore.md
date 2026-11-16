@@ -401,21 +401,25 @@ WHERE u.id = '<user_uuid>';
 
 | Data Type | Retention Period | Deletion Trigger |
 |-----------|-----------------|-----------------|
-| User profile | Until account deletion | `DELETE /api/user/delete` or manual admin action |
+| User profile | Until account deletion | `POST /api/user/delete` or manual admin action |
 | Projects | Until account deletion | Explicit delete in `deleteUserAccount` |
 | Billing records (`token_usage`, `token_purchases`, `cost_log`, `credit_transactions`) | Until account deletion | Explicit delete in `deleteUserAccount` |
 | Webhook idempotency records | 48 hours (TTL) | Automatic expiry |
 | Generation job records | Until account deletion | Explicit delete in `deleteUserAccount` |
 | Published games | Unpublished and removed on account deletion | Explicit delete in `deleteUserAccount` |
 
-For the Right to Erasure (`DELETE /api/user/delete`), most foreign keys to `users` do not cascade. `deleteUserAccount` (`web/src/lib/auth/user-service.ts`) deletes the user's rows explicitly, in one transaction, before the `users` row. Confirm it covers every table with a foreign key to `users`:
+This table lists the main data types. The checklist below covers every table.
+
+For the Right to Erasure (`POST /api/user/delete`), most foreign keys to `users` do not cascade. `deleteUserAccount` (`web/src/lib/auth/user-service.ts`) deletes the user's rows explicitly, in one transaction, before the `users` row. Confirm it covers every table with a foreign key to `users`:
 - By `user_id`: `api_keys`, `provider_keys`, `token_usage`, `token_purchases`, `projects`, `cost_log`, `credit_transactions`, `published_games`, `generation_jobs`, `provider_job_owners`, `feedback`, `moderation_appeals`, `seller_profiles`, `game_ratings`, `game_comments`, `game_likes`, `game_forks`, `asset_reviews`
 - By another column: `user_follows` (`follower_id` and `following_id`), `asset_purchases` (`buyer_id`), `game_reports` (`reporter_id`), `marketplace_assets` (`seller_id`)
 - By `ON DELETE CASCADE`, with no explicit delete: `graph_nodes`, `graph_edges`
 
 The schema-driven test in `web/src/lib/auth/__tests__/user-service.test.ts` reads every foreign key to `users` from `schema.ts` and fails when a non-cascading one has no matching `DELETE`. This list is for review; that test is the check.
 
-Billing records have no exception: an erasure request deletes them with the rest of the account, and nothing is kept for billing audit afterwards. Stripe keeps its own records of the user's payments; they are outside this database, and `deleteUserAccount` does not change them.
+Billing records have no exception: an erasure request deletes them with the rest of the account, and nothing is kept for billing audit afterwards. Two places are outside the `deleteUserAccount` transaction:
+- **Backups.** Deleted rows stay in Neon's PITR history and retained WAL (up to 30 days, Section 4.4) and in the weekly exports (the last 4 are kept, Section 6) until those expire: 35 days at most. The Privacy Policy states this limit. Before promoting a restored branch (Section 3), list the `users` rows it has that production no longer has. Those are accounts deleted after the restore point; run `deleteUserAccount` for each one on the restored branch, so a restore never brings an erased account back.
+- **Stripe.** `deleteUserAccount` does not call Stripe. The Stripe customer, its invoices and any active subscription stay there, and deleting the `users` row removes the app's only link to them (`stripe_customer_id`, `stripe_subscription_id`). Before running an erasure by hand, find the user's subscription in the Stripe Dashboard and cancel it, so the deleted account is not charged again.
 
 ---
 

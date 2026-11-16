@@ -160,7 +160,8 @@ test.describe('Public Pages @ui', () => {
 
       const retention = page.locator('#data-retention');
       const payment = retention.locator('li').filter({ hasText: 'Payment records' });
-      await expect(payment).toContainText('deleted with it');
+      await expect(payment).toContainText('When you delete your account, they are deleted too');
+      await expect(payment).toContainText('Stripe');
       await expect(retention).not.toContainText('7 years');
     });
 

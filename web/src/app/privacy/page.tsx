@@ -181,7 +181,9 @@ export default async function PrivacyPolicyPage() {
         <p>
           We use Stripe to process payments and manage subscriptions. Stripe collects
           and processes your payment information directly. SpawnForge does not have access
-          to your full payment card details. For more information, see{' '}
+          to your full payment card details. Stripe keeps its own records of your
+          payments, and deleting your SpawnForge account does not delete them. For more
+          information, see{' '}
           <a
             href="https://stripe.com/privacy"
             target="_blank"
@@ -273,10 +275,12 @@ export default async function PrivacyPolicyPage() {
             content before it is permanently deleted.
           </li>
           <li>
-            <strong>Payment records:</strong> Your billing history, token purchases,
-            and credit transactions are retained for the duration of your account and
-            deleted with it. Stripe, our payment processor, keeps its own records of
-            your payments under its own privacy policy (see section 4.2).
+            <strong>Payment records:</strong> Your token purchases, credit
+            transactions, and usage records are kept while your account exists. When
+            you delete your account, they are deleted too, with no exception for billing
+            audits. Copies in our database backups are removed as those backups expire,
+            within 35 days. Stripe, our payment processor, keeps its own records of your
+            payments under its own privacy policy (see section 4.2).
           </li>
           <li>
             <strong>Usage and analytics data:</strong> Retained in aggregate,
@@ -321,7 +325,7 @@ export default async function PrivacyPolicyPage() {
         <p>
           You have the right to request deletion of your personal data. You can delete
           your account through your account settings. Upon deletion, we will remove your
-          personal data within 30 days, subject to our data retention obligations.
+          personal data within 30 days, as described in section 6 (Data Retention).
         </p>
 
         <h3>7.4 Right to Data Portability</h3>
