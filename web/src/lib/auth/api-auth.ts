@@ -2,7 +2,7 @@ import { auth, clerkClient } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import { getUserByClerkId, syncUserFromClerk } from './user-service';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
+import { serviceDegraded } from '@/lib/api/errors';
 import type { User } from '../db/schema';
 import { effectiveTier, spendableTokensOf } from '@/lib/ai/tierAccess';
 import type { Tier } from '@/lib/db/schema';
@@ -71,13 +71,12 @@ export async function authenticateRequest(): Promise<
     // payload. Never fall through to a userless AuthContext (credit bypass).
     return {
       ok: false,
-      // `redactedJson`, not `NextResponse.json`: this construction sits INSIDE a
-      // catch, where a raw constructor is banned (#9736). The body is two fixed
-      // strings today; the redactor is what keeps that true if it stops being.
-      response: redactedJson(
-        { error: 'SERVICE_DEGRADED', message: 'User sync temporarily unavailable. Please retry.' },
-        { status: 503 },
-      ),
+      // `serviceDegraded` builds through `redactedJson`, not `NextResponse.json`:
+      // this construction sits INSIDE a catch, where a raw constructor is banned
+      // (#9736). The body is two fixed strings today; the redactor is what keeps
+      // that true if it stops being. Same helper the status routes use for an
+      // ownership-lookup outage (#10262), so the contract has one definition.
+      response: serviceDegraded('User sync temporarily unavailable. Please retry.'),
     };
   }
   if (!user) {
@@ -116,10 +115,7 @@ export async function authenticateRequest(): Promise<
       // user without DB state (tier, credits). Prevents credit bypass (PF-474).
       return {
         ok: false,
-        response: NextResponse.json(
-          { error: 'SERVICE_DEGRADED', message: 'User sync temporarily unavailable. Please retry.' },
-          { status: 503 },
-        ),
+        response: serviceDegraded('User sync temporarily unavailable. Please retry.'),
       };
     }
     user = syncResult.user;

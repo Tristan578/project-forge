@@ -25,6 +25,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { providerJobOwners, type Provider } from '@/lib/db/schema';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { JobOwnershipUnavailableError } from './jobOwnershipError';
 
 /**
  * Record which user's request produced a provider job id. First writer wins
@@ -63,17 +64,25 @@ export async function bindProviderJob(
  * Returns `false` — the status route's cue to answer 404, same as "job not
  * found" — both when no binding exists (an unbound legacy job that predates
  * this check, or a bind write that itself failed) and when the binding
- * belongs to a different user. A lookup failure ALSO returns `false`: unlike
- * the write side above, this IS the security decision, so a DB error must
- * fail closed rather than silently letting an unverifiable poll through.
+ * belongs to a different user.
+ *
+ * A lookup FAILURE never resolves to `false`. It THROWS
+ * `JobOwnershipUnavailableError` (after reporting to Sentry), which the status
+ * routes render as 503 `SERVICE_DEGRADED` — still fail-closed (no key is
+ * resolved, nothing is read), but distinguishable from "not yours". The
+ * distinction matters because the poller treats a status-route 404 as
+ * terminal (refund + stop polling): a `false` here on a DB hiccup would fail
+ * the owner's running job while the provider kept working. See
+ * `jobOwnershipError.ts`.
  */
 export async function verifyProviderJobOwner(
   userId: string,
   provider: Provider,
   providerJobId: string,
 ): Promise<boolean> {
+  let rows: Array<{ userId: string }>;
   try {
-    const rows = await queryWithResilience(() =>
+    rows = await queryWithResilience(() =>
       getDb()
         .select({ userId: providerJobOwners.userId })
         .from(providerJobOwners)
@@ -85,11 +94,11 @@ export async function verifyProviderJobOwner(
         )
         .limit(1)
     );
-    return rows.length > 0 && rows[0].userId === userId;
   } catch (err) {
     captureException(err, { action: 'verify_provider_job_owner', provider, providerJobId, userId });
-    return false;
+    throw new JobOwnershipUnavailableError();
   }
+  return rows.length > 0 && rows[0].userId === userId;
 }
 
 /**
@@ -99,33 +108,35 @@ export async function verifyProviderJobOwner(
  * DIFFERENT user — distinct from `verifyProviderJobOwner`, which answers
  * "is this caller the owner" for a status poll.
  *
- * Unlike `verifyProviderJobOwner`, this function does NOT catch a lookup
- * failure itself — there is no try/catch here, and a DB error propagates
- * (rejects) to the caller rather than resolving to `null` or any other
- * value. This IS the security decision, so callers MUST NOT treat a
- * rejection as "unbound": the only safe way to consume this function is to
- * let the rejection propagate (or explicitly re-throw after side effects)
- * so an enclosing handler denies the write, the way `POST /api/jobs`'s
- * outer try/catch turns this rejecting into a fixed 500 that skips the
- * insert. A caller that swallows the error and defaults to "no owner found"
- * would silently reopen the ownership-spoofing hole this function exists to
- * close.
+ * A lookup failure never resolves to `null` or any other value: it is
+ * reported to Sentry and re-thrown as `JobOwnershipUnavailableError`, the
+ * same contract as `verifyProviderJobOwner`. This IS the security decision,
+ * so callers MUST NOT treat the rejection as "unbound": `POST /api/jobs`
+ * renders it as 503 `SERVICE_DEGRADED` and skips the insert. A caller that
+ * swallows the error and defaults to "no owner found" would silently reopen
+ * the ownership-spoofing hole this function exists to close.
  */
 export async function findProviderJobOwnerId(
   provider: string,
   providerJobId: string,
 ): Promise<string | null> {
-  const rows = await queryWithResilience(() =>
-    getDb()
-      .select({ userId: providerJobOwners.userId })
-      .from(providerJobOwners)
-      .where(
-        and(
-          eq(providerJobOwners.provider, provider),
-          eq(providerJobOwners.providerJobId, providerJobId),
-        ),
-      )
-      .limit(1)
-  );
+  let rows: Array<{ userId: string }>;
+  try {
+    rows = await queryWithResilience(() =>
+      getDb()
+        .select({ userId: providerJobOwners.userId })
+        .from(providerJobOwners)
+        .where(
+          and(
+            eq(providerJobOwners.provider, provider),
+            eq(providerJobOwners.providerJobId, providerJobId),
+          ),
+        )
+        .limit(1)
+    );
+  } catch (err) {
+    captureException(err, { action: 'find_provider_job_owner', provider, providerJobId });
+    throw new JobOwnershipUnavailableError();
+  }
   return rows.length > 0 ? rows[0].userId : null;
 }

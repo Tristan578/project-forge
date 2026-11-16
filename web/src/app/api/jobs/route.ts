@@ -7,9 +7,15 @@ import { eq, and, inArray, desc, sql, or } from 'drizzle-orm';
 import { isQstashConfigured } from '@/lib/qstash/client';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
+import { redactedJson, serviceDegraded } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { findProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import {
+  JobOwnershipUnavailableError,
+  JOB_OWNERSHIP_UNAVAILABLE_MESSAGE,
+} from '@/lib/generate/jobOwnershipError';
+import { asyncCapabilityForType } from '@/lib/generate/asyncTypeCapability';
+import { DB_PROVIDER } from '@/lib/config/providers';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +40,15 @@ const createJobSchema = z.object({
  * most 2000 chars or non-empty PNG data URL at most 4 MiB characters.
  * Returns HTTP 201 {job:{id}}; auth/rate/validation errors use middleware,
  * and persistence failures return a fixed 500 response.
+ *
+ * Ownership (#10262): a providerJobId already bound to ANOTHER account is
+ * refused with 409, and an ownership lookup that itself fails is refused
+ * with 503 SERVICE_DEGRADED (retryable) — never inserted. The provider for
+ * that lookup is derived server-side from `type`, so the client-supplied
+ * `provider` string cannot steer it. LIMITATION: the derivation covers only
+ * the async types (`ASYNC_TYPE_TO_DB_CAPABILITY`); `sfx` and `voice` never
+ * produce a pollable job, no binding is ever written for them, and a row
+ * created under one of those types is NOT checked against the bindings.
  */
 async function POST_impl(req: NextRequest) {
   try {
@@ -55,9 +70,32 @@ async function POST_impl(req: NextRequest) {
     // otherwise surface a stranger's job in this caller's own `GET /api/jobs`
     // list (their id, but bound provider/providerJobId belonging to another
     // account). Bound-to-this-user and never-bound are both accepted.
-    const existingOwnerId = await findProviderJobOwnerId(provider, providerJobId);
-    if (existingOwnerId && existingOwnerId !== mid.userId) {
-      return redactedJson({ error: 'This job belongs to another account' }, { status: 409 });
+    //
+    // The lookup provider is derived SERVER-SIDE from `type`, never read from
+    // the body: the client's `provider` is display data (GenerateSpriteDialog
+    // sends 'sdxl' where the server bound 'replicate', so a body-keyed lookup
+    // never matched on sprite), and a caller could send any string to dodge
+    // the check. A type with no async capability (`sfx`, `voice`) never has a
+    // pollable job, so no binding is ever written for it and there is nothing
+    // to look up — a row planted under such a type only ever appears in the
+    // planter's own list, and the status routes' own ownership check keeps
+    // the underlying result unreadable to them.
+    const ownershipCapability = asyncCapabilityForType(type);
+    if (ownershipCapability) {
+      let existingOwnerId: string | null;
+      try {
+        existingOwnerId = await findProviderJobOwnerId(DB_PROVIDER[ownershipCapability], providerJobId);
+      } catch (err) {
+        // "Cannot verify" is a retryable 503, not a silent "unbound" and not
+        // the generic 500 below. The insert is skipped either way.
+        if (err instanceof JobOwnershipUnavailableError) {
+          return serviceDegraded(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
+        }
+        throw err;
+      }
+      if (existingOwnerId && existingOwnerId !== mid.userId) {
+        return redactedJson({ error: 'This job belongs to another account' }, { status: 409 });
+      }
     }
 
     const [job] = await queryWithResilience(() =>

@@ -34,6 +34,7 @@ import {
   findProviderJobOwnerId,
 } from '../jobOwnership';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { JobOwnershipUnavailableError } from '../jobOwnershipError';
 
 const mockCaptureException = vi.mocked(captureException);
 
@@ -112,12 +113,15 @@ describe('jobOwnership', () => {
       expect(result).toBe(false);
     });
 
-    it('fails CLOSED (returns false) and reports to Sentry when the lookup itself throws', async () => {
+    it('fails CLOSED by THROWING JobOwnershipUnavailableError — never `false` — and reports to Sentry when the lookup itself fails', async () => {
+      // `false` is the routes' cue for the terminal 404 ("not yours"), and the
+      // poller refunds and stops on it. A DB failure is "cannot verify": it
+      // must reach the route as a distinct, retryable error (rendered 503).
       mockSelectLimit.mockRejectedValueOnce(new Error('db down'));
 
-      const result = await verifyProviderJobOwner('user-1', 'meshy', 'task-abc');
+      await expect(verifyProviderJobOwner('user-1', 'meshy', 'task-abc'))
+        .rejects.toBeInstanceOf(JobOwnershipUnavailableError);
 
-      expect(result).toBe(false);
       expect(mockCaptureException).toHaveBeenCalledTimes(1);
       expect(mockCaptureException.mock.calls[0][1]).toMatchObject({
         action: 'verify_provider_job_owner',
@@ -167,10 +171,17 @@ describe('jobOwnership', () => {
       expect(result).toBeNull();
     });
 
-    it('propagates a lookup failure rather than silently treating it as unbound', async () => {
+    it('rejects with JobOwnershipUnavailableError (and reports to Sentry) rather than silently treating a lookup failure as unbound', async () => {
       mockSelectLimit.mockRejectedValueOnce(new Error('db down'));
 
-      await expect(findProviderJobOwnerId('meshy', 'task-abc')).rejects.toThrow('db down');
+      await expect(findProviderJobOwnerId('meshy', 'task-abc'))
+        .rejects.toBeInstanceOf(JobOwnershipUnavailableError);
+      expect(mockCaptureException).toHaveBeenCalledTimes(1);
+      expect(mockCaptureException.mock.calls[0][1]).toMatchObject({
+        action: 'find_provider_job_owner',
+        provider: 'meshy',
+        providerJobId: 'task-abc',
+      });
     });
   });
 });

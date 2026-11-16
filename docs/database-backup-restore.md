@@ -409,7 +409,7 @@ WHERE u.id = '<user_uuid>';
 | Published games | Unpublished and removed on account deletion | Cascade |
 
 For the Right to Erasure (`DELETE /api/user/delete`), confirm the cascading deletes cover all tables with `user_id` foreign keys:
-- `api_keys`, `provider_keys`, `token_usage`, `token_purchases`, `projects`, `cost_log`, `credit_transactions`, `published_games`, `generation_jobs`, `feedback`, `moderation_appeals`, `seller_profiles`, `game_ratings`, `game_comments`, `game_likes`, `user_follows`, `asset_purchases`, `asset_reviews`
+- `api_keys`, `provider_keys`, `token_usage`, `token_purchases`, `projects`, `cost_log`, `credit_transactions`, `published_games`, `generation_jobs`, `provider_job_owners` (non-cascading FK; deleted explicitly in `deleteUserAccount`, #10262), `feedback`, `moderation_appeals`, `seller_profiles`, `game_ratings`, `game_comments`, `game_likes`, `user_follows`, `asset_purchases`, `asset_reviews`, `game_reports` (by `reporter_id`), `marketplace_assets` (by `seller_id`). The schema-driven test in `web/src/lib/auth/__tests__/user-service.test.ts` derives this list from `schema.ts` and fails when a new non-cascading FK to `users` has no delete.
 
 ---
 

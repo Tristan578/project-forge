@@ -7,10 +7,11 @@ import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
-import { redactedJson } from '@/lib/api/errors';
+import { redactedJson, serviceDegraded } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { JobOwnershipUnavailableError, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobOwnershipError';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -53,7 +54,18 @@ async function GET_impl(request: NextRequest) {
   // result. Checked BEFORE any provider key is resolved. See
   // `src/lib/generate/jobOwnership.ts`. (The spritesheet_ branch above never
   // resolves a key or touches the provider, so it needs no check.)
-  const isOwner = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.sprite, jobId);
+  let isOwner: boolean;
+  try {
+    isOwner = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.sprite, jobId);
+  } catch (err) {
+    // "Cannot verify" is not "not yours" (#10262): a lookup failure is the
+    // retryable 503 SERVICE_DEGRADED the poller keeps polling through, never
+    // the terminal 404 below (which refunds and stops the job).
+    if (err instanceof JobOwnershipUnavailableError) {
+      return serviceDegraded(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
+    }
+    throw err;
+  }
   if (!isOwner) {
     return NextResponse.json({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
   }

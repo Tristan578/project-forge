@@ -65,6 +65,9 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { findProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+// Real class, from the un-mocked module: the route's `instanceof` must see
+// the same constructor the (mocked) lookup rejects with.
+import { JobOwnershipUnavailableError } from '@/lib/generate/jobOwnershipError';
 
 const mockInsertReturning = vi.fn();
 const mockSelectFrom = vi.fn();
@@ -292,17 +295,18 @@ describe('/api/jobs', () => {
         expect(findProviderJobOwnerId).toHaveBeenCalledWith('meshy', 'j-1');
       });
 
-      // findProviderJobOwnerId deliberately does NOT catch a lookup failure
-      // (see its doc comment and jobOwnership.test.ts's "propagates a lookup
-      // failure" case) — it rejects, relying on this route's outer try/catch
-      // to turn that into a fixed 500 and skip the insert. That fail-closed
-      // behavior at the route level is the actual security property #10262
-      // is about, so it must be exercised here, not just at the DB-insert
-      // failure ("returns 500 on DB error") which never touches this path.
-      it('returns 500 without inserting when findProviderJobOwnerId itself rejects', async () => {
+      // findProviderJobOwnerId never resolves on a lookup failure: it rejects
+      // with JobOwnershipUnavailableError (see jobOwnership.test.ts), and the
+      // route renders that as the retryable 503 SERVICE_DEGRADED contract —
+      // "cannot verify" is not "unbound" — and skips the insert. That
+      // fail-closed behavior at the route level is the actual security
+      // property #10262 is about, so it is exercised here, not just at the
+      // DB-insert failure ("returns 500 on DB error") which never touches
+      // this path.
+      it('returns 503 SERVICE_DEGRADED without inserting when the ownership lookup itself fails', async () => {
         mockAuth(true);
         const { insertChain } = setupDb();
-        vi.mocked(findProviderJobOwnerId).mockRejectedValueOnce(new Error('db down'));
+        vi.mocked(findProviderJobOwnerId).mockRejectedValueOnce(new JobOwnershipUnavailableError());
 
         const req = new NextRequest('http://localhost/api/jobs', {
           method: 'POST',
@@ -317,9 +321,85 @@ describe('/api/jobs', () => {
         const response = await POST(req);
         const body = await response.json();
 
-        expect(response.status).toBe(500);
-        expect(body.error).toBe('Failed to create job');
+        expect(response.status).toBe(503);
+        expect(body).toMatchObject({ error: 'SERVICE_DEGRADED' });
+        expect(typeof body.message).toBe('string');
         expect(insertChain.values).not.toHaveBeenCalled();
+      });
+
+      it('still returns the fixed 500 without inserting for a rejection that is NOT an ownership-lookup failure', async () => {
+        // The 503 branch is keyed on the error class; anything else keeps the
+        // route's generic fail-closed 500, so a bug that throws something
+        // unexpected before the insert cannot be mistaken for a DB outage.
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findProviderJobOwnerId).mockRejectedValueOnce(new Error('unexpected'));
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({ providerJobId: 'j-1', provider: 'meshy', type: 'model', prompt: 'A red cube' }),
+        });
+
+        const response = await POST(req);
+        expect(response.status).toBe(500);
+        expect((await response.json()).error).toBe('Failed to create job');
+        expect(insertChain.values).not.toHaveBeenCalled();
+      });
+
+      // The lookup provider is derived from `type` on the server. Keyed on the
+      // body's `provider`, the guard never matched for sprite (the dialog sends
+      // 'sdxl'; the server bound 'replicate') and any caller could dodge it by
+      // sending a different provider string.
+      it('derives the lookup provider from type, ignoring the client-supplied provider string', async () => {
+        mockAuth(true);
+        setupDb();
+        mockInsertReturning.mockResolvedValueOnce([{ id: 'job-abc' }]);
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({ providerJobId: 'pred-1', provider: 'sdxl', type: 'sprite', prompt: 'A hero' }),
+        });
+
+        const response = await POST(req);
+
+        expect(response.status).toBe(201);
+        expect(findProviderJobOwnerId).toHaveBeenCalledTimes(1);
+        expect(findProviderJobOwnerId).toHaveBeenCalledWith('replicate', 'pred-1');
+      });
+
+      it('refuses with 409 even when the body names a provider under which the id is not bound', async () => {
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findProviderJobOwnerId).mockResolvedValue('someone-else');
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({ providerJobId: 'pred-1', provider: 'not-a-provider', type: 'sprite', prompt: 'A hero' }),
+        });
+
+        const response = await POST(req);
+
+        expect(response.status).toBe(409);
+        expect(findProviderJobOwnerId).toHaveBeenCalledWith('replicate', 'pred-1');
+        expect(insertChain.values).not.toHaveBeenCalled();
+      });
+
+      it('skips the ownership lookup for a type that never produces a pollable job (sfx)', async () => {
+        // Documented limitation: no binding is ever written for sfx/voice, so
+        // there is nothing to look up. The row is still created.
+        mockAuth(true);
+        setupDb();
+        mockInsertReturning.mockResolvedValueOnce([{ id: 'job-sfx' }]);
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({ providerJobId: 'sfx-1', provider: 'elevenlabs', type: 'sfx', prompt: 'A whoosh' }),
+        });
+
+        const response = await POST(req);
+
+        expect(response.status).toBe(201);
+        expect(findProviderJobOwnerId).not.toHaveBeenCalled();
       });
     });
   });

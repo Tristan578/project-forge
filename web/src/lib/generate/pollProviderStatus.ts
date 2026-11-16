@@ -23,6 +23,7 @@
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import type { AsyncGenerationType } from './asyncTypeCapability';
 
 /**
  * Terminal message for a music-job poll (PF-1301 / #9522). Music routes to
@@ -36,42 +37,16 @@ export const MUSIC_SYNC_TERMINAL_MESSAGE = withRetryGuidance(
 );
 
 /**
- * Async generation types that have a status route and a `generation_jobs` row.
- *
- * `pixel-art` is intentionally EXCLUDED: it has no member in the
- * `generation_type` DB enum (its route asserts `type: 'pixel-art'` → 400), so
- * there is no `generation_jobs` row for a durable callback to finalize. Adding
- * it here would force an enum migration for zero benefit — pixel-art stays on
- * the client-poll path. Any new value added to this union MUST also (1) have a
- * `generation_type` enum member, (2) map in `ASYNC_TYPE_TO_DB_CAPABILITY`
- * below, and (3) be exercised by the parity test.
+ * The async type union and its type→capability map live in the leaf module
+ * `asyncTypeCapability.ts` (so `POST /api/jobs` can derive the ownership
+ * provider without importing the provider clients above, #10262) and are
+ * re-exported here for every existing import site.
  */
-export type AsyncGenerationType =
-  | 'model'
-  | 'texture'
-  | 'skybox'
-  | 'music'
-  | 'sprite'
-  | 'sprite_sheet'
-  | 'tileset';
-
-/** Provider-capability key (in DB_PROVIDER) used to resolve the poll key. */
-export type DbCapabilityForType = 'model3d' | 'texture' | 'music' | 'sprite';
-
-/**
- * Maps each async type to the `DB_PROVIDER` capability whose key the callback
- * must resolve to poll the provider. Skybox reuses the texture provider
- * (Meshy); all sprite variants use the sprite provider (Replicate).
- */
-export const ASYNC_TYPE_TO_DB_CAPABILITY: Record<AsyncGenerationType, DbCapabilityForType> = {
-  model: 'model3d',
-  texture: 'texture',
-  skybox: 'texture',
-  music: 'music',
-  sprite: 'sprite',
-  sprite_sheet: 'sprite',
-  tileset: 'sprite',
-};
+export {
+  ASYNC_TYPE_TO_DB_CAPABILITY,
+  type AsyncGenerationType,
+  type DbCapabilityForType,
+} from './asyncTypeCapability';
 
 /** Normalized, provider-agnostic status the callback acts on. */
 export interface NormalizedProviderStatus {

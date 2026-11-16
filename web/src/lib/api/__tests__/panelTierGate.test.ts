@@ -53,9 +53,11 @@ describe('panelTierGateResponseForPoll (status polls)', () => {
   });
 
   it('refuses a never-granted starter (every token column 0) on a hobbyist panel, with the TIER_REQUIRED body', async () => {
-    // The #10236 review-board blocker: status routes do not bind jobId to the
-    // caller and the resolver hands a zero-cost status check the platform key,
-    // so admitting this $0 account would let it poll arbitrary job ids.
+    // The #10236 review-board blocker: the resolver hands a zero-cost status
+    // check the platform key, so admitting this $0 account would let it poll
+    // creator-tier providers it never paid for. (Polling ARBITRARY job ids is
+    // stopped by `verifyProviderJobOwner`, #10262 — not by this gate, which
+    // only decides who reaches the status route at all.)
     const res = panelTierGateResponseForPoll(HOBBYIST_PANEL, NEVER_GRANTED_STARTER);
     expect(res?.status).toBe(403);
     expect(await res?.json()).toEqual({

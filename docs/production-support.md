@@ -497,9 +497,14 @@ stay refused. A spent trial still qualifies, because the grant sets
 `monthly_tokens` and spending only raises `monthly_tokens_used`. A `starter`
 that never held tokens (a signup the grant never reached, every column 0) is
 judged as `starter` and refused on hobbyist status routes too, as it was before
-#7715. The status routes do **not** check that the `jobId` belongs to the
-caller (pre-existing on `main` for every paid tier, tracked in #10262), so the
-poll gate narrows who can reach them; it is not an ownership check. The resolver, likewise, skips its tier and balance checks for a
+#7715. The poll gate narrows who can reach a status route; it is not an
+ownership check. That is `verifyProviderJobOwner`
+(`web/src/lib/generate/jobOwnership.ts`, #10262), which each key-resolving
+status route runs after the gate and before `resolveApiKey`: a `jobId` not
+bound to the caller answers 404 (the client stops polling and refunds), and a
+failure of the lookup itself answers 503 `SERVICE_DEGRADED` (the client keeps
+polling) — so a DB incident shows up as 503s on the status routes, never as a
+wave of refunds. The resolver, likewise, skips its tier and balance checks for a
 zero-cost `STATUS_CHECK_OPERATION` call (the pollers and the QStash
 `generation-complete` callback). The polled job was paid for when it was
 created, and one generation can spend the whole grant (a tileset costs 50), so

@@ -187,6 +187,23 @@ export const serviceUnavailable = (message: string) =>
   createErrorResponse(503, message, { code: ErrorCode.SERVICE_UNAVAILABLE });
 
 /**
+ * 503 `SERVICE_DEGRADED` — the degraded-mode contract `authenticateRequest`
+ * established for a TRANSIENT failure the client should retry: `error` is the
+ * code, `message` the sentence. Distinct from `serviceUnavailable` (a
+ * capability that is not provisioned) and from every 4xx. `useGenerationPolling`
+ * reads exactly this shape — it keeps polling on a 503 and, if the job never
+ * recovers, shows `message`, never the code. Used by `authenticateRequest`
+ * for a user-sync outage and by the status routes when the job-ownership
+ * lookup itself fails (#10262): "cannot verify" must never render as the
+ * terminal 404 that means "not yours".
+ *
+ * `redactedJson`, not `NextResponse.json`: this is routinely called INSIDE a
+ * catch, where a raw constructor is banned (#9736).
+ */
+export const serviceDegraded = (message: string) =>
+  redactedJson({ error: 'SERVICE_DEGRADED', message }, { status: 503 });
+
+/**
  * Check if an error is a DB resilience error (circuit breaker open or rate limited)
  * and return a 503 response with retryAfter header. Returns null if the error
  * is not a DB resilience error and should be handled elsewhere.

@@ -1242,15 +1242,20 @@ describe('useGenerationPolling', () => {
     fetchSpy.mockRestore();
   });
 
-  it('still treats a 500 as transient — only 404 is terminal', async () => {
-    // Guards the boundary of the new branch: a 500 with the same body shape
-    // must keep polling exactly as before (#9736), not be swept into the
-    // terminal path.
+  it.each([
+    [500, { error: 'Could not read the 3D Model generation status. Please try again.' }],
+    // The ownership lookup's own failure (#10262, round 4): "cannot verify" is
+    // the SERVICE_DEGRADED 503 the routes send instead of the terminal 404.
+    [503, { error: 'SERVICE_DEGRADED', message: 'Could not verify who owns this job right now. Please retry.' }],
+  ])('still treats a %i as transient — only 404 is terminal', async (status, body) => {
+    // Guards the boundary of the terminal-404 branch: a non-OK read with any
+    // other status must keep polling exactly as before (#9736), not be swept
+    // into the refund-and-stop path.
     mockJobs['tr1'] = makeJob('tr1', { usageId: 'usage-tr1' });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
       ok: false,
-      status: 500,
-      json: () => Promise.resolve({ error: 'Could not read the 3D Model generation status. Please try again.' }),
+      status,
+      json: () => Promise.resolve(body),
     } as Response));
 
     renderHook(() => useGenerationPolling());

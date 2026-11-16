@@ -306,6 +306,9 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     expect(res.status).toBe(200);
     await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
+    // No asyncJob and no jobIdForOwnership: nothing declares a pollable job
+    // id, so nothing is bound either (#10262).
+    expect(mockBindProviderJob).not.toHaveBeenCalled();
   });
 
   it('publishes on a cache MISS (durable callback armed for the new provider job)', async () => {
@@ -326,6 +329,10 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
       { userId: 'user-1', providerJobId: 'task-123', type: 'model', tokenUsageId: 'usage-1', attempt: 0 },
       { delaySeconds: 30 },
     );
+    // The cached path has its OWN bind site (inside the cacheMiss factory,
+    // #10262) — a new provider job was issued here, so it must be bound to
+    // the caller exactly like the uncached path.
+    expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
   });
 
   it('does NOT publish on a cache HIT (re-served result — no new job to poll)', async () => {
@@ -341,5 +348,9 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     await expect(res.json()).resolves.not.toHaveProperty('durable');
     await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
+    // A HIT re-serves a job id that was bound to whoever first created it;
+    // this caller must NOT be bound to it (first writer wins would refuse
+    // anyway, but the call must never be made).
+    expect(mockBindProviderJob).not.toHaveBeenCalled();
   });
 });

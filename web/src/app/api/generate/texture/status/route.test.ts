@@ -10,6 +10,7 @@ import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { JobOwnershipUnavailableError } from '@/lib/generate/jobOwnershipError';
 
 const mockGetTextureStatus = vi.hoisted(() => vi.fn());
 
@@ -88,6 +89,21 @@ describe('GET /api/generate/texture/status', () => {
       expect(data.error).toBe(JOB_NOT_FOUND_MESSAGE);
       expect(resolveApiKey).not.toHaveBeenCalled();
       expect(mockGetTextureStatus).not.toHaveBeenCalled();
+    });
+
+    it('returns 503 SERVICE_DEGRADED — not 404 — when the ownership lookup itself fails, so the poller keeps polling', async () => {
+      // A 404 is terminal for useGenerationPolling (refund + stop). A DB
+      // failure on the ownership SELECT must therefore never render as one:
+      // the job is unverifiable, not lost. No key is resolved either way.
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(verifyProviderJobOwner).mockRejectedValue(new JobOwnershipUnavailableError());
+
+      const res = await GET(makeRequest({ jobId: 'job-123' }));
+
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ error: 'SERVICE_DEGRADED' });
+      expect(resolveApiKey).not.toHaveBeenCalled();
     });
 
     it('checks ownership with the authenticated userId, the texture provider, and the polled jobId', async () => {
