@@ -279,8 +279,9 @@ export default async function PrivacyPolicyPage() {
             transactions, and records of the AI tokens you used are kept while your
             account exists. When you delete your account, they are deleted within 30
             days, with no exception for billing audits. Copies in our database backups
-            are removed as those backups expire, within 35 days. Stripe, our payment processor, keeps its own records of your
-            payments under its own privacy policy (see section 4.2).
+            are removed as those backups expire, within 35 days. Stripe, our payment
+            processor, keeps its own records of your payments under its own privacy
+            policy (see section 4.2).
           </li>
           <li>
             <strong>Usage and analytics data:</strong> Retained in aggregate,
