@@ -3,8 +3,7 @@ name: dx-guardian
 description: Developer experience guardian. Audits documentation freshness, cross-IDE consistency, and quality standards.
 model: haiku
 effort: medium
-memory: project
-tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+tools: [Read, Grep, Glob]
 skills: [developer-experience, kanban, docs]
 hooks:
   Stop:

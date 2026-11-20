@@ -3,8 +3,7 @@ name: test-reviewer
 description: Read-only test-coverage reviewer for the review board. Audits a diff for coverage gaps, weakened or vacuous assertions, missing CI gates, flaky patterns and test-quality anti-patterns. Reports findings as PASS/FAIL — never writes tests (that is test-writer's job).
 model: sonnet
 effort: high
-memory: project
-tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+tools: [Read, Grep, Glob]
 skills: [testing, tdd, playwright-best-practices]
 maxTurns: 25
 hooks:

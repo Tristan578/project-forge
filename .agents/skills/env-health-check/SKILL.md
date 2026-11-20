@@ -5,7 +5,35 @@ description: Validate SpawnForge production environments — Vercel deployments,
 
 # Environment Health Check
 
-You are running a systematic health check across all SpawnForge production environments. This skill exists because silent infrastructure failures (like duplicate YAML keys breaking CD for 21+ hours) are catastrophic when customers are live.
+Check the particular release and environment the user requested. Start with the executable gate:
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/scripts/run-health-check.sh" \
+  --environment production --release <full-commit> \
+  --deployment-id <github-deployment-id> --run-id <github-cd-run-id>
+```
+
+Select the full SHA from the requested delivery, the GitHub deployment for that
+SHA and environment, and the corresponding CD run. Check their IDs in the
+deployment and workflow records. The gate fetches those records independently
+and probes the configured public origin. It reports healthy (0), failed (1),
+degraded (2) or unknown (3), with a verdict per check. Observations older than
+10 minutes and customer smoke runs older than 24 hours cannot prove current
+behavior. Authentication or protection gaps stay unknown. Treat AI providers
+as degraded when the live report says so. Pass `--critical-service "AI Providers"`
+when the release depends on that provider. A required provider needs a passing
+customer probe for the specific behavior under review.
+
+For delivery, pass `--completion-plan PATH` for a separately approved JSON
+inventory containing `artifact` (`SpawnForge`), `environment`, `revision`,
+`requirements` (requirement IDs mapped to the gate's check IDs), and `issues`
+(every discovered issue's SpawnForge GitHub issue number mapped to the check
+that verifies its fix). The gate requires healthy independent evidence and
+independently verifies each issue's completed state. When the gate lacks an
+applicable check or a discovered issue cannot be fixed and verified, delivery
+is incomplete. Do not approve a scope inventory that omits a requirement or
+finding. The approved inventory is the input to the gate, never a self-issued
+PASS receipt. CI evidence does not establish behavior beyond its actual test scope.
 
 ## When to Run
 
@@ -27,7 +55,7 @@ gh run list --workflow=cd.yml --branch main --limit 3
 ```
 
 **Evaluate:**
-- If the latest run has `0s` duration and `failure` → **CRITICAL: workflow file error** (the duplicate-YAML-key failure above)
+- A failed run with zero duration needs the workflow annotations and job logs. Keep the cause unknown if those records cannot distinguish a workflow error from cancellation, provider failure or other causes.
 - If the latest run failed after >0s → investigate with `gh run view <ID> --log-failed`
 - If no runs in the last 24h → CD may not be triggering on push
 
@@ -257,7 +285,7 @@ echo "Production is $COMMITS_BEHIND commits behind main"
 
 ## Scripts
 
-- `bash "${CLAUDE_SKILL_DIR}/scripts/run-health-check.sh"` — Full health check: local env file, required vars, node version, and production environments via hook script
+- `bash "${CLAUDE_SKILL_DIR}/scripts/run-health-check.sh" --help` — release health and completion gate. Local setup diagnostics are separate from deployed release evidence.
 
 ## References
 

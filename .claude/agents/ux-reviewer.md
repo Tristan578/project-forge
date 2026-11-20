@@ -3,10 +3,7 @@ name: ux-reviewer
 description: Senior UX designer and antagonistic reviewer. Enforces design library usage over bespoke components, WCAG AA accessibility, theme coherence, desirability, and usability. Reviews specs, plans, PRs, and components for UX excellence. Finds problems others miss.
 model: sonnet
 effort: high
-memory: project
-mcpServers:
-  - playwright
-tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+tools: [Read, Grep, Glob]
 skills: [web-accessibility, game-ui-design, playwright-best-practices]
 maxTurns: 25
 hooks:

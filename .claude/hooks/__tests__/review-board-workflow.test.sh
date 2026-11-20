@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Runs the node:test suite for .claude/workflows/review-board.js (#10325): the
-# round cap, fix-diff re-reviews with only the named seats, carried seats in
-# the published count, and a board decided by blocking findings. It lives in
-# this directory so the hook-tests job (and the Windows job) run it from their
-# glob; ci-gate's needs-hooks filter matches .claude/workflows/ for that reason.
+# Check the legacy workflow refuses ambient agent dispatch.
+# Native execution is covered by .claude/tools/test_native_reviewer.py.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 command -v node >/dev/null 2>&1 || { echo "FAIL: node is required by this suite"; exit 1; }

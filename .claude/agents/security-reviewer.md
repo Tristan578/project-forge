@@ -3,8 +3,7 @@ name: security-reviewer
 description: Security and compliance specialist. Reviews code for prompt injection, auth gaps, secret exposure, input validation, and dependency vulnerabilities.
 model: sonnet
 effort: high
-memory: project
-tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+tools: [Read, Grep, Glob]
 skills: [testing]
 hooks:
   Stop:

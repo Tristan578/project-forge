@@ -7,6 +7,28 @@ description: "Use when dispatching code reviews, spec reviews, or PR reviews. De
 
 All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. Each verdict is PASS or FAIL, never "pass with issues". The rules below decide what a seat may raise, what blocks, and when the loop stops.
 
+## Start the review
+
+```bash
+python .claude/tools/review_board.py --base <verified-full-merge-base-sha> \
+  --context <tracked-caller> --context <tracked-test>
+```
+
+An authorized operator selects the current base, commits the reviewed tree, and
+supplies tracked callers, tests and dependencies needed to understand the fix.
+Include the governing lessons and checklists when they apply. The launcher
+pins HEAD, packages the Git diff and selected files, and opens each seat in a
+fresh Claude Code process with every action tool disabled. It requires the
+verified Claude Code release and an authorized Anthropic API credential.
+Only the approved model endpoint receives the packet. The package is the seat's
+read surface. Missing packet evidence blocks that seat.
+
+Invoke this launcher from Claude Code or Codex. The old `/review-board` workflow
+returns BLOCKED because its children inherit ambient capabilities. Standalone
+role definitions provide checklists and do not authorize delivery verdicts.
+The Bash denylist remains supplementary. A separate authorized operator may
+collect scoped runtime evidence or publish a verdict after reviewing the result.
+
 ## Scope, severity and the round cap
 
 These rules exist because an unscoped "any finding fails" board does not converge. Five adversarial seats always find one more nit or one more hypothetical, so every round produces a fix and the fix produces another round. That cost #10130 sixteen rounds, and on 2026-10-03 it cost #10298 sixteen rounds, #10294 twelve and #10307 nine, for one user's weekly budget. In the same period CI on all 16 open PRs stayed red on a one-line shared fix that nobody ported (lessons-learned #23).
@@ -16,25 +38,27 @@ These rules exist because an unscoped "any finding fails" board does not converg
    - a hypothetical the seat has not tied to a changed line;
    - a "while you're here" improvement.
 
-   A seat that notices a real pre-existing bug reports it under `followups` in its verdict, and the orchestrator files ONE GitHub issue per PR for all of them.
-2. **No open-ended hunting.** A seat does not build scratch apps or harnesses, or run production builds, to search for new attack shapes. It may run one to CONFIRM a specific defect it has already tied to a changed line, and must say which line.
+   A seat that notices a real pre-existing bug records it in its findings. Verify the fix before completing the work. If the fix is blocked, keep the work incomplete.
+2. **Use pinned evidence.** A seat requests missing verification from the authorized operator and identifies the affected line.
 3. **Severity decides what blocks.**
    - `blocker` and `major` fail the board: a correctness or security defect in the diff, a broken or vacuous test of the changed code, or a claim in the PR that is false.
-   - `minor` does not fail the board: wording, comment style, a missing nice-to-have test, docs drift. The builder fixes minors in the SAME push when they are cheap, or files them in the follow-up issue. A minor alone never triggers another round.
+   - Describe minor findings precisely. Outstanding discovered issues keep the revision incomplete.
    - Seats that grade on their own scale map onto this one. A security finding rated CRITICAL, HIGH or MEDIUM is a `blocker` or `major`; a security defect is never `minor`, which is for wording, style and docs only. A UX finding rated CRITICAL or HIGH is a `blocker` or `major`; UX MEDIUM and LOW are `minor`.
    - An orchestrator `focus` narrows where a seat looks first. It never excuses a blocker or major elsewhere in the diff.
-4. **A re-review covers the fix, not the PR again.** After round 1, the board reviews `git diff <last-reviewed-sha>..HEAD` and checks that the previous blocking findings are closed. Seats re-run as follows:
-   - only the seats that failed, plus any seat whose domain the fix touches;
-   - a comment-, docs- or test-only fix diff gets ONE seat on a cheaper model;
-   - the security seat ALWAYS re-runs when the fix diff touches `web/src/lib/security/`, `web/src/app/api/`, auth, `web/src/lib/scripting/`, CSP, `.github/workflows/`, or a test that pins a security property. When a test-only fix diff touches such a test, the one cheap seat is the security seat.
-5. **Three rounds, then stop.** A round is one board run against one head: all five seats in round 1, the re-run seats after that. `.claude/workflows/review-board.js` enforces this: pass `{round, since, seats, carried}` for a re-review (`since` = the sha the last round reviewed, `seats` = the seats to re-run, `carried` = the seats whose earlier PASS stands), and at `round: 4` it does not run at all and returns `STOP`. A re-review must account for every seat exactly once, re-run or carried. `carried` is the orchestrator's assertion and the workflow cannot verify it, so carry only a seat whose latest verdict on this PR was a PASS and whose domain the fix does not touch; the published line names the fix range, the re-run seats and the carried seats so a reader can check. If a PR still has a blocker or major after round 3, the orchestrator stops and brings it to the user with the open findings and a recommendation: fix, split, accept with a documented limit, or close. It does not start round 4 on its own.
+4. **Re-review prior findings.** Pass `--previous PATH` with the preceding local
+   board result for the same batch. Clean verdicts can be reused within 24 hours
+   while the packet, runtime and model match. A changed commit or packet
+   requires fresh verdicts. Preserve all prior findings in the review input.
+5. **Three rounds, then escalate.** Keep the local outputs outside the checkout
+   and retain the previous result between rounds. After round 3, unresolved
+   findings require root-cause work, a revised plan or an explicit blocker.
 6. **Ready means the user's definition, checked first.** CI green on the head, review threads answered and resolved, and a board PASS. Read the PR's CI before spending anything on review. A failure shared across PRs (one red job on every PR) gets its fix ported into each PR, or merged once to main, before any board runs.
 
 ## The 5 Reviewers
 
 | Role | Agent Type | Focus |
 |------|-----------|-------|
-| **Architect** | `feature-dev:code-architect` | Structure, dependencies, scaling, monorepo, build pipeline |
+| **Architect** | Snapshot architecture checklist | Structure, dependencies, scaling, monorepo, build pipeline |
 | **Security** | `security-reviewer` | Injection, auth, data exposure, validation, XSS, CSRF |
 | **DX** | `dx-guardian` | Developer workflow, onboarding, migration burden, documentation |
 | **UX/Frontend** | `ux-reviewer` | Accessibility (WCAG AA), component UX, Tailwind, responsive |
@@ -66,8 +90,8 @@ carries its PASS forward, and every re-run seat must pass the fix diff. So
 `PASS 5/5` after round 2 means each seat's most recent review passed, not that
 all five re-read the final head. Say which seats re-ran in the summary.
 
-`.claude/workflows/review-board.js` runs this itself in its Publish phase; run
-it by hand when the board was run by hand. Pass the sha the board **actually
+An authorized operator runs this separately after inspecting the local board
+result. Pass the sha the board **actually
 reviewed**, not the current head — if a push landed mid-review they differ, and
 `scripts/board-verdict.sh` then reports the verdict as stale rather than letting
 it grade code no reviewer saw.
@@ -79,7 +103,7 @@ Until a verdict exists for the current head the status is `pending`, on purpose:
 
 - Never substitute a single generic reviewer for the 5 specialized agents
 - If concurrency is limited, dispatch in batches of 3 then 2 — all 5 MUST review
-- Run the board via `.claude/workflows/review-board.js`, which dispatches each seat as its own agent and publishes the verdict
+- Run the board via `.claude/tools/review_board.py`.
 - For CI/CD/infra changes: **6 reviewers** — add `infra-devops`
 - For documentation changes: add `docs-guardian` (PASS/FAIL only)
 
@@ -98,9 +122,9 @@ All agents have: `model` (alias), `effort`, `memory`, `skills`, and agent-scoped
 | `test-writer` | `memory: project`, writes + commits | Vitest + RTL tests (builder, NOT a reviewer) |
 | `test-reviewer` | read-only, `block-writes.sh` | Test seat on the review board (PASS/FAIL) |
 | `infra-devops` | `mcpServers: github` | Deploy, CI/CD |
-| `ux-reviewer` | read-only, `mcpServers: playwright` | UX/a11y |
+| `ux-reviewer` | read-only | UX/a11y |
 | `docs-maintainer` | `memory: project` | Documentation |
 | `rust-engine` | `mcpServers: context7` | Bevy ECS, WASM |
 
-**All 5 reviewers** have: read-only tools, Stop hook validates PASS/FAIL, PreToolUse blocks writes.
-**Agent teams:** Enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings.json.
+The isolated review process exposes only structured output. Existing project
+permission rules and shell hooks remain available on their separate paths.

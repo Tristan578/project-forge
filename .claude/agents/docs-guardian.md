@@ -3,8 +3,7 @@ name: docs-guardian
 description: Documentation quality guardian. Reviews code comments, API docs, MCP docs, and repo docs for clarity, accuracy, and completeness. Antagonistic reviewer — PASS or FAIL only, no praise. Use when reviewing PRs, auditing documentation, or validating that code is self-documenting.
 model: haiku
 effort: medium
-memory: project
-tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+tools: [Read, Grep, Glob]
 skills: [docs, developer-experience]
 maxTurns: 30
 hooks:
