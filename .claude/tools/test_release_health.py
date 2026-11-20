@@ -108,6 +108,14 @@ class Health(unittest.TestCase):
         self.plan["issues"]["123"] = "unavailable-behavior-proof"
         self.assertEqual(self.run_cli()[0], 4)
 
+    def test_test_mode_browser_configuration_allowed_only_in_staging(self):
+        def sandbox_page(_):
+            return 200, b"<html>pk_test_synthetic_configuration</html>"
+
+        for environment, expected in (("production", "failed"), ("staging", "healthy")):
+            result = observe(environment, RELEASE, 42, 24, sandbox_page, self.records.__getitem__)
+            self.assertEqual(result["checks"]["SF-PUBLIC-JOURNEY"][0], expected)
+
 
 observe = health.observe
 completion = health.completion

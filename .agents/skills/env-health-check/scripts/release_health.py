@@ -100,16 +100,14 @@ def observe(environment, release, deploy_id, run_id, fetch_url=fetch, github_api
         return ("degraded", ", ".join(affected)) if affected else ("healthy", "live services up")
 
     def public_journey():
-        code, body = fetch_url(origin + "/")
-        if environment == "staging" and code in (301, 302, 307, 308, 401, 403):
-            return "unknown", "staging landing page requires approved access"
-        if code != 200 or b"<html" not in body.lower() or b"pk_test_" in body:
-            return "failed", "landing page unavailable or misconfigured"
-        code, _ = fetch_url(origin + "/sign-in")
-        if environment == "staging" and code in (301, 302, 307, 308, 401, 403):
-            return "unknown", "staging sign-in page requires approved access"
-        if code != 200:
-            return "failed", f"sign-in page returned HTTP {code}"
+        for path, label in (("/", "landing"), ("/sign-in", "sign-in")):
+            code, body = fetch_url(origin + path)
+            if environment == "staging" and code in (301, 302, 307, 308, 401, 403):
+                return "unknown", f"staging {label} page requires approved access"
+            if code != 200 or b"<html" not in body.lower():
+                return "failed", f"{label} page unavailable (HTTP {code})"
+            if environment == "production" and b"pk_test_" in body:
+                return "failed", f"production {label} page is using test-mode sign-in"
         return "healthy", "public landing and sign-in routes responded"
 
     def cd_evidence():

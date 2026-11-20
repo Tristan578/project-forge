@@ -62,6 +62,10 @@ ticket transition are separate from this revision.
   degraded. The November 7 smoke run was outside the 24-hour window, so current
   customer behavior remained unknown and completion incomplete. No authenticated
   customer action or deployment change was performed.
+- The staging check confirmed its own deployment record and public pages.
+  Staging intentionally renders test-mode sign-in configuration. The gate
+  applies the production test-key restriction only in production. The staging
+  CD job has no customer smoke result, so staging completion is also incomplete.
 
 ## Reproduce
 
@@ -73,6 +77,6 @@ node tools/agentic-sync/port.mjs --check
 ```
 
 Fixtures prove the recorded behavior on the installed Windows runtime. Live
-provider review, authenticated customer behavior, staging verification and
+provider review, authenticated customer behavior, staging journey evidence and
 release approval remain open. The approved task completion inventory must cover
 the real requirements and findings. Keep the shared ticket incomplete.
