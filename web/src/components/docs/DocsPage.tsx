@@ -597,7 +597,7 @@ function formatInline(text: string, inlineText: string = text): React.ReactNode 
       if (boldMatch[1]) parts.push(boldMatch[1]);
       parts.push(
         <strong key={key++} className="font-semibold text-[var(--sf-text)]">
-          {formatInline(text, boldMatch[2])}
+          {formatInline(boldMatch[2])}
         </strong>
       );
       remaining = boldMatch[3];
