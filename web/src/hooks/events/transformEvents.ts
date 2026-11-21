@@ -11,6 +11,7 @@ import { takeStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
 import { applyWhenPrimary } from './primaryGate';
+import { applyStagedSceneArrangement, includeSceneArrangement } from '@/lib/music/sceneArrangement';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
@@ -187,7 +188,8 @@ export function handleTransformEvent(
       // when the running engine binary predates the change — every side effect
       // below is "the scene was exported", not "my request was answered", so
       // none of them may depend on it.
-      const { json, name, requestId } = payload;
+      const { name, requestId } = payload;
+      const json = includeSceneArrangement(payload.json);
       const state = useEditorStore.getState();
 
       // Cache for periodic IndexedDB auto-save
@@ -217,6 +219,7 @@ export function handleTransformEvent(
     }
 
     case 'SCENE_LOADED': {
+      applyStagedSceneArrangement();
       const payload = castPayload<{ name: string }>(data);
       useEditorStore.setState({
         sceneName: payload.name,

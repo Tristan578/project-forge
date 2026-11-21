@@ -1,109 +1,275 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
-import { Music, Plus, Trash2, Repeat } from 'lucide-react';
+import { memo, useId, useMemo, useState, type KeyboardEvent } from 'react';
+import { Music, Plus, Trash2, Undo2, Redo2 } from 'lucide-react';
+import { Button, Card, Input, Select } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { useMusicArrangementStore, type ArrangementSlice } from '@/lib/music/arrangementStore';
 import {
-  useMusicArrangementStore,
-  type ArrangementSlice,
-} from '@/lib/music/arrangementStore';
-import { clipLength, overlappingClips, type MusicClip } from '@/lib/music/arrangementTypes';
+  clipLength,
+  overlappingClipIds,
+  MAX_ARRANGEMENT_TRACKS,
+  MAX_ARRANGEMENT_CLIPS,
+  MAX_AUDIO_DURATION_SECONDS,
+  MAX_TIMELINE_OFFSET_SECONDS,
+  type MusicClip,
+  type MusicTrack,
+} from '@/lib/music/arrangementTypes';
 
-const PX_PER_SECOND = 6;
-const DEFAULT_SOURCE_LENGTH_SECONDS = 30;
+const TRACKS_PER_PAGE = 8;
+const CLIPS_PER_PAGE = 25;
+const fieldClass = 'min-h-11 min-w-0';
+const labelClass = 'flex min-w-0 flex-col gap-1 text-xs text-[var(--sf-text-secondary)]';
 
-interface ClipRowProps {
+type ClipActions = Pick<ArrangementSlice, 'moveClip' | 'trimClip' | 'setLoopPoints' | 'deleteClip'>;
+interface ClipRowProps extends ClipActions {
   clip: MusicClip;
   overlapping: boolean;
-  moveClip: ArrangementSlice['moveClip'];
-  trimClip: ArrangementSlice['trimClip'];
-  setLoopPoints: ArrangementSlice['setLoopPoints'];
-  deleteClip: ArrangementSlice['deleteClip'];
 }
 
 function ClipRow({ clip, overlapping, moveClip, trimClip, setLoopPoints, deleteClip }: ClipRowProps) {
   const length = clipLength(clip);
   return (
-    <div className="flex flex-col gap-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] p-2" data-testid={`clip-${clip.id}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-medium text-zinc-200" title={clip.sourceUrl}>
-          {clip.name}
-          {overlapping && (
-            <span className="ml-1 text-[10px] font-normal text-amber-400" title="Overlaps another clip on this track">
-              (overlap)
-            </span>
-          )}
-        </span>
-        <button
+    <Card className="min-w-0" data-testid={`clip-${clip.id}`}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="min-w-0 break-words text-sm font-medium">{clip.name}</h4>
+        <Button
           type="button"
+          variant="ghost"
           aria-label={`Delete clip ${clip.name}`}
+          title="Delete this clip; Undo restores it"
           onClick={() => deleteClip(clip.id)}
-          className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
+          className="min-h-11 min-w-11 px-2"
         >
-          <Trash2 size={13} />
-        </button>
+          <Trash2 size={16} aria-hidden="true" />
+        </Button>
       </div>
-
-      <div className="relative h-3 w-full overflow-hidden rounded bg-zinc-800">
-        <div
-          className="absolute top-0 h-full rounded bg-purple-600/70"
-          style={{ left: `${clip.startOffset * PX_PER_SECOND}px`, width: `${Math.max(2, length * PX_PER_SECOND)}px` }}
-          data-testid={`clip-block-${clip.id}`}
-        />
-      </div>
-
-      <div className="grid grid-cols-3 gap-2">
-        <label className="flex flex-col text-[10px] text-zinc-400">
-          Start (s)
-          <input
+      <p className="mb-3 break-words text-xs text-[var(--sf-text-secondary)]">
+        Start: {clip.startOffset.toFixed(2)} s · End: {(clip.startOffset + length).toFixed(2)} s ·
+        Trimmed length: {length.toFixed(2)} s
+      </p>
+      {overlapping && (
+        <p className="mb-3 text-xs text-[var(--sf-text-secondary)]">
+          Overlaps another clip on this track.
+        </p>
+      )}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <label className={labelClass}>
+          Start offset (s)
+          <Input
             type="number"
             min={0}
-            step={0.1}
+            max={MAX_TIMELINE_OFFSET_SECONDS}
+            step="any"
             aria-label={`Start offset for ${clip.name}`}
+            title="Stored start offset; arrangement playback is not available yet"
             value={clip.startOffset}
-            onChange={(e) => moveClip(clip.id, parseFloat(e.target.value))}
-            className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-200"
+            onChange={(e) => moveClip(clip.id, e.target.valueAsNumber)}
+            className={fieldClass}
           />
         </label>
-        <label className="flex flex-col text-[10px] text-zinc-400">
+        <label className={labelClass}>
           Trim in (s)
-          <input
+          <Input
             type="number"
             min={0}
-            step={0.1}
+            max={clip.sourceDurationSeconds}
+            step="any"
             aria-label={`Trim start for ${clip.name}`}
+            title="Start of the stored source window"
             value={clip.trimStart}
-            onChange={(e) => trimClip(clip.id, { trimStart: parseFloat(e.target.value) })}
-            className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-200"
+            onChange={(e) => trimClip(clip.id, { trimStart: e.target.valueAsNumber })}
+            className={fieldClass}
           />
         </label>
-        <label className="flex flex-col text-[10px] text-zinc-400">
+        <label className={labelClass}>
           Trim out (s)
-          <input
+          <Input
             type="number"
             min={0}
-            step={0.1}
+            max={clip.sourceDurationSeconds}
+            step="any"
             aria-label={`Trim end for ${clip.name}`}
+            title="End of the stored source window"
             value={clip.trimEnd}
-            onChange={(e) => trimClip(clip.id, { trimEnd: parseFloat(e.target.value) })}
-            className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-200"
+            onChange={(e) => trimClip(clip.id, { trimEnd: e.target.valueAsNumber })}
+            className={fieldClass}
           />
         </label>
       </div>
+      <Button
+        type="button"
+        variant="outline"
+        className="mt-3 min-h-11"
+        aria-label={`Loop ${clip.name}`}
+        aria-pressed={clip.loopEnabled}
+        title="Store the loop setting; this does not change playback yet"
+        onClick={() => setLoopPoints(clip.id, { loopEnabled: !clip.loopEnabled })}
+      >
+        Loop metadata: {clip.loopEnabled ? 'On' : 'Off'}
+      </Button>
+    </Card>
+  );
+}
 
-      <label className="flex items-center gap-1.5 text-[11px] text-zinc-300">
-        <input
-          type="checkbox"
-          aria-label={`Loop ${clip.name}`}
-          checked={clip.loopEnabled}
-          onChange={(e) => setLoopPoints(clip.id, { loopEnabled: e.target.checked })}
-          className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-purple-500"
-        />
-        <Repeat size={12} aria-hidden="true" />
-        Loop
-      </label>
-    </div>
+interface TrackCardProps extends ClipActions {
+  track: MusicTrack;
+  clips: MusicClip[];
+  overlaps: Set<string>;
+  audioAssets: { id: string; name: string }[];
+  addClip: ArrangementSlice['addClip'];
+  deleteTrack: ArrangementSlice['deleteTrack'];
+  setTrackMuted: ArrangementSlice['setTrackMuted'];
+  announce: (message: string) => void;
+}
+
+function TrackCard({
+  track, clips, overlaps, audioAssets, addClip, deleteTrack, setTrackMuted,
+  moveClip, trimClip, setLoopPoints, deleteClip, announce,
+}: TrackCardProps) {
+  const durationHelpId = useId();
+  const [sourceId, setSourceId] = useState('');
+  const [sourceLength, setSourceLength] = useState('');
+  const [addError, setAddError] = useState('');
+  const [page, setPage] = useState(0);
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(clips.length / CLIPS_PER_PAGE) - 1));
+  const selectedSource = audioAssets.find((asset) => asset.id === sourceId)
+    ?? (sourceId === '' ? audioAssets[0] : undefined);
+  const duration = Number(sourceLength);
+  const validDuration = sourceLength.trim() !== '' && Number.isFinite(duration)
+    && duration > 0 && duration <= MAX_AUDIO_DURATION_SECONDS;
+  const durationError = sourceLength !== '' && !validDuration;
+
+  const handleAddClip = () => {
+    if (!selectedSource || !validDuration) return;
+    const id = addClip({
+      trackId: track.id,
+      sourceUrl: selectedSource.name,
+      sourceDurationSeconds: duration,
+      name: selectedSource.name,
+    });
+    if (!id) {
+      setAddError(`Clip could not be added. Check its source and duration, or remove a clip if the ${MAX_ARRANGEMENT_CLIPS}-clip limit is reached.`);
+      return;
+    }
+    setAddError('');
+    setPage(Math.floor(clips.length / CLIPS_PER_PAGE));
+    announce(`Added ${selectedSource.name} to ${track.name}.`);
+  };
+
+  return (
+    <Card data-testid={`track-${track.id}`} className="min-w-0">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="min-w-0 break-words text-sm font-semibold">{track.name}</h3>
+        <div className="flex flex-wrap items-center gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            aria-label={`Mute ${track.name}`}
+            aria-pressed={track.muted}
+            title="Store the mute setting; this does not change playback yet"
+            onClick={() => setTrackMuted(track.id, !track.muted)}
+          >
+            Mute metadata: {track.muted ? 'On' : 'Off'}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label={`Delete track ${track.name}`}
+            title="Delete this track and its clips; Undo restores them together"
+            onClick={() => {
+              deleteTrack(track.id);
+              announce(`Deleted ${track.name} and its clips. Use Undo arrangement edit to restore them.`);
+            }}
+            className="min-h-11 min-w-11 px-2"
+          >
+            <Trash2 size={16} aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {clips.slice(currentPage * CLIPS_PER_PAGE, (currentPage + 1) * CLIPS_PER_PAGE).map((clip) => (
+          <ClipRow
+            key={clip.id}
+            clip={clip}
+            overlapping={overlaps.has(clip.id)}
+            moveClip={moveClip}
+            trimClip={trimClip}
+            setLoopPoints={setLoopPoints}
+            deleteClip={(id) => {
+              deleteClip(id);
+              announce(`Deleted ${clip.name}. Use Undo arrangement edit to restore it.`);
+            }}
+          />
+        ))}
+        {clips.length === 0 && (
+          <p className="text-xs text-[var(--sf-text-secondary)]">No clips on this track.</p>
+        )}
+      </div>
+      {clips.length > CLIPS_PER_PAGE && (
+        <div className="mt-2 flex flex-wrap items-center gap-2" aria-label={`Clip pages for ${track.name}`}>
+          <Button type="button" variant="outline" className="min-h-11" disabled={currentPage === 0}
+            onClick={() => setPage(currentPage - 1)}>Previous clips</Button>
+          <span className="text-xs">Page {currentPage + 1} of {Math.ceil(clips.length / CLIPS_PER_PAGE)}</span>
+          <Button type="button" variant="outline" className="min-h-11"
+            disabled={(currentPage + 1) * CLIPS_PER_PAGE >= clips.length}
+            onClick={() => setPage(currentPage + 1)}>Next clips</Button>
+        </div>
+      )}
+      <div className="mt-3 space-y-2 border-t border-[var(--sf-border)] pt-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <label className={labelClass}>
+            Audio source
+            <Select
+              aria-label={`Clip source for ${track.name}`}
+              title="Select an imported or generated audio asset"
+              value={selectedSource?.id ?? ''}
+              options={audioAssets.map((asset) => ({ value: asset.id, label: asset.name }))}
+              placeholder={audioAssets.length === 0 ? 'No audio assets' : 'Select audio'}
+              disabled={audioAssets.length === 0}
+              onChange={(e) => {
+                setSourceId(e.target.value);
+                setSourceLength('');
+                setAddError('');
+              }}
+              className={fieldClass}
+            />
+          </label>
+          <label className={labelClass}>
+            Source duration (s)
+            <Input
+              type="number"
+              min={0}
+              max={MAX_AUDIO_DURATION_SECONDS}
+              step="any"
+              aria-label={`Source length for ${track.name}`}
+              aria-describedby={durationHelpId}
+              title="Enter the audio file's actual duration in seconds"
+              value={sourceLength}
+              onChange={(e) => { setSourceLength(e.target.value); setAddError(''); }}
+              error={durationError}
+              className={fieldClass}
+              placeholder="Enter duration"
+            />
+          </label>
+        </div>
+        <p id={durationHelpId} className="text-xs text-[var(--sf-text-secondary)]">
+          {durationError
+            ? `Enter a duration greater than 0 and no more than ${MAX_AUDIO_DURATION_SECONDS} seconds.`
+            : 'Enter the actual source duration before adding a clip; it is not measured automatically.'}
+        </p>
+        {audioAssets.length === 0 && (
+          <p className="text-xs text-[var(--sf-text-secondary)]">Import or generate audio to add a clip.</p>
+        )}
+        {addError && <p role="alert" className="text-xs text-[var(--sf-text-secondary)]">{addError}</p>}
+        <Button type="button" variant="outline" onClick={handleAddClip}
+          disabled={!selectedSource || !validDuration} className="min-h-11">
+          <Plus size={16} aria-hidden="true" /> Add Clip
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -118,149 +284,108 @@ export const MusicArrangementPanel = memo(function MusicArrangementPanel() {
   const trimClip = useMusicArrangementStore((s) => s.trimClip);
   const setLoopPoints = useMusicArrangementStore((s) => s.setLoopPoints);
   const deleteClip = useMusicArrangementStore((s) => s.deleteClip);
-
-  const [pendingSource, setPendingSource] = useState<Record<string, string>>({});
-  const [pendingLength, setPendingLength] = useState<Record<string, number>>({});
-
+  const undo = useMusicArrangementStore((s) => s.undo);
+  const redo = useMusicArrangementStore((s) => s.redo);
+  const canUndo = useMusicArrangementStore((s) => s.canUndo);
+  const canRedo = useMusicArrangementStore((s) => s.canRedo);
+  const [notice, setNotice] = useState('');
+  const [addError, setAddError] = useState('');
+  const [page, setPage] = useState(0);
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(arrangement.tracks.length / TRACKS_PER_PAGE) - 1));
   const audioAssets = useMemo(
-    () => Object.values(assetRegistry).filter((a) => a.kind === 'audio'),
+    () => Object.values(assetRegistry).filter((asset) => asset.kind === 'audio'),
     [assetRegistry],
   );
-
   const clipsByTrack = useMemo(() => {
-    const map: Record<string, MusicClip[]> = {};
+    const groups = new Map<string, MusicClip[]>();
     for (const clip of arrangement.clips) {
-      (map[clip.trackId] ??= []).push(clip);
+      const clips = groups.get(clip.trackId);
+      if (clips) clips.push(clip);
+      else groups.set(clip.trackId, [clip]);
     }
-    return map;
+    return groups;
   }, [arrangement.clips]);
+  const overlaps = useMemo(() => overlappingClipIds(arrangement.clips), [arrangement.clips]);
 
-  const handleAddClip = (trackId: string) => {
-    const sourceUrl = pendingSource[trackId] ?? audioAssets[0]?.name;
-    if (!sourceUrl) return;
-    const length = pendingLength[trackId] ?? DEFAULT_SOURCE_LENGTH_SECONDS;
-    addClip({ trackId, sourceUrl, sourceDurationSeconds: length, name: sourceUrl });
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Editor-wide Delete/Undo shortcuts must not act on scene entities while
+    // focus is in music controls. Text fields retain native text editing.
+    event.stopPropagation();
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      undo();
+      setNotice('Undid the last arrangement edit.');
+    } else if ((key === 'z' && event.shiftKey) || key === 'y') {
+      event.preventDefault();
+      redo();
+      setNotice('Redid the last arrangement edit.');
+    }
   };
 
   return (
-    <div className="flex h-full flex-col bg-[var(--sf-bg-app)] text-zinc-200">
-      <div className="flex items-center justify-between border-b border-[var(--sf-border)] px-3 py-2">
+    <div className="flex h-full min-w-0 flex-col bg-[var(--sf-bg-app)] text-[var(--sf-text)]"
+      onKeyDown={handleKeyDown}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--sf-border)] px-3 py-2">
         <div className="flex items-center gap-2">
-          <Music size={15} className="text-purple-400" aria-hidden="true" />
+          <Music size={16} aria-hidden="true" />
           <h2 className="text-sm font-semibold">Music Arrangement</h2>
         </div>
-        <button
-          type="button"
-          onClick={() => addTrack()}
-          className="flex items-center gap-1 rounded bg-purple-600 px-2 py-1 text-xs font-medium text-white hover:bg-purple-500"
-        >
-          <Plus size={12} aria-hidden="true" />
-          Add Track
-        </button>
+        <div className="flex flex-wrap gap-1">
+          <Button type="button" variant="outline" className="min-h-11 min-w-11 px-2"
+            aria-label="Undo arrangement edit" title="Undo arrangement edit (Ctrl/Cmd+Z in this panel)"
+            disabled={!canUndo} onClick={() => { undo(); setNotice('Undid the last arrangement edit.'); }}>
+            <Undo2 size={16} aria-hidden="true" /> Undo
+          </Button>
+          <Button type="button" variant="outline" className="min-h-11 min-w-11 px-2"
+            aria-label="Redo arrangement edit" title="Redo arrangement edit (Ctrl/Cmd+Shift+Z in this panel)"
+            disabled={!canRedo} onClick={() => { redo(); setNotice('Redid the last arrangement edit.'); }}>
+            <Redo2 size={16} aria-hidden="true" /> Redo
+          </Button>
+          <Button type="button" className="min-h-11" onClick={() => {
+            const id = addTrack();
+            if (!id) {
+              setAddError(`Track could not be added. Remove a track if the ${MAX_ARRANGEMENT_TRACKS}-track limit is reached.`);
+              return;
+            }
+            setAddError('');
+            setPage(Math.floor(arrangement.tracks.length / TRACKS_PER_PAGE));
+            setNotice('Added a track.');
+          }}>
+            <Plus size={16} aria-hidden="true" /> Add Track
+          </Button>
+        </div>
       </div>
-
       <div className="flex-1 space-y-3 overflow-auto p-3">
+        <p className="text-xs text-[var(--sf-text-secondary)]">
+          Authoring only: offsets, trim, loop and mute settings are stored with the scene.
+          These settings do not change preview, game or exported playback yet.
+        </p>
+        <p className="text-xs text-[var(--sf-text-secondary)]">
+          Undo and Redo apply to arrangement edits, including deleted tracks and their clips.
+        </p>
+        <p role="status" aria-live="polite" className="text-xs text-[var(--sf-text-secondary)]">{notice}</p>
+        {addError && <p role="alert" className="text-xs text-[var(--sf-text-secondary)]">{addError}</p>}
         {arrangement.tracks.length === 0 ? (
-          <EmptyState
-            icon={Music}
-            title="No tracks yet"
-            description="Add a track, then place imported or generated audio as clips."
-          />
-        ) : (
-          arrangement.tracks.map((track) => (
-            <div
-              key={track.id}
-              className="rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-elevated)] p-2"
-              data-testid={`track-${track.id}`}
-            >
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="truncate text-xs font-semibold text-zinc-100">{track.name}</span>
-                <div className="flex items-center gap-1">
-                  <label className="flex items-center gap-1 text-[10px] text-zinc-400">
-                    <input
-                      type="checkbox"
-                      aria-label={`Mute ${track.name}`}
-                      checked={track.muted}
-                      onChange={(e) => setTrackMuted(track.id, e.target.checked)}
-                      className="h-3 w-3 rounded border-zinc-600 bg-zinc-800"
-                    />
-                    Mute
-                  </label>
-                  <button
-                    type="button"
-                    aria-label={`Delete track ${track.name}`}
-                    onClick={() => deleteTrack(track.id)}
-                    className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {(clipsByTrack[track.id] ?? []).map((clip) => (
-                  <ClipRow
-                    key={clip.id}
-                    clip={clip}
-                    overlapping={overlappingClips(clip, arrangement.clips).length > 0}
-                    moveClip={moveClip}
-                    trimClip={trimClip}
-                    setLoopPoints={setLoopPoints}
-                    deleteClip={deleteClip}
-                  />
-                ))}
-                {(clipsByTrack[track.id] ?? []).length === 0 && (
-                  <p className="text-[11px] italic text-zinc-500">No clips on this track.</p>
-                )}
-              </div>
-
-              <div className="mt-2 flex items-end gap-2 border-t border-zinc-800 pt-2">
-                <label className="flex flex-1 flex-col text-[10px] text-zinc-400">
-                  Source
-                  <select
-                    aria-label={`Clip source for ${track.name}`}
-                    value={pendingSource[track.id] ?? audioAssets[0]?.name ?? ''}
-                    onChange={(e) => setPendingSource((p) => ({ ...p, [track.id]: e.target.value }))}
-                    disabled={audioAssets.length === 0}
-                    className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-200 disabled:opacity-50"
-                  >
-                    {audioAssets.length === 0 ? (
-                      <option value="">No audio assets</option>
-                    ) : (
-                      audioAssets.map((a) => (
-                        <option key={a.id} value={a.name}>
-                          {a.name}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </label>
-                <label className="flex w-20 flex-col text-[10px] text-zinc-400">
-                  Length (s)
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    aria-label={`Source length for ${track.name}`}
-                    value={pendingLength[track.id] ?? DEFAULT_SOURCE_LENGTH_SECONDS}
-                    onChange={(e) =>
-                      setPendingLength((p) => ({ ...p, [track.id]: parseFloat(e.target.value) }))
-                    }
-                    className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-200"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleAddClip(track.id)}
-                  disabled={audioAssets.length === 0}
-                  className="flex items-center gap-1 rounded bg-zinc-700 px-2 py-1 text-xs font-medium text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
-                >
-                  <Plus size={12} aria-hidden="true" />
-                  Add Clip
-                </button>
-              </div>
-            </div>
-          ))
+          <EmptyState icon={Music} title="No tracks yet"
+            description="Add a track, then place imported or generated audio as clips." />
+        ) : arrangement.tracks.slice(currentPage * TRACKS_PER_PAGE, (currentPage + 1) * TRACKS_PER_PAGE).map((track) => (
+          <TrackCard key={track.id} track={track} clips={clipsByTrack.get(track.id) ?? []}
+            overlaps={overlaps} audioAssets={audioAssets} addClip={addClip} deleteTrack={deleteTrack}
+            setTrackMuted={setTrackMuted} moveClip={moveClip} trimClip={trimClip}
+            setLoopPoints={setLoopPoints} deleteClip={deleteClip} announce={setNotice} />
+        ))}
+        {arrangement.tracks.length > TRACKS_PER_PAGE && (
+          <div className="flex flex-wrap items-center gap-2" aria-label="Track pages">
+            <Button type="button" variant="outline" className="min-h-11" disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}>Previous tracks</Button>
+            <span className="text-xs">Page {currentPage + 1} of {Math.ceil(arrangement.tracks.length / TRACKS_PER_PAGE)}</span>
+            <Button type="button" variant="outline" className="min-h-11"
+              disabled={(currentPage + 1) * TRACKS_PER_PAGE >= arrangement.tracks.length}
+              onClick={() => setPage(currentPage + 1)}>Next tracks</Button>
+          </div>
         )}
       </div>
     </div>

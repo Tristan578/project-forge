@@ -1,31 +1,28 @@
 /**
- * Music arrangement store (music.FR-2.OP-01 / OP-02, #9854).
+ * Scene-scoped music arrangement authoring state (#9854).
  *
- * A standalone Zustand store holding the one `MusicArrangement` the editor is
- * working on. The state creator (`createArrangementSlice`) is exported so tests
- * can mount it in isolation with `createSliceStore()` (the `sliceTestTemplate`
- * pattern), exactly like the editor-store slices.
+ * The editor explicitly overlays this metadata on exported scene JSON and
+ * hydrates it on scene transitions. Rust ignores this key during loading and
+ * does not retain it for a subsequent engine export.
  *
- * Every mutation routes through the pure helpers in `arrangementTypes.ts`, so
- * the manual controls in `MusicArrangementPanel` and the future in-app AI path
- * (#9855) call the identical operations rather than drifting into two
- * implementations of "trim a clip".
- *
- * PERSISTENCE reuses the existing project path with no new table: an arrangement
- * serialises into the project's `sceneData` object under
- * `ARRANGEMENT_SCENE_DATA_KEY`, which the `/api/projects/[id]` PUT accepts
- * (`sceneData` is an open record) and the editor load returns. The engine's
- * scene file has no `deny_unknown_fields`, so the extra key rides along
- * untouched through `load_scene`; `readArrangementFromSceneData` pulls it back
- * out on reopen. See `applyArrangementToSceneData` / `readArrangementFromSceneData`.
+ * User edits have bounded undo/redo history. editRevision changes only for
+ * accepted edits, undo, and redo, allowing the editor to schedule persistence
+ * without importing editorStore here. Hydration/reset starts a new history.
  */
-
 import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import {
   ARRANGEMENT_VERSION,
   ARRANGEMENT_SCENE_DATA_KEY,
+  ARRANGEMENT_HISTORY_LIMIT,
   DEFAULT_TEMPO_BPM,
+  MAX_ARRANGEMENT_TRACKS,
+  MAX_ARRANGEMENT_CLIPS,
+  MAX_AUDIO_DURATION_SECONDS,
+  MAX_TIMELINE_OFFSET_SECONDS,
+  MAX_ARRANGEMENT_ID_LENGTH,
+  MAX_ARRANGEMENT_NAME_LENGTH,
+  MAX_AUDIO_SOURCE_LENGTH,
   clampFinite,
   clampTrimWindow,
   createEmptyArrangement,
@@ -36,13 +33,17 @@ import {
 } from './arrangementTypes';
 
 let idCounter = 0;
-/** Monotonic-ish unique id; the counter defends against same-millisecond collisions. */
-function makeId(prefix: string): string {
-  idCounter += 1;
-  return `${prefix}_${Date.now().toString(36)}_${idCounter.toString(36)}`;
+function makeId(prefix: string, existing: readonly { id: string }[]): string {
+  const ids = new Set(existing.map((item) => item.id));
+  let id: string;
+  do {
+    idCounter += 1;
+    id = `${prefix}_${Date.now().toString(36)}_${idCounter.toString(36)}`;
+  } while (ids.has(id));
+  return id;
 }
 
-/** Input for adding a clip. `startOffset` and `name` default sensibly. */
+/** Input for a clip on an existing track. Invalid sources are rejected. */
 export interface AddClipInput {
   trackId: string;
   sourceUrl: string;
@@ -51,324 +52,346 @@ export interface AddClipInput {
   name?: string;
 }
 
-/** Input for the generated/imported-audio hand-off. */
+/** Source metadata from a generated or imported audio asset. */
 export interface AddGeneratedClipInput {
-  /** Asset name/id the clip's `sourceUrl` points at. */
   sourceUrl: string;
   durationSeconds: number;
-  /** Track to place it on; a new track is created when omitted. */
+  /** Existing track ID; omit to create a Music track in the same undo step. */
   trackId?: string;
   name?: string;
 }
 
 export interface ArrangementSlice {
   arrangement: MusicArrangement;
-
-  /** Add a track; returns its id. */
-  addTrack: (name?: string) => string;
-  /** Remove a track and every clip on it. */
+  /** Increments only on actual user edits, undo, and redo; never on hydration. */
+  editRevision: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Add a track, or return null when the track limit has been reached. */
+  addTrack: (name?: string) => string | null;
+  /** Remove a track and its clips as one undoable edit. */
   deleteTrack: (trackId: string) => void;
   renameTrack: (trackId: string, name: string) => void;
   setTrackMuted: (trackId: string, muted: boolean) => void;
-
-  /** Add a clip to an existing track; returns its id, or null if the track is unknown. */
+  /** Return null for an unknown track, invalid source, or collection limit. */
   addClip: (input: AddClipInput) => string | null;
-  /** Move a clip along its track's timeline (and optionally to another track). */
   moveClip: (clipId: string, startOffset: number, trackId?: string) => void;
-  /** Adjust a clip's trimmed source window (clamped to legal bounds). */
+  /** Clamp the authored trim window within the source duration. */
   trimClip: (clipId: string, trim: { trimStart?: number; trimEnd?: number }) => void;
-  /** Toggle looping and optionally set the loop window in one operation. */
+  /** Store loop intent and an optional trim window; this does not play audio. */
   setLoopPoints: (
     clipId: string,
     loop: { loopEnabled: boolean; trimStart?: number; trimEnd?: number },
   ) => void;
   deleteClip: (clipId: string) => void;
-
-  /** Place a generated/imported track as a clip (the GenerateMusicDialog hand-off). */
-  addGeneratedClip: (input: AddGeneratedClipInput) => string;
-
+  /** Add a source and optional new track atomically; rejection changes nothing. */
+  addGeneratedClip: (input: AddGeneratedClipInput) => string | null;
   setTempoBpm: (bpm: number) => void;
+  /** Undoable user action. Scene transitions should use reset/hydrate instead. */
   clearArrangement: () => void;
-
-  /** Snapshot for persistence; `null` when the arrangement is empty. */
+  undo: () => void;
+  redo: () => void;
+  /** Detached persistence snapshot; null when no authored metadata remains. */
   serialize: () => MusicArrangement | null;
-  /** Replace the whole arrangement (project load / undo). `null` clears it. */
+  /** Validate and adopt scene metadata, clearing history without marking dirty. */
   hydrate: (arrangement: MusicArrangement | null) => void;
+  /** Start an empty scene and clear history without marking dirty. */
+  reset: () => void;
 }
 
-/** Update one clip in the arrangement via a mapping function. */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function validDuration(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 0 && value <= MAX_AUDIO_DURATION_SECONDS;
+}
+
+function validId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+    && value.length <= MAX_ARRANGEMENT_ID_LENGTH && value.trim() === value;
+}
+
+function validSource(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+    && value.length <= MAX_AUDIO_SOURCE_LENGTH;
+}
+
+function label(value: unknown, fallback: string): string {
+  return (typeof value === 'string' && value.trim() ? value.trim() : fallback)
+    .slice(0, MAX_ARRANGEMENT_NAME_LENGTH);
+}
+
+function cloneArrangement(arrangement: MusicArrangement): MusicArrangement {
+  return {
+    ...arrangement,
+    tracks: arrangement.tracks.map((track) => ({ ...track })),
+    clips: arrangement.clips.map((clip) => ({ ...clip })),
+  };
+}
+
+/** Preserve object identity when the requested clip edit changes no fields. */
 function mapClip(
   arrangement: MusicArrangement,
   clipId: string,
-  fn: (clip: MusicClip) => MusicClip,
+  update: (clip: MusicClip) => MusicClip,
 ): MusicArrangement {
-  let changed = false;
-  const clips = arrangement.clips.map((clip) => {
-    if (clip.id !== clipId) return clip;
-    changed = true;
-    return fn(clip);
-  });
-  return changed ? { ...arrangement, clips } : arrangement;
+  const index = arrangement.clips.findIndex((clip) => clip.id === clipId);
+  if (index < 0) return arrangement;
+  const previous = arrangement.clips[index];
+  const next = update(previous);
+  if (next.trackId === previous.trackId && next.startOffset === previous.startOffset
+    && next.trimStart === previous.trimStart && next.trimEnd === previous.trimEnd
+    && next.loopEnabled === previous.loopEnabled) return arrangement;
+  const clips = [...arrangement.clips];
+  clips[index] = next;
+  return { ...arrangement, clips };
 }
 
-export const createArrangementSlice: StateCreator<ArrangementSlice, [], [], ArrangementSlice> = (
-  set,
-  get,
-) => ({
-  arrangement: createEmptyArrangement(),
+function newClip(input: AddClipInput, existing: readonly MusicClip[]): MusicClip | null {
+  if (!validSource(input.sourceUrl) || !validDuration(input.sourceDurationSeconds)) return null;
+  return {
+    id: makeId('clip', existing),
+    trackId: input.trackId,
+    sourceUrl: input.sourceUrl,
+    sourceDurationSeconds: input.sourceDurationSeconds,
+    startOffset: clampFinite(input.startOffset, 0, MAX_TIMELINE_OFFSET_SECONDS, 0),
+    ...clampTrimWindow(input.sourceDurationSeconds, 0, input.sourceDurationSeconds),
+    loopEnabled: false,
+    name: label(input.name, input.sourceUrl),
+  };
+}
 
-  addTrack: (name) => {
-    const id = makeId('track');
-    const track: MusicTrack = {
-      id,
-      name: name && name.trim() ? name.trim() : `Track ${get().arrangement.tracks.length + 1}`,
-      muted: false,
-    };
-    set((s) => ({ arrangement: { ...s.arrangement, tracks: [...s.arrangement.tracks, track] } }));
-    return id;
-  },
+export const createArrangementSlice: StateCreator<ArrangementSlice, [], [], ArrangementSlice> = (set, get) => {
+  let past: MusicArrangement[] = [];
+  let future: MusicArrangement[] = [];
 
-  deleteTrack: (trackId) => {
-    set((s) => ({
-      arrangement: {
-        ...s.arrangement,
-        tracks: s.arrangement.tracks.filter((t) => t.id !== trackId),
-        // Deleting a track takes its clips with it — no orphaned clips.
-        clips: s.arrangement.clips.filter((c) => c.trackId !== trackId),
-      },
-    }));
-  },
+  const commit = (next: MusicArrangement) => {
+    const current = get();
+    if (next === current.arrangement) return;
+    past = [...past, current.arrangement].slice(-ARRANGEMENT_HISTORY_LIMIT);
+    future = [];
+    set({ arrangement: next, canUndo: true, canRedo: false, editRevision: current.editRevision + 1 });
+  };
+  const hydrate = (value: MusicArrangement | null) => {
+    past = [];
+    future = [];
+    set({
+      arrangement: parseArrangement(value) ?? createEmptyArrangement(),
+      canUndo: false,
+      canRedo: false,
+    });
+  };
 
-  renameTrack: (trackId, name) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    set((s) => ({
-      arrangement: {
-        ...s.arrangement,
-        tracks: s.arrangement.tracks.map((t) => (t.id === trackId ? { ...t, name: trimmed } : t)),
-      },
-    }));
-  },
-
-  setTrackMuted: (trackId, muted) => {
-    set((s) => ({
-      arrangement: {
-        ...s.arrangement,
-        tracks: s.arrangement.tracks.map((t) => (t.id === trackId ? { ...t, muted } : t)),
-      },
-    }));
-  },
-
-  addClip: (input) => {
-    const state = get();
-    // A clip on an empty (unknown) track is a no-op, not a phantom clip.
-    if (!state.arrangement.tracks.some((t) => t.id === input.trackId)) return null;
-
-    const duration =
-      typeof input.sourceDurationSeconds === 'number' && Number.isFinite(input.sourceDurationSeconds)
-        ? Math.max(0, input.sourceDurationSeconds)
-        : 0;
-    const { trimStart, trimEnd } = clampTrimWindow(duration, 0, duration);
-    const id = makeId('clip');
-    const clip: MusicClip = {
-      id,
-      trackId: input.trackId,
-      sourceUrl: input.sourceUrl,
-      sourceDurationSeconds: duration,
-      startOffset: clampFinite(input.startOffset, 0, Number.MAX_SAFE_INTEGER, 0),
-      trimStart,
-      trimEnd,
-      loopEnabled: false,
-      name: input.name && input.name.trim() ? input.name.trim() : input.sourceUrl,
-    };
-    set((s) => ({ arrangement: { ...s.arrangement, clips: [...s.arrangement.clips, clip] } }));
-    return id;
-  },
-
-  moveClip: (clipId, startOffset, trackId) => {
-    set((s) => {
-      const targetTrackValid =
-        trackId !== undefined && s.arrangement.tracks.some((t) => t.id === trackId);
-      return {
-        arrangement: mapClip(s.arrangement, clipId, (clip) => ({
-          ...clip,
-          startOffset: clampFinite(startOffset, 0, Number.MAX_SAFE_INTEGER, clip.startOffset),
-          trackId: targetTrackValid ? trackId! : clip.trackId,
-        })),
+  return {
+    arrangement: createEmptyArrangement(),
+    editRevision: 0,
+    canUndo: false,
+    canRedo: false,
+    addTrack: (name) => {
+      const current = get().arrangement;
+      if (current.tracks.length >= MAX_ARRANGEMENT_TRACKS) return null;
+      const track = {
+        id: makeId('track', current.tracks),
+        name: label(name, `Track ${current.tracks.length + 1}`),
+        muted: false,
       };
-    });
-  },
+      commit({ ...current, tracks: [...current.tracks, track] });
+      return track.id;
+    },
+    deleteTrack: (trackId) => {
+      const current = get().arrangement;
+      if (!current.tracks.some((track) => track.id === trackId)) return;
+      commit({
+        ...current,
+        tracks: current.tracks.filter((track) => track.id !== trackId),
+        clips: current.clips.filter((clip) => clip.trackId !== trackId),
+      });
+    },
+    renameTrack: (trackId, name) => {
+      const current = get().arrangement;
+      const trimmed = label(name, '');
+      if (!trimmed || !current.tracks.some((track) => track.id === trackId && track.name !== trimmed)) return;
+      commit({ ...current, tracks: current.tracks.map((track) => track.id === trackId ? { ...track, name: trimmed } : track) });
+    },
+    setTrackMuted: (trackId, muted) => {
+      const current = get().arrangement;
+      if (typeof muted !== 'boolean'
+        || !current.tracks.some((track) => track.id === trackId && track.muted !== muted)) return;
+      commit({ ...current, tracks: current.tracks.map((track) => track.id === trackId ? { ...track, muted } : track) });
+    },
+    addClip: (input) => {
+      const current = get().arrangement;
+      if (current.clips.length >= MAX_ARRANGEMENT_CLIPS
+        || !current.tracks.some((track) => track.id === input.trackId)) return null;
+      const clip = newClip(input, current.clips);
+      if (!clip) return null;
+      commit({ ...current, clips: [...current.clips, clip] });
+      return clip.id;
+    },
+    moveClip: (clipId, startOffset, trackId) => {
+      const current = get().arrangement;
+      const targetValid = trackId !== undefined && current.tracks.some((track) => track.id === trackId);
+      commit(mapClip(current, clipId, (clip) => ({
+        ...clip,
+        startOffset: clampFinite(startOffset, 0, MAX_TIMELINE_OFFSET_SECONDS, clip.startOffset),
+        trackId: targetValid ? trackId : clip.trackId,
+      })));
+    },
+    trimClip: (clipId, trim) => {
+      commit(mapClip(get().arrangement, clipId, (clip) => ({
+        ...clip,
+        ...clampTrimWindow(clip.sourceDurationSeconds, trim.trimStart ?? clip.trimStart, trim.trimEnd ?? clip.trimEnd),
+      })));
+    },
+    setLoopPoints: (clipId, loop) => {
+      if (typeof loop.loopEnabled !== 'boolean') return;
+      commit(mapClip(get().arrangement, clipId, (clip) => ({
+        ...clip,
+        ...clampTrimWindow(clip.sourceDurationSeconds, loop.trimStart ?? clip.trimStart, loop.trimEnd ?? clip.trimEnd),
+        loopEnabled: loop.loopEnabled,
+      })));
+    },
+    deleteClip: (clipId) => {
+      const current = get().arrangement;
+      if (!current.clips.some((clip) => clip.id === clipId)) return;
+      commit({ ...current, clips: current.clips.filter((clip) => clip.id !== clipId) });
+    },
+    addGeneratedClip: (input) => {
+      const current = get().arrangement;
+      if (!validSource(input.sourceUrl) || !validDuration(input.durationSeconds)
+        || current.clips.length >= MAX_ARRANGEMENT_CLIPS) return null;
+      let track = input.trackId === undefined ? undefined : current.tracks.find((item) => item.id === input.trackId);
+      if (input.trackId !== undefined && !track) return null;
+      if (!track && current.tracks.length >= MAX_ARRANGEMENT_TRACKS) return null;
+      const needsTrack = !track;
+      track ??= { id: makeId('track', current.tracks), name: 'Music', muted: false };
+      const clip = newClip({
+        trackId: track.id,
+        sourceUrl: input.sourceUrl,
+        sourceDurationSeconds: input.durationSeconds,
+        name: input.name,
+      }, current.clips);
+      if (!clip) return null;
+      commit({
+        ...current,
+        tracks: needsTrack ? [...current.tracks, track] : current.tracks,
+        clips: [...current.clips, clip],
+      });
+      return clip.id;
+    },
+    setTempoBpm: (bpm) => {
+      const current = get().arrangement;
+      const tempoBpm = clampFinite(bpm, 20, 400, current.tempoBpm);
+      if (tempoBpm !== current.tempoBpm) commit({ ...current, tempoBpm });
+    },
+    clearArrangement: () => {
+      if (!isArrangementEmpty(get().arrangement)) commit(createEmptyArrangement());
+    },
+    undo: () => {
+      const previous = past.pop();
+      if (!previous) return;
+      const current = get();
+      future.push(current.arrangement);
+      set({ arrangement: previous, canUndo: past.length > 0, canRedo: true, editRevision: current.editRevision + 1 });
+    },
+    redo: () => {
+      const next = future.pop();
+      if (!next) return;
+      const current = get();
+      past.push(current.arrangement);
+      set({ arrangement: next, canUndo: true, canRedo: future.length > 0, editRevision: current.editRevision + 1 });
+    },
+    serialize: () => isArrangementEmpty(get().arrangement) ? null : cloneArrangement(get().arrangement),
+    hydrate,
+    reset: () => hydrate(null),
+  };
+};
 
-  trimClip: (clipId, trim) => {
-    set((s) => ({
-      arrangement: mapClip(s.arrangement, clipId, (clip) => {
-        const { trimStart, trimEnd } = clampTrimWindow(
-          clip.sourceDurationSeconds,
-          trim.trimStart ?? clip.trimStart,
-          trim.trimEnd ?? clip.trimEnd,
-        );
-        return { ...clip, trimStart, trimEnd };
-      }),
-    }));
-  },
-
-  setLoopPoints: (clipId, loop) => {
-    set((s) => ({
-      arrangement: mapClip(s.arrangement, clipId, (clip) => {
-        const { trimStart, trimEnd } = clampTrimWindow(
-          clip.sourceDurationSeconds,
-          loop.trimStart ?? clip.trimStart,
-          loop.trimEnd ?? clip.trimEnd,
-        );
-        return { ...clip, loopEnabled: loop.loopEnabled, trimStart, trimEnd };
-      }),
-    }));
-  },
-
-  deleteClip: (clipId) => {
-    set((s) => ({
-      arrangement: { ...s.arrangement, clips: s.arrangement.clips.filter((c) => c.id !== clipId) },
-    }));
-  },
-
-  addGeneratedClip: (input) => {
-    // Reuse the primitives so the generated hand-off is not a second code path:
-    // ensure a track, then addClip onto it.
-    let trackId = input.trackId && get().arrangement.tracks.some((t) => t.id === input.trackId)
-      ? input.trackId
-      : undefined;
-    if (!trackId) {
-      trackId = get().addTrack('Music');
-    }
-    const clipId = get().addClip({
-      trackId,
-      sourceUrl: input.sourceUrl,
-      sourceDurationSeconds: input.durationSeconds,
-      name: input.name ?? input.sourceUrl,
-    });
-    // addClip only returns null for an unknown track, which we just created.
-    return clipId as string;
-  },
-
-  setTempoBpm: (bpm) => {
-    set((s) => ({
-      arrangement: {
-        ...s.arrangement,
-        tempoBpm: clampFinite(bpm, 20, 400, s.arrangement.tempoBpm || DEFAULT_TEMPO_BPM),
-      },
-    }));
-  },
-
-  clearArrangement: () => set({ arrangement: createEmptyArrangement() }),
-
-  serialize: () => {
-    const { arrangement } = get();
-    return isArrangementEmpty(arrangement) ? null : arrangement;
-  },
-
-  hydrate: (arrangement) => set({ arrangement: arrangement ?? createEmptyArrangement() }),
-});
-
-/** The app-wide music arrangement store. */
+/** The editor's arrangement store; editor lifecycle code owns scene adoption. */
 export const useMusicArrangementStore = create<ArrangementSlice>()(createArrangementSlice);
 
-// ---------------------------------------------------------------------------
-// Persistence helpers — pure, so they are testable without the store and can
-// run on the server (they never touch the DOM or the store singleton).
-// ---------------------------------------------------------------------------
-
 /**
- * Return a copy of `sceneData` carrying the arrangement under
- * `ARRANGEMENT_SCENE_DATA_KEY`. A `null`/empty arrangement REMOVES the key, so
- * clearing every clip and saving does not leave a stale arrangement behind.
+ * Overlay a detached arrangement snapshot on scene JSON. This must be applied
+ * after engine export because Rust does not preserve the metadata itself.
+ * Null/default-empty arrangements remove a previously persisted value.
  */
 export function applyArrangementToSceneData(
   sceneData: Record<string, unknown>,
   arrangement: MusicArrangement | null,
 ): Record<string, unknown> {
   const next = { ...sceneData };
-  if (!arrangement || isArrangementEmpty(arrangement)) {
-    delete next[ARRANGEMENT_SCENE_DATA_KEY];
-    return next;
-  }
-  next[ARRANGEMENT_SCENE_DATA_KEY] = arrangement;
+  if (!arrangement || isArrangementEmpty(arrangement)) delete next[ARRANGEMENT_SCENE_DATA_KEY];
+  else next[ARRANGEMENT_SCENE_DATA_KEY] = cloneArrangement(arrangement);
   return next;
 }
 
-/** True for a finite number, used to reject NaN/strings from untrusted JSON. */
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v);
-}
-
-/** Validate one clip from untrusted JSON, or drop it (return null). */
-function parseClip(raw: unknown): MusicClip | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const c = raw as Record<string, unknown>;
-  if (typeof c.id !== 'string' || typeof c.trackId !== 'string') return null;
-  if (typeof c.sourceUrl !== 'string') return null;
-  const duration = isFiniteNumber(c.sourceDurationSeconds) ? Math.max(0, c.sourceDurationSeconds) : 0;
-  const { trimStart, trimEnd } = clampTrimWindow(
-    duration,
-    isFiniteNumber(c.trimStart) ? c.trimStart : 0,
-    isFiniteNumber(c.trimEnd) ? c.trimEnd : duration,
-  );
-  return {
-    id: c.id,
-    trackId: c.trackId,
-    sourceUrl: c.sourceUrl,
-    sourceDurationSeconds: duration,
-    startOffset: isFiniteNumber(c.startOffset) ? Math.max(0, c.startOffset) : 0,
-    trimStart,
-    trimEnd,
-    loopEnabled: c.loopEnabled === true,
-    name: typeof c.name === 'string' && c.name ? c.name : c.sourceUrl,
-  };
-}
-
-/** Validate one track from untrusted JSON, or drop it (return null). */
 function parseTrack(raw: unknown): MusicTrack | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const t = raw as Record<string, unknown>;
-  if (typeof t.id !== 'string') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const track = raw as Record<string, unknown>;
+  if (!validId(track.id)) return null;
+  return { id: track.id, name: label(track.name, 'Track'), muted: track.muted === true };
+}
+
+function parseClip(raw: unknown): MusicClip | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const clip = raw as Record<string, unknown>;
+  if (!validId(clip.id) || !validId(clip.trackId) || !validSource(clip.sourceUrl)
+    || !validDuration(clip.sourceDurationSeconds)) return null;
   return {
-    id: t.id,
-    name: typeof t.name === 'string' && t.name ? t.name : 'Track',
-    muted: t.muted === true,
+    id: clip.id,
+    trackId: clip.trackId,
+    sourceUrl: clip.sourceUrl,
+    sourceDurationSeconds: clip.sourceDurationSeconds,
+    startOffset: clampFinite(clip.startOffset, 0, MAX_TIMELINE_OFFSET_SECONDS, 0),
+    ...clampTrimWindow(
+      clip.sourceDurationSeconds,
+      isFiniteNumber(clip.trimStart) ? clip.trimStart : 0,
+      isFiniteNumber(clip.trimEnd) ? clip.trimEnd : clip.sourceDurationSeconds,
+    ),
+    loopEnabled: clip.loopEnabled === true,
+    name: label(clip.name, clip.sourceUrl),
   };
 }
 
-/**
- * Read a validated arrangement out of a project's `sceneData`, or `null` when
- * none is present or it is malformed. Every field is checked by name and
- * unknown keys are dropped — `sceneData` can originate from another user's
- * exported project, so it is untrusted input (same discipline as the scene
- * audio manifest).
- *
- * Clips whose `trackId` names no surviving track are dropped, so a partially
- * corrupt file cannot resurrect orphaned clips.
- */
-export function readArrangementFromSceneData(sceneData: unknown): MusicArrangement | null {
-  if (!sceneData || typeof sceneData !== 'object') return null;
-  const raw = (sceneData as Record<string, unknown>)[ARRANGEMENT_SCENE_DATA_KEY];
-  if (!raw || typeof raw !== 'object') return null;
+/** Validate untrusted metadata before allocating or adopting bounded collections. */
+function parseArrangement(raw: unknown): MusicArrangement | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
-
-  const tracks = Array.isArray(obj.tracks)
-    ? obj.tracks.map(parseTrack).filter((t): t is MusicTrack => t !== null)
-    : [];
-  const trackIds = new Set(tracks.map((t) => t.id));
-  const clips = Array.isArray(obj.clips)
-    ? obj.clips
-        .map(parseClip)
-        .filter((c): c is MusicClip => c !== null && trackIds.has(c.trackId))
-    : [];
-
-  if (tracks.length === 0 && clips.length === 0) return null;
-
-  return {
-    version: isFiniteNumber(obj.version) ? obj.version : ARRANGEMENT_VERSION,
-    tempoBpm: isFiniteNumber(obj.tempoBpm) ? clampFinite(obj.tempoBpm, 20, 400, DEFAULT_TEMPO_BPM) : DEFAULT_TEMPO_BPM,
+  if (obj.version !== undefined && obj.version !== ARRANGEMENT_VERSION) return null;
+  if (!Array.isArray(obj.tracks) || !Array.isArray(obj.clips)
+    || obj.tracks.length > MAX_ARRANGEMENT_TRACKS || obj.clips.length > MAX_ARRANGEMENT_CLIPS) return null;
+  const tracks: MusicTrack[] = [];
+  const trackIds = new Set<string>();
+  for (const rawTrack of obj.tracks) {
+    const track = parseTrack(rawTrack);
+    if (!track || trackIds.has(track.id)) continue;
+    tracks.push(track);
+    trackIds.add(track.id);
+  }
+  const clips: MusicClip[] = [];
+  const clipIds = new Set<string>();
+  for (const rawClip of obj.clips) {
+    const clip = parseClip(rawClip);
+    if (!clip || !trackIds.has(clip.trackId) || clipIds.has(clip.id)) continue;
+    clips.push(clip);
+    clipIds.add(clip.id);
+  }
+  const arrangement = {
+    version: ARRANGEMENT_VERSION,
+    tempoBpm: clampFinite(obj.tempoBpm, 20, 400, DEFAULT_TEMPO_BPM),
     tracks,
     clips,
   };
+  return isArrangementEmpty(arrangement) ? null : arrangement;
+}
+
+/**
+ * Read bounded, current-version metadata, dropping invalid/duplicate entries
+ * and orphaned clips. Unsupported schemas or oversized collections are rejected
+ * as a whole. No untrusted objects are shared with the mutable editor state.
+ */
+export function readArrangementFromSceneData(sceneData: unknown): MusicArrangement | null {
+  if (!sceneData || typeof sceneData !== 'object' || Array.isArray(sceneData)) return null;
+  return parseArrangement((sceneData as Record<string, unknown>)[ARRANGEMENT_SCENE_DATA_KEY]);
 }

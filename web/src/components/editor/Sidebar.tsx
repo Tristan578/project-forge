@@ -2,6 +2,7 @@
 
 import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge, Sparkles, Music } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Button } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -293,11 +294,16 @@ export function Sidebar() {
       />
 
       {/* Music Arrangement toggle */}
-      <ToolButton
-        icon={<Music size={20} />}
+      <Button
+        type="button"
+        variant="ghost"
         onClick={() => openPanel('music-arrangement')}
         title="Music Arrangement"
-      />
+        aria-label="Music Arrangement"
+        className="min-h-11 min-w-11 shrink-0 px-2"
+      >
+        <Music size={20} aria-hidden="true" />
+      </Button>
 
       {/* AI Chat toggle */}
       <ToolButton

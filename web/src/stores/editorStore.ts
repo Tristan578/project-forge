@@ -6,6 +6,9 @@
  */
 
 import { create } from 'zustand';
+import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { resetSceneArrangement, stageSceneArrangement } from '@/lib/music/sceneArrangement';
 import { trackCommandDispatched } from '@/lib/analytics/events';
 import { addBreadcrumb, captureException } from '@/lib/monitoring/sentry-client';
 import { checkCommandBatch, checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
@@ -126,6 +129,27 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createLocalizationSlice(...args),
   ...createOrchestratorSlice(...args),
 }));
+
+// User arrangement edits use the same dirty/autosave signal as engine edits.
+// Hydration changes no edit revision, so opening a scene never marks it dirty.
+let arrangementAutoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+useMusicArrangementStore.subscribe((state, previous) => {
+  if (state.arrangement !== previous.arrangement && arrangementAutoSaveTimer !== null) {
+    clearTimeout(arrangementAutoSaveTimer);
+    arrangementAutoSaveTimer = null;
+  }
+  if (state.editRevision !== previous.editRevision) {
+    useEditorStore.setState({ sceneModified: true, cloudSaveStatus: 'idle' });
+    arrangementAutoSaveTimer = setTimeout(() => {
+      arrangementAutoSaveTimer = null;
+      const editor = useEditorStore.getState();
+      if (editor.autoSaveEnabled && editor.engineMode === 'edit') editor.saveScene();
+    }, DEBOUNCE_TRANSFORM_AUTOSAVE_MS);
+  }
+});
+useEditorStore.subscribe((state, previous) => {
+  if (state.projectId !== previous.projectId) resetSceneArrangement();
+});
 
 // E2E store exposure (__EDITOR_STORE, __CHAT_STORE, __FORGE_DISPATCH) is done
 // in a SINGLE place — EditorLayout's post-hydration useEffect — so all three
@@ -278,7 +302,20 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
       reportCommandRejected(command, tooBig);
       return { success: false, error: tooBig };
     }
-    const response = dispatcher(command, payload);
+    // Stage frontend metadata around every scene replacement, including direct
+    // chat dispatches. A rejection/throw rolls back only this pending load;
+    // an accepted load keeps its metadata until SCENE_LOADED, even if late.
+    const rollbackArrangement = command === 'load_scene' || command === 'new_scene'
+      ? stageSceneArrangement(command === 'load_scene' && payload && typeof payload === 'object' && 'json' in payload && typeof payload.json === 'string' ? payload.json : undefined)
+      : undefined;
+    let response: CommandResponse | void;
+    try {
+      response = dispatcher(command, payload);
+    } catch (error) {
+      rollbackArrangement?.();
+      throw error;
+    }
+    if (response && response.success === false) rollbackArrangement?.();
     // Only an explicit `success: false` is a rejection. A dispatcher that
     // returns nothing (every test double, and any pre-PF-1098 caller) is not
     // reporting failure, and must not be treated as if it were.

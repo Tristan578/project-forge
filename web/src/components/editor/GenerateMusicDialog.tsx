@@ -93,23 +93,25 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
           entityId: target,
           sink: useEditorStore.getState(),
         });
-        // Hand the generated track to the shared arrangement (#9854): it lands
-        // as a clip in the Music Arrangement editor instead of being a
-        // play-only, standalone result, so imported and generated material sit
-        // in one editable timeline. `Number.isFinite`, not `||`, so a 0-length
-        // report cannot mask a real duration with a default.
+        // The synchronous result can seed editable authoring metadata. This
+        // does not change the separately attached entity's playback settings.
+        // Use the provider duration when present; otherwise use the requested
+        // duration as authoring metadata, not a measured playback guarantee.
         const durationSeconds =
           typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds)
             ? data.durationSeconds
             : duration;
-        useMusicArrangementStore.getState().addGeneratedClip({
+        const clipId = useMusicArrangementStore.getState().addGeneratedClip({
           sourceUrl: assetName,
           durationSeconds,
           name: assetName,
         });
-        return target
+        const imported = target
           ? `Music generated and attached as "${assetName}".`
           : `Music generated and imported as "${assetName}".`;
+        return clipId
+          ? `${imported} A clip is ready in Music Arrangement (authoring only).`
+          : `${imported} No arrangement clip was added: check the source duration and track/clip limits in Music Arrangement.`;
       }
 
       if (typeof data.jobId !== 'string' || data.jobId.length === 0) {

@@ -39,7 +39,7 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
   });
 
   it('adds a track and returns its id', () => {
-    const id = s().addTrack('Lead');
+    const id = s().addTrack('Lead')!;
     expect(id).toMatch(/^track_/);
     expect(s().arrangement.tracks).toEqual([{ id, name: 'Lead', muted: false }]);
   });
@@ -51,7 +51,7 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
   });
 
   it('adds a clip onto a track and clamps trim to the source length', () => {
-    const trackId = s().addTrack();
+    const trackId = s().addTrack()!;
     const clipId = s().addClip({ trackId, sourceUrl: 'music-intro', sourceDurationSeconds: 30 });
     expect(clipId).not.toBeNull();
     const clip = s().arrangement.clips[0];
@@ -74,7 +74,7 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
   });
 
   it('moves a clip along the timeline and clamps negative offsets to 0', () => {
-    const trackId = s().addTrack();
+    const trackId = s().addTrack()!;
     const clipId = s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 })!;
     s().moveClip(clipId, 12.5);
     expect(s().arrangement.clips[0].startOffset).toBe(12.5);
@@ -83,8 +83,8 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
   });
 
   it('moves a clip to another track, ignoring an unknown target track', () => {
-    const t1 = s().addTrack();
-    const t2 = s().addTrack();
+    const t1 = s().addTrack()!;
+    const t2 = s().addTrack()!;
     const clipId = s().addClip({ trackId: t1, sourceUrl: 'a', sourceDurationSeconds: 10 })!;
     s().moveClip(clipId, 1, t2);
     expect(s().arrangement.clips[0].trackId).toBe(t2);
@@ -93,15 +93,15 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
   });
 
   it('deletes a clip', () => {
-    const trackId = s().addTrack();
+    const trackId = s().addTrack()!;
     const clipId = s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 })!;
     s().deleteClip(clipId);
     expect(s().arrangement.clips).toHaveLength(0);
   });
 
   it('deleting a track removes its clips but keeps other tracks', () => {
-    const t1 = s().addTrack();
-    const t2 = s().addTrack();
+    const t1 = s().addTrack()!;
+    const t2 = s().addTrack()!;
     s().addClip({ trackId: t1, sourceUrl: 'a', sourceDurationSeconds: 10 });
     s().addClip({ trackId: t2, sourceUrl: 'b', sourceDurationSeconds: 10 });
     s().deleteTrack(t1);
@@ -110,7 +110,7 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
   });
 
   it('deleting an empty track is a no-op on clips', () => {
-    const t1 = s().addTrack();
+    const t1 = s().addTrack()!;
     s().deleteTrack(t1);
     expect(s().arrangement.tracks).toHaveLength(0);
     expect(s().arrangement.clips).toHaveLength(0);
@@ -119,7 +119,7 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
 
 describe('music.FR-2.OP-02 — trim, loop points, boundaries', () => {
   const seed = () => {
-    const trackId = s().addTrack();
+    const trackId = s().addTrack()!;
     const clipId = s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 20 })!;
     return { trackId, clipId };
   };
@@ -167,8 +167,8 @@ describe('music.FR-2.OP-02 — trim, loop points, boundaries', () => {
 
 describe('overlap detection (boundary: overlapping clips)', () => {
   it('detects overlap on the same track and ignores clips on other tracks', () => {
-    const t1 = s().addTrack();
-    const t2 = s().addTrack();
+    const t1 = s().addTrack()!;
+    const t2 = s().addTrack()!;
     const c1 = s().addClip({ trackId: t1, sourceUrl: 'a', sourceDurationSeconds: 10 })!;
     const c2 = s().addClip({ trackId: t1, sourceUrl: 'b', sourceDurationSeconds: 10 })!;
     const c3 = s().addClip({ trackId: t2, sourceUrl: 'c', sourceDurationSeconds: 10 })!;
@@ -195,7 +195,7 @@ describe('generated/imported audio hand-off', () => {
   });
 
   it('reuses an existing track when a valid trackId is passed', () => {
-    const trackId = s().addTrack('Existing');
+    const trackId = s().addTrack('Existing')!;
     s().addGeneratedClip({ sourceUrl: 'm', durationSeconds: 10, trackId });
     expect(s().arrangement.tracks).toHaveLength(1);
     expect(s().arrangement.clips[0].trackId).toBe(trackId);
@@ -208,7 +208,7 @@ describe('serialize / hydrate', () => {
   });
 
   it('round-trips a non-empty arrangement through hydrate', () => {
-    const trackId = s().addTrack('T');
+    const trackId = s().addTrack('T')!;
     s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 });
     const snapshot = s().serialize();
     expect(snapshot).not.toBeNull();
