@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useId } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
@@ -22,10 +22,6 @@ type SoundType = 'sfx' | 'voice';
 type VoiceStyle = 'neutral' | 'friendly' | 'sinister' | 'excited' | 'calm';
 
 export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSoundDialogProps) {
-  // useId, not literal ids: the panel can mount more than once, and a
-  // repeated id sends the second <label for> to the first panel's control.
-  const baseId = useId();
-  const fieldId = (key: string) => `${baseId}-${key}`;
   const [soundType, setSoundType] = useState<SoundType>('sfx');
   const [sfxPrompt, setSfxPrompt] = useState('');
   const [duration, setDuration] = useState(5);
@@ -50,10 +46,6 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
   // still be able to switch back to the other.
   const gate = useGenerationGate(soundType === 'sfx' ? 'sfx-generation' : 'voice-generation');
   const canSubmit =
-    // `blocked` is false until the first /api/capabilities body lands, so
-    // without this a permanently-unavailable capability presented a live
-    // Generate button with no notice beside it (#9725 p8).
-    !gate.loading &&
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
@@ -155,7 +147,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-sound-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sound-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
           {/* Type selection */}
           <div>
             <label className="mb-2 block text-xs font-medium text-zinc-300">Type</label>
@@ -203,11 +195,10 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
               </div>
 
               <div>
-                <label htmlFor={fieldId('duration')} className="mb-1 block text-xs font-medium text-zinc-300">
+                <label className="mb-1 block text-xs font-medium text-zinc-300">
                   Duration: {duration.toFixed(1)}s
                 </label>
                 <input
-                  id={fieldId('duration')}
                   type="range"
                   min={0.5}
                   max={22}
@@ -244,9 +235,8 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
               </div>
 
               <div>
-                <label htmlFor={fieldId('style')} className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+                <label className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
                 <select
-                  id={fieldId('style')}
                   value={voiceStyle}
                   onChange={(e) => setVoiceStyle(e.target.value as VoiceStyle)}
                   disabled={isSubmitting || gate.blocked}
@@ -274,7 +264,6 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                 className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
               />
               <label htmlFor="attach" className="text-xs text-zinc-300">
-                {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank primary entity name is unset; falls back to a display placeholder */}
                 Auto-attach to <span className="font-medium">{primaryName || 'selected entity'}</span>
               </label>
             </div>

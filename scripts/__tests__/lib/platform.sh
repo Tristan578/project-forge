@@ -48,14 +48,12 @@ platform_name() {
     *) echo unknown ;;
   esac
 }
-readonly -f platform_name
 
 unsupported_on() {
   local platform="${1:?platform}" reason="${2:?reason}"
   echo "UNSUPPORTED on ${platform}: ${reason}" >&2
   exit "$PLATFORM_UNSUPPORTED_EXIT"
 }
-readonly -f unsupported_on
 
 probe_skip_absent_on() {
   local platform="${1:?platform}" reason="${2:?reason}"
@@ -65,7 +63,6 @@ probe_skip_absent_on() {
   fi
   probe_skip "$reason"
 }
-readonly -f probe_skip_absent_on
 
 probe_skip() {
   local reason="${1:?reason}"
@@ -81,4 +78,3 @@ probe_skip() {
     fi
   fi
 }
-readonly -f probe_skip

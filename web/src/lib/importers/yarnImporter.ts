@@ -306,7 +306,7 @@ function convertYarnNode(
         segments.push({ kind: 'choices', items: [line] });
       }
     } else {
-      currentSeq ??= [];
+      if (!currentSeq) currentSeq = [];
       currentSeq.push(line);
     }
   }
@@ -607,13 +607,13 @@ function linkChain(chain: DialogueNode[]): void {
 
     switch (current.type) {
       case 'text':
-        current.next ??= nextNode.id;
+        if (current.next === null) current.next = nextNode.id;
         break;
       case 'action':
-        current.next ??= nextNode.id;
+        if (current.next === null) current.next = nextNode.id;
         break;
       case 'condition':
-        current.onTrue ??= nextNode.id;
+        if (current.onTrue === null) current.onTrue = nextNode.id;
         break;
       // choice and end nodes do not chain automatically
     }

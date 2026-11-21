@@ -93,8 +93,8 @@ const BEARER = (key: string): Record<string, string> => ({ Authorization: `Beare
 /**
  * One credit-free, authenticated GET per provider. Each entry cites the vendor
  * page that documents the endpoint and header, so the contract pinned by the
- * tests is the provider's, not ours (lesson 14). `null` means this verifier
- * has no credit-free probe for the provider (currently Hyper3D).
+ * tests is the provider's, not ours (lesson 14). `null` = not probeable:
+ * Suno has no API, Hyper3D is BYOK-only and never served by a platform key.
  */
 export const PROVIDER_PROBES: Record<PlatformKeyProvider, Probe | null> = {
   anthropic: {
@@ -134,6 +134,7 @@ export const PROVIDER_PROBES: Record<PlatformKeyProvider, Probe | null> = {
     docs: 'https://www.remove.bg/api#account-balance',
   },
   hyper3d: null,
+  suno: null,
 };
 
 /** The gateway's authenticated, credit-free endpoint (serves GATEWAY_CAPABILITIES). */
@@ -186,8 +187,10 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
       }];
     }
 
-    // Each alternative stays visible in the report; one successful sprite
-    // provider verifies the aggregate capability, not every operation.
+    // One row per provider the capability's platform path can resolve - a
+    // capability that spends more than one key needs every one of them.
+    // One row per key the capability's platform path can resolve — shared with
+    // /api/capabilities through CAPABILITY_REQUIRED_PROVIDERS so the two agree.
     const providers: readonly PlatformKeyProvider[] =
       CAPABILITY_REQUIRED_PROVIDERS[capability] ?? [provider as PlatformKeyProvider];
     return providers.map((platformProvider): PlanRow => {
@@ -298,17 +301,17 @@ export function formatTable(results: ProbeResult[]): string {
 export interface Summary {
   /** Capabilities not declared unavailable (sprite's two rows count once). */
   offered: number;
-  /** Offered capabilities with a verified usable path. */
+  /** Offered capabilities whose EVERY row passed. */
   verified: number;
   /** Capabilities declared unavailable in code. */
   unavailable: number;
-  /** Offered capabilities without a verified path — any causes a non-zero exit. */
+  /** Rows that failed or whose key is missing — any of these is a non-zero exit. */
   failing: number;
 }
 
 /**
  * Count CAPABILITIES, not rows: a capability with two keys (sprite) is one
- * capability, verified when a supported alternative passes. A missing sole path
+ * capability, verified only when every one of its rows passed, and `missing`
  * counts as failing because an unset platform key is exactly what this
  * script exists to catch. Pure, so the exit-code decision is testable.
  */
@@ -317,10 +320,8 @@ export function summarize(results: ProbeResult[]): Summary {
   for (const r of results) byCapability.set(r.capability, [...(byCapability.get(r.capability) ?? []), r]);
   const groups = [...byCapability.values()];
   const offered = groups.filter((rows) => rows.every((r) => r.status !== 'unavailable'));
-  const verified = offered.filter((rows) => CAPABILITY_REQUIRED_PROVIDERS[rows[0].capability]
-    ? rows.some((r) => r.status === 'pass')
-    : rows.every((r) => r.status === 'pass'));
-  const failing = offered.filter((rows) => !verified.includes(rows));
+  const verified = offered.filter((rows) => rows.every((r) => r.status === 'pass'));
+  const failing = results.filter((r) => r.status === 'fail' || r.status === 'missing');
   return {
     offered: offered.length,
     verified: verified.length,

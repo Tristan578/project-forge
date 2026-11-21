@@ -28,9 +28,7 @@ QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
-readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
-readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
 
@@ -72,7 +70,6 @@ run_resolve() {
   RESOLVE_OUT="$(cat "$out")"
   rm -f "$out"
 }
-readonly -f run_resolve
 
 # ---- pull_request: passes the event payload straight through ---------------
 run_resolve EVENT_NAME=pull_request PR_BASE_SHA=aaa111 PR_HEAD_SHA=bbb222
@@ -127,7 +124,6 @@ assert_hard_failure() {
     pass "$label: exits non-zero and writes no outputs"
   fi
 }
-readonly -f assert_hard_failure
 
 assert_hard_failure "pull_request with empty base SHA" \
   EVENT_NAME=pull_request PR_BASE_SHA= PR_HEAD_SHA=bbb222
@@ -175,7 +171,6 @@ pin() {
     fail "$label: no line matching /$pattern/ in ${file##*/}"
   fi
 }
-readonly -f pin
 
 pin "ci.yml still declares the workflow_dispatch trigger (#9161/#9381)" \
   "$CI_YML" '^  workflow_dispatch:'
@@ -241,47 +236,22 @@ else
   pin "ci.yml forwards needs-design into quality-gates" \
     "$CI_YML" 'design-changed: \$\{\{ fromJSON\(needs\.ci-gate\.outputs\.needs-design\) \}\}'
 
-  # Lighthouse must run for every production-build input on every event.
-  # `web-changed` is too narrow: packages/ui, nested workspace manifests, the
-  # root lockfile, and .node-version can alter the build without touching web/.
+  # lighthouse-delta must carry NO job-level `if:` at all. Gating it on
+  # `inputs.web-changed` looks tempting and is a coverage regression:
+  # `needs-web` is `^web/` only, so a packages/ui change (a runtime dependency
+  # of the web build) or a root lockfile bump would skip the performance gate.
+  # Path-gating it correctly is #9526 and needs an output ci-gate does not emit
+  # yet. Until then, unconditional is the honest posture.
   lh_block="$(awk '/^  lighthouse-delta:$/{inblk=1; next} inblk && /^  [a-z]/{exit} inblk' "$QG_YML" | grep -v '^[[:space:]]*#')"
   if [ -z "$lh_block" ]; then
     fail "could not cut the lighthouse-delta job out of quality-gates.yml — this assertion cannot be verified (fail closed)"
-  elif ! grep -qx '    if: inputs.web-build-inputs-changed' <<<"$lh_block"; then
-    fail "lighthouse-delta must use exactly inputs.web-build-inputs-changed — event gates skip workflow_dispatch and web-changed misses production build inputs"
+  elif grep -qE "^    if:" <<<"$lh_block"; then
+    # Four spaces exactly: a JOB-level key. Steps inside this job legitimately
+    # carry their own deeper-indented `if:` (the @spawnforge/ui cache hit), and
+    # matching those would make this assertion unsatisfiable.
+    fail "lighthouse-delta carries a job-level if: — see the comment above it. An event gate skips it on the bot-branch dispatch path (#9161); a web-changed gate misses packages/ui and dependency bumps."
   else
-    pass "lighthouse-delta is gated by the shared web-build-inputs signal"
-  fi
-
-  pin "ci.yml forwards web-build-inputs into quality-gates" \
-    "$CI_YML" 'web-build-inputs-changed: \$\{\{ fromJSON\(needs\.ci-gate\.outputs\.needs-web-build-inputs\) \}\}'
-
-  matcher_line="$(grep -v '^[[:space:]]*#' "$CI_YML" | grep -E 'grep -qE .*web_build_inputs=true' || true)"
-  matcher="$(sed -nE "s/.*grep -qE '([^']+)'.*/\\1/p" <<<"$matcher_line")"
-  if [ -z "$matcher" ]; then
-    fail "could not extract the ci.yml web-build-inputs matcher (fail closed)"
-  else
-    assert_web_input() {
-      local path="$1" expected="$2" actual
-      if printf '%s\n' "$path" | grep -qE "$matcher"; then actual=true; else actual=false; fi
-      if [ "$actual" = "$expected" ]; then
-        pass "web-build-inputs matcher: $path => $expected"
-      else
-        fail "web-build-inputs matcher: $path => $actual, expected $expected (/$matcher/)"
-      fi
-    }
-    # The matcher is extracted from ci.yml, so these fixtures exercise the
-    # workflow implementation. ci-gate resolves both PR and dispatch ranges
-    # above, and the reusable workflow consumes this shared output for both.
-    assert_web_input 'web/src/app/page.tsx' true
-    assert_web_input 'packages/ui/src/Button.tsx' true
-    assert_web_input 'apps/docs/package.json' true
-    assert_web_input 'package.json' true
-    assert_web_input 'package-lock.json' true
-    assert_web_input '.node-version' true
-    assert_web_input 'apps/docs/package-lock.json' false
-    assert_web_input 'packages/other/src/index.ts' false
-    assert_web_input 'docs/guide.md' false
+    pass "lighthouse-delta has no job-level if: (runs on every quality-gates call)"
   fi
 fi
 

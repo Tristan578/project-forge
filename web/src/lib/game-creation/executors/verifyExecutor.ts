@@ -170,9 +170,7 @@ export const verifyExecutor: ExecutorDefinition = {
     // Check 6: winnability — the only check whose answer the user acts on.
     // Everything above is cosmetic; a scene that fails this one cannot be
     // played at all, so it is the one finding that must fail the step.
-    // Orchestrator verification reads the same completionMode the Play gate
-    // does, so both surfaces agree on whether a win condition is required (#9901).
-    const report = validateWinnability(sceneGraph, allGameComponents ?? {}, sceneGraph.completionMode);
+    const report = validateWinnability(sceneGraph, allGameComponents ?? {});
     const winnabilityIssues = report.issues.map(issue => issue.code);
 
     if (!report.winnable) {

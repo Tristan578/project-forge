@@ -3,15 +3,13 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * GET /api/billing/status
  * Get current billing status for the authenticated user.
  * Includes subscription status from Stripe when available.
  */
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -63,10 +61,6 @@ async function GET_impl(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/billing/status', method: 'GET' });
-    return redactedJson({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

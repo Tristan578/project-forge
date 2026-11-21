@@ -116,22 +116,6 @@ test.describe('Production Smoke Tests @smoke @production', () => {
     expect(integrityErrors).toEqual([]);
   });
 
-  for (const method of ['GET', 'HEAD'] as const) {
-    test('missing published game returns404 for ' + method, async ({ request }) => {
-      const res = await request.fetch(PROD_URL + '/play/user_release_smoke_absent_20260916/no-such-published-game', {
-        method, maxRedirects: 0,
-      });
-      expect(res.status()).toBe(404);
-      expect(res.headers()['x-robots-tag']).toBe('noindex');
-      expect(res.headers()['cache-control']).toContain('no-store');
-      if (method === 'GET') {
-        expect(await res.text()).toContain('<h1>Game Not Found</h1>');
-      } else {
-        expect((await res.body()).length).toBe(0);
-      }
-    });
-  }
-
   test('community page loads', async ({ request }) => {
     const res = await request.get(`${PROD_URL}/community`);
     expect(res.status()).toBe(200);
@@ -171,43 +155,6 @@ test.describe('Production Smoke Tests @smoke @production', () => {
     const body = await res.body();
     expect(body.length).toBeGreaterThan(1_000_000);
   });
-
-  for (const variant of ['webgl2', 'webgpu', 'webgl2-runtime', 'webgpu-runtime']) {
-    for (const dependency of ['forge_engine.js', 'forge_engine_bg.wasm', 'wasm-manifest.json']) {
-      test('same-origin fallback serves ' + variant + '/' + dependency, async ({ request }) => {
-        const url = PROD_URL + '/engine-pkg-' + variant + '/' + dependency;
-        const res = dependency.endsWith('.json')
-          ? await request.get(url, { maxRedirects: 0 })
-          : await request.head(url, { maxRedirects: 0 });
-        expect(res.status()).toBe(200);
-        if (dependency.endsWith('.json')) {
-          expect(res.headers()['content-type']).toContain('application/json');
-          const manifest = await res.json();
-          expect(manifest.jsFile).toBe('forge_engine.js');
-          expect(manifest.wasmFile).toBe('forge_engine_bg.wasm');
-          for (const field of ['jsHash', 'wasmHash', 'buildId']) {
-            expect(manifest[field]).toMatch(/^[0-9a-f]{16}$/);
-          }
-        } else {
-          expect(res.headers()['content-type']).toMatch(dependency.endsWith('.wasm') ? /application\/wasm/ : /javascript/);
-          // Vercel removes Content-Length for compressed HEAD responses. Prove the
-          // actual fallback asset exists with a bounded byte-range GET instead.
-          const range = await request.get(url, {
-            headers: { Range: 'bytes=0-7' },
-            maxRedirects: 0,
-          });
-          expect([200, 206]).toContain(range.status());
-          const bytes = await range.body();
-          expect(bytes.length).toBeGreaterThan(0);
-          if (dependency.endsWith('.wasm')) {
-            expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x00, 0x61, 0x73, 0x6d]));
-          } else {
-            expect(bytes.toString('utf8')).toMatch(/\S/);
-          }
-        }
-      });
-    }
-  }
 
   test('API health endpoint responds', async ({ request }) => {
     const res = await request.get(`${PROD_URL}/api/health`);

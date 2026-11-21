@@ -26,9 +26,6 @@ import { DocsPanel } from './DocsPanel';
 const AudioMixerPanel = lazy(() =>
   import('./AudioMixerPanel').then((m) => ({ default: m.AudioMixerPanel }))
 );
-const MusicArrangementPanel = lazy(() =>
-  import('./MusicArrangementPanel').then((m) => ({ default: m.MusicArrangementPanel }))
-);
 
 // ---- AI / advanced panels — lazy imports (opened on demand) ----
 const UIBuilderPanel = lazy(() =>
@@ -135,7 +132,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useUserStore } from '@/stores/userStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
-import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier } from '@/lib/ai/tierAccess';
+import { canAccessPanel } from '@/lib/ai/tierAccess';
 import { LockedPanelOverlay } from './LockedPanelOverlay';
 
 // ---- Loading skeleton shown while a lazy panel is fetched ----
@@ -175,21 +172,8 @@ function withTierGate(
   Component: React.ComponentType,
 ): React.FunctionComponent<IDockviewPanelProps> {
   return function TierGatedPanel(_props: IDockviewPanelProps) {
-    const rawTier = useUserStore((s) => s.tier);
-    const spendableTokens = useUserStore((s) => s.spendableTokens);
-    const profileLoaded = useUserStore((s) => s.profileLoaded);
-    // A starter account with trial tokens reads as hobbyist here (#7715).
-    const tier = effectiveTier(rawTier, spendableTokens);
-    // Before /api/user/profile resolves, `tier`/`spendableTokens` read their
-    // defaults ('starter'/0), which is indistinguishable from "no trial
-    // access" — showing the lock on a panel the trial could open would flash
-    // it in front of a trial-eligible account for the one render before the
-    // real balance lands. Only those panels are ambiguous: a creator/pro panel
-    // is locked for every $0 account, so it stays locked until the profile
-    // loads (#7715 review round 3).
-    const hasAccess = profileLoaded
-      ? canAccessPanel(panelId, tier)
-      : canAccessPanelBeforeProfileLoad(panelId);
+    const tier = useUserStore((s) => s.tier);
+    const hasAccess = canAccessPanel(panelId, tier);
 
     // Track feature flag evaluation once on mount (non-critical analytics)
     useEffect(() => {
@@ -302,7 +286,6 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'asset-browser': AssetPanelWrapper,
   // Heavy supplemental — lazy
   'audio-mixer': withSuspense(AudioMixerPanel),
-  'music-arrangement': withSuspense(MusicArrangementPanel),
   docs: DocsPanelWrapper,
   // AI / advanced — lazy, no tier restriction
   'ui-builder': withSuspense(UIBuilderPanel),

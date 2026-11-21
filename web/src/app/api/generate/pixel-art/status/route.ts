@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
-import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { PixelArtClient } from '@/lib/generate/pixelArtClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
-import { redactedJson, serviceDegraded } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
-import { withRetryGuidance } from '@/lib/generate/retryGuidance';
-import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
-import { JobOwnershipUnavailableError, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobOwnershipError';
 
 // Async status endpoint for pixel-art generation. The POST /generate/pixel-art
 // route returns status:'pending' + jobId=predictionId for the DEFAULT Replicate
@@ -23,7 +15,7 @@ import { JobOwnershipUnavailableError, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from 
 // branch here. The OpenAI pixel-art path returns inline base64 and is marked
 // 'completed' by the dialog, so the poll loop (which only polls pending/
 // processing jobs) never reaches this route for OpenAI.
-async function GET_impl(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     rateLimit: true,
@@ -31,41 +23,11 @@ async function GET_impl(request: NextRequest) {
   });
   if (mid.error) return mid.error;
 
-  // Per-panel tier gate, POLL variant (#7715): the panel POST /api/generate/pixel-art declares
-  // ('generate-pixel-art'), checked BEFORE any provider key is resolved. A poll reads
-  // a job already paid for, so a starter that has HELD tokens is judged at the
-  // trial access tier whatever its live balance, and a never-granted starter
-  // as a plain starter. Not a jobId ownership check — see
-  // `src/lib/api/panelTierGate.ts`.
-  const tierDenied = panelTierGateResponseForPoll('generate-pixel-art', mid.authContext!.user);
-  if (tierDenied) return tierDenied;
-
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get('jobId');
 
   if (!jobId) {
     return NextResponse.json({ error: 'Missing jobId parameter' }, { status: 400 });
-  }
-
-  // Ownership check (#10262): resolveApiKey below returns the PLATFORM key by
-  // default, so without this ANY signed-in caller admitted past the tier gate
-  // above could poll a job id they never created and read back another user's
-  // result. Checked BEFORE any provider key is resolved. See
-  // `src/lib/generate/jobOwnership.ts`.
-  let isOwner: boolean;
-  try {
-    isOwner = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.pixel_art, jobId);
-  } catch (err) {
-    // "Cannot verify" is not "not yours" (#10262): a lookup failure is the
-    // retryable 503 SERVICE_DEGRADED the poller keeps polling through, never
-    // the terminal 404 below (which refunds and stops the job).
-    if (err instanceof JobOwnershipUnavailableError) {
-      return serviceDegraded(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
-    }
-    throw err;
-  }
-  if (!isOwner) {
-    return NextResponse.json({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
   }
 
   // Poll Replicate for prediction status
@@ -75,12 +37,12 @@ async function GET_impl(request: NextRequest) {
       mid.userId!,
       DB_PROVIDER.pixel_art,
       0,
-      STATUS_CHECK_OPERATION
+      'status_check'
     );
     apiKey = resolved.key;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
     }
     throw err;
   }
@@ -116,20 +78,14 @@ async function GET_impl(request: NextRequest) {
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
       error: mappedStatus === 'failed'
-        ? withRetryGuidance(result.status === 'succeeded'
+        ? (result.status === 'succeeded'
             ? 'Pixel art generation produced no image'
             : 'Pixel art generation failed')
         : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/pixel-art/status', jobId });
-    // The provider's own text stays server-side: `lib/generate/*Client.ts`
-    // folds the upstream RESPONSE BODY into the thrown error, and on the
-    // platform path the credential in play is the platform's (#9736).
-    return redactedJson({ error: 'Could not read the Pixel Art generation status. Please try again.' }, { status: 500 });
+    const message = err instanceof Error ? err.message : 'Status check failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

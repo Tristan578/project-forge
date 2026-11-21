@@ -1,9 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { sceneCreateExecutor } from '../sceneCreateExecutor';
-import type { ExecutorContext, OrchestratorGDD } from '../../types';
-import { loadProjectScenes, saveProjectScenes, createInitialProject } from '@/lib/scenes/sceneManager';
-import { attachFixtureValidator } from '@/lib/scenes/__tests__/sceneFixture';
-import { setSceneValidator } from '@/lib/scenes/sceneValidation';
+import type { ExecutorContext } from '../../types';
+import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 
 /**
  * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
@@ -34,34 +32,6 @@ function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
 describe('sceneCreateExecutor', () => {
   beforeEach(() => {
     localStorage.clear();
-    attachFixtureValidator();
-  });
-
-  afterEach(() => {
-    setSceneValidator(null);
-    vi.unstubAllGlobals();
-  });
-
-  it('creates scenes only in the active project namespace', async () => {
-    const a = createInitialProject();
-    const b = createInitialProject();
-    a.scenes[0].name = 'Keep project A';
-    b.scenes[0].name = 'Keep project B';
-    saveProjectScenes(a, 'project-a');
-    saveProjectScenes(b, 'project-b');
-    const aBefore = JSON.stringify(loadProjectScenes('project-a'));
-    const ctx = makeCtx({ store: {
-      projectId: 'project-b', setScenes: vi.fn(), newScene: vi.fn(), sceneGraph: { nodes: {} },
-    } });
-
-    const result = await sceneCreateExecutor.execute({ name: 'New B scene' }, ctx);
-
-    expect(result.success).toBe(true);
-    expect(JSON.stringify(loadProjectScenes('project-a'))).toBe(aBefore);
-    const updated = loadProjectScenes('project-b');
-    expect(updated.scenes.map((scene) => scene.name)).toEqual(['Keep project B', 'New B scene']);
-    expect(updated.activeSceneId).toBe(updated.scenes[1].id);
-    expect(updated.scenes[1].data?.metadata?.name).toBe('New B scene');
   });
 
   it('has correct name', () => {
@@ -104,31 +74,6 @@ describe('sceneCreateExecutor', () => {
 
     expect(ctx.getStore().newScene).toHaveBeenCalled();
     expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
-  });
-
-  // #9998: the brief's completion mode becomes the scene's native, editable
-  // `SceneGraph.completionMode`. It rides on `newScene` because the
-  // SCENE_LOADED that command emits is the boundary that sets the incoming
-  // scene's mode — written any earlier, that same event would wipe it.
-  it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
-    'opens the new scene in the brief\'s %s mode',
-    async (mode) => {
-      const ctx = makeCtx({ gdd: { completionMode: mode } as OrchestratorGDD });
-      await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
-
-      expect(ctx.getStore().newScene).toHaveBeenCalledWith({ completionMode: mode });
-    },
-  );
-
-  it('opens a legacy win scene when the brief declares no mode, rather than keeping the previous one', async () => {
-    const withoutMode = makeCtx({ gdd: {} as OrchestratorGDD });
-    await sceneCreateExecutor.execute({ name: 'Cave Level' }, withoutMode);
-    expect(withoutMode.getStore().newScene).toHaveBeenCalledWith({ completionMode: undefined });
-
-    // A context built before `gdd` existed (every older caller) behaves the same.
-    const withoutGdd = makeCtx();
-    await sceneCreateExecutor.execute({ name: 'Cave Level' }, withoutGdd);
-    expect(withoutGdd.getStore().newScene).toHaveBeenCalledWith({ completionMode: undefined });
   });
 
   // PF-1138. `worldType`/`worldConfig` used to be accepted by this schema and
@@ -225,23 +170,6 @@ describe('sceneCreateExecutor', () => {
     expect(result.success).toBe(true);
 
     vi.unstubAllGlobals();
-  });
-
-  // #10056: `newScene()` was made boolean precisely so a refused new scene
-  // cannot be reported as success, but this executor discarded the result and
-  // returned `successResult` regardless — so the pipeline reported a created
-  // scene the engine never emptied, and every later step stacked the generated
-  // game on top of the starter Ground/Player/Sun.
-  it('fails the step when the engine refuses to clear the starter scene', async () => {
-    const ctx = makeCtx({ store: {
-      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), sceneGraph: { nodes: {} },
-    } });
-
-    const result = await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
-
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('COMMAND_FAILED');
-    expect(ctx.getStore().newScene).toHaveBeenCalled();
   });
 
   it('aborts before touching persisted scenes', async () => {

@@ -79,7 +79,7 @@ pub fn setup_scene(
         LightData::directional(),
         DirectionalLight {
             illuminance: 10_000.0,
-            shadow_maps_enabled: true,
+            shadows_enabled: true,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, 0.5, 0.0)),

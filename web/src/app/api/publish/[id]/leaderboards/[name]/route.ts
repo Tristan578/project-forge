@@ -5,8 +5,6 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const patchLeaderboardSchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional(),
@@ -34,7 +32,7 @@ async function findBoard(gameId: string, boardName: string) {
 }
 
 // PATCH /api/publish/[id]/leaderboards/[name] — update leaderboard config
-async function PATCH_impl(
+export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; name: string }> }
 ) {
@@ -104,12 +102,12 @@ async function PATCH_impl(
     return NextResponse.json({ success: true, updated: Object.keys(updates) });
   } catch (err) {
     captureException(err, { route: '/api/publish/[id]/leaderboards/[name]', method: 'PATCH' });
-    return redactedJson({ error: 'Failed to update leaderboard' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to update leaderboard' }, { status: 500 });
   }
 }
 
 // DELETE /api/publish/[id]/leaderboards/[name] — delete leaderboard and all entries
-async function DELETE_impl(
+export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; name: string }> }
 ) {
@@ -145,11 +143,6 @@ async function DELETE_impl(
     return NextResponse.json({ success: true });
   } catch (err) {
     captureException(err, { route: '/api/publish/[id]/leaderboards/[name]', method: 'DELETE' });
-    return redactedJson({ error: 'Failed to delete leaderboard' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to delete leaderboard' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const PATCH = withEgressGuard(PATCH_impl);
-export const DELETE = withEgressGuard(DELETE_impl);

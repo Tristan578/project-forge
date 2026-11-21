@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildTemplateSceneFile, toEngineEntityType } from '../templateSceneFile';
 import { TEMPLATE_REGISTRY } from '@/data/templates';
-import type { GameTemplate, EntitySnapshotData, EngineActionDef } from '@/data/templates';
+import type { GameTemplate, EntitySnapshotData } from '@/data/templates';
 
 /** Fields `EntitySnapshot` declares WITHOUT `#[serde(default)]` — all mandatory. */
 const REQUIRED_SNAPSHOT_FIELDS = [
@@ -120,66 +120,11 @@ describe('buildTemplateSceneFile', () => {
     expect(JSON.parse(sceneJson).entities[0].name).toBe('Entity One');
   });
 
-  /**
-   * A TEMPLATE THAT SAYS NOTHING ABOUT INPUT MUST NOT SILENCE THE KEYBOARD.
-   *
-   * This used to assert `{ actions: {}, preset: null }`, because `InputMap` had
-   * no serde default and a template's `inputBindings: {}` failed the whole
-   * file. That workaround had a cost nobody priced: `load_scene` assigns the
-   * file's map straight onto the `InputMap` resource, so every template was
-   * loaded into a scene where NO KEY DID ANYTHING — and a genre preset was then
-   * applied on top, which is how "pick a genre" became the only route to having
-   * input at all.
-   *
-   * `SceneFile.input_bindings` takes `#[serde(default)]` now and
-   * `InputMap::default()` is a working keyboard, so the right emission for a
-   * template with no opinion is to OMIT the key. An empty map is not neutral —
-   * it is a deliberate statement that nothing is bound (#9764).
-   */
-  it('omits inputBindings when the template declares none, so the defaults apply', () => {
+  it('emits inputBindings as an InputMap, not the template empty object', () => {
+    // `InputMap` declares `actions` and `preset` with no serde default, so the
+    // template's `inputBindings: {}` fails the ENTIRE file, not just this key.
     const { sceneJson } = buildTemplateSceneFile(makeTemplate([makeEntity()]));
-    expect('inputBindings' in JSON.parse(sceneJson)).toBe(false);
-  });
-
-  // These two fixtures used the EDITOR STORE's spelling (`actionName`,
-  // `actionType: 'digital'`, `sources: ['KeyG']`). `buildInputBindings` takes
-  // `unknown` and passes anything through, so they passed — while pinning a
-  // shape `load_scene` cannot deserialise, which is the wrong contract stated
-  // with the same confidence as the right one. Rewritten in the engine's
-  // `ActionDef` shape, which is what a template actually has to emit.
-  it('passes through the actions a template declares', () => {
-    const template = makeTemplate([makeEntity()]);
-    template.sceneData.inputBindings = {
-      grapple: {
-        name: 'grapple',
-        actionType: { type: 'Digital' },
-        sources: [{ type: 'Key', value: 'KeyG' }],
-      },
-    };
-
-    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
-    expect(parsed.inputBindings.actions.grapple).toEqual({
-      name: 'grapple',
-      actionType: { type: 'Digital' },
-      sources: [{ type: 'Key', value: 'KeyG' }],
-    });
-  });
-
-  it('accepts a template that already writes the full InputMap shape', () => {
-    const template = makeTemplate([makeEntity()]);
-    template.sceneData.inputBindings = {
-      actions: {
-        p2_attack: {
-          name: 'p2_attack',
-          actionType: { type: 'Digital' },
-          sources: [{ type: 'Key', value: 'Enter' }],
-        },
-      },
-      preset: null,
-    } as unknown as Record<string, EngineActionDef>;
-
-    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
-    expect(Object.keys(parsed.inputBindings.actions)).toEqual(['p2_attack']);
+    expect(JSON.parse(sceneJson).inputBindings).toEqual({ actions: {}, preset: null });
   });
 
   it('splits physics into physicsData and physicsEnabled and fills every field', () => {

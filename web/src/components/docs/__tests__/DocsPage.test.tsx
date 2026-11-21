@@ -45,10 +45,6 @@ const setupContent = [
   'Some `inline code` snippet.',
   'An external [link](https://example.com) reference.',
   'A local [link](/docs/other) reference.',
-  '  [Standalone paragraph](/docs/standalone)  ',
-  '- [Command Reference](../reference/commands.md)',
-  '3. [External resource](https://example.com/resource)',
-  '[First reference](/docs/first) | [Second reference](/docs/second)',
   '',
   '- bullet one',
   '- bullet two',
@@ -163,46 +159,6 @@ describe('DocsPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([
-    { name: 'bold and code before a link', markdown: 'Use **bold** and `code` before [the guide](/docs/guide).', text: 'Use bold and code before the guide.', tokens: ['strong:bold', 'code:code', 'a:the guide'], links: ['/docs/guide'] },
-    { name: 'bold and code after a link', markdown: 'Read [the guide](/docs/guide), then **bold** and `code`.', text: 'Read the guide, then bold and code.', tokens: ['a:the guide', 'strong:bold', 'code:code'], links: ['/docs/guide'] },
-    { name: 'repeated tokens and multiple links', markdown: '`first` and **second** [alpha](/docs/a), then `third` [beta](https://example.com/b).', text: 'first and second alpha, then third beta.', tokens: ['code:first', 'strong:second', 'a:alpha', 'code:third', 'a:beta'], links: ['/docs/a', 'https://example.com/b'] },
-    { name: 'link-shaped text inside literal code', markdown: '`[not a link](https://example.com/code)` then [real](/docs/real).', text: '[not a link](https://example.com/code) then real.', tokens: ['code:[not a link](https://example.com/code)', 'a:real'], links: ['/docs/real'] },
-    { name: 'consecutive tokens of the same type', markdown: '**one** **two** `three` [four](/docs/four).', text: 'one two three four.', tokens: ['strong:one', 'strong:two', 'code:three', 'a:four'], links: ['/docs/four'] },
-    { name: 'links nested in bold prose', markdown: '**Read [guide](/docs/guide) to begin**.', text: 'Read guide to begin.', tokens: ['strong:Read guide to begin', 'a:guide'], links: ['/docs/guide'] },
-    { name: 'code and links nested in bold prose', markdown: '**Use `npm install` then [guide](/docs/guide)**.', text: 'Use npm install then guide.', tokens: ['strong:Use npm install then guide', 'code:npm install', 'a:guide'], links: ['/docs/guide'] },
-    { name: 'bold link followed by surrounding prose', markdown: '**[guide](/docs/guide)** to begin.', text: 'guide to begin.', tokens: ['strong:guide', 'a:guide'], links: ['/docs/guide'] },
-    { name: 'standalone link nested in bold', markdown: '**[guide](/docs/guide)**', text: 'guide', tokens: ['strong:guide', 'a:guide'], links: ['/docs/guide'] },
-    { name: 'unclosed syntax and escaped literal HTML', markdown: 'Literal <img src=x onerror=boom> and unclosed `code plus **bold.', text: 'Literal <img src=x onerror=boom> and unclosed `code plus **bold.', tokens: [], links: [] },
-  ])('renders mixed inline Markdown in source order: $name (PF-390)', async (fixture) => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        docs: docs.map((doc) => doc.path === 'getting-started/setup'
-          ? { ...doc, content: fixture.markdown, sections: [] } : doc),
-        meta: {},
-      }),
-    });
-    const { container } = render(<DocsPage />);
-    await waitFor(() => expect(screen.queryByText('Loading documentation...')).not.toBeInTheDocument());
-    fireEvent.click(within(getNav()).getByText('Setup Guide'));
-    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
-    const paragraph = pane.querySelector('p') as HTMLParagraphElement;
-    expect(paragraph).not.toBeNull();
-    expect(paragraph.textContent).toBe(fixture.text);
-    expect(Array.from(paragraph.querySelectorAll('strong, code, a'))
-      .map((node) => node.tagName.toLowerCase() + ':' + node.textContent)).toEqual(fixture.tokens);
-    const links = Array.from(paragraph.querySelectorAll('a'));
-    expect(links.map((link) => link.getAttribute('href'))).toEqual(fixture.links);
-    for (const link of links) {
-      const external = link.getAttribute('href')?.startsWith('http');
-      expect(link.getAttribute('target')).toBe(external ? '_blank' : null);
-      expect(link.getAttribute('rel')).toBe(external ? 'noopener noreferrer' : null);
-    }
-    expect(paragraph.querySelector('img')).toBeNull();
-  });
-
   it('shows a loading state before the docs index resolves', () => {
     mockFetch.mockReturnValue(new Promise(() => {})); // never resolves
     render(<DocsPage />);
@@ -226,7 +182,7 @@ describe('DocsPage', () => {
 
   it('renders the docs home with a quick-start link and category grid', async () => {
     const { container } = await renderLoaded();
-    const pane = within(container.querySelector('[aria-label="Documentation content"]') as HTMLElement);
+    const pane = within(container.querySelector('.min-w-0.flex-1') as HTMLElement);
 
     // Quick-start button, from the "index" doc.
     expect(pane.getByText('Welcome to SpawnForge')).toBeInTheDocument();
@@ -272,12 +228,9 @@ describe('DocsPage', () => {
 
     // "features" starts expanded by default.
     expect(within(nav).getByText('Feature Beta')).toBeInTheDocument();
-    expect(within(nav).getByRole('button', { name: /Features/ })).toHaveAttribute('aria-expanded', 'true');
-    expect(within(nav).getByRole('textbox', { name: 'Search documentation' })).toHaveClass('focus-visible:ring-2', 'min-h-[44px]');
 
     fireEvent.click(within(nav).getByRole('button', { name: /Features/ }));
     expect(within(nav).queryByText('Feature Beta')).not.toBeInTheDocument();
-    expect(within(nav).getByRole('button', { name: /Features/ })).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(within(nav).getByRole('button', { name: /Features/ }));
     expect(within(nav).getByText('Feature Beta')).toBeInTheDocument();
@@ -288,10 +241,8 @@ describe('DocsPage', () => {
     const nav = getNav();
 
     fireEvent.click(within(nav).getByText('Setup Guide'));
-    expect(within(nav).getByRole('button', { name: 'Setup Guide' })).toHaveAttribute('aria-current', 'page');
-    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
 
-    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
+    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
     const content = within(pane);
 
     // Breadcrumb: category label + doc title.
@@ -302,7 +253,6 @@ describe('DocsPage', () => {
     const hrefs = Array.from(toc).map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('#setup-guide');
     expect(hrefs).toContain('#installation');
-    for (const link of toc) expect(link).toHaveClass('min-h-[44px]');
 
     // Headers get slugified ids.
     expect(pane.querySelector('h1#setup-guide')?.textContent).toBe('Setup Guide');
@@ -317,8 +267,6 @@ describe('DocsPage', () => {
     expect(externalLink.textContent).toBe('link');
     expect(externalLink.target).toBe('_blank');
     expect(externalLink.rel).toBe('noopener noreferrer');
-    expect(externalLink).toHaveClass('inline', 'focus-visible:ring-2');
-    expect(externalLink).not.toHaveClass('inline-flex', 'min-h-[44px]');
 
     const localLink = pane.querySelector('a[href="/docs/other"]') as HTMLAnchorElement;
     expect(localLink.textContent).toBe('link');
@@ -344,40 +292,23 @@ describe('DocsPage', () => {
     expect(content.getByText('Final paragraph.')).toBeInTheDocument();
   });
 
-  it('keeps bare paragraph and list links as standalone controls while sentence links stay inline', async () => {
-    const { container } = await renderLoaded();
-    fireEvent.click(within(getNav()).getByText('Setup Guide'));
-    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
-    for (const href of ['/docs/standalone', '../reference/commands.md', 'https://example.com/resource', '/docs/first', '/docs/second']) {
-      const link = pane.querySelector(`a[href="${href}"]`) as HTMLAnchorElement;
-      expect(link).toHaveClass('inline-flex', 'min-h-[44px]', 'min-w-[44px]', 'focus-visible:ring-2');
-    }
-    const external = pane.querySelector('a[href="https://example.com/resource"]') as HTMLAnchorElement;
-    expect(external).toHaveAttribute('target', '_blank');
-    expect(external).toHaveAttribute('rel', 'noopener noreferrer');
-    const sentenceLink = pane.querySelector('a[href="https://example.com"]') as HTMLAnchorElement;
-    expect(sentenceLink).toHaveClass('inline');
-    expect(sentenceLink).not.toHaveClass('inline-flex', 'min-h-[44px]');
-  });
-
   it('returns to docs home via the breadcrumb back button', async () => {
     const { container } = await renderLoaded();
     const nav = getNav();
 
     fireEvent.click(within(nav).getByText('Setup Guide'));
-    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
+    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
     expect(within(pane).getByText('Getting Started')).toBeInTheDocument();
 
     fireEvent.click(within(pane).getByTitle('Back to docs home'));
 
     expect(mockRouterReplace).toHaveBeenCalledWith('/docs', { scroll: false });
-    expect(nav.querySelector('[aria-current]')).toBeNull();
     expect(within(pane).getByText('Welcome to SpawnForge')).toBeInTheDocument();
   });
 
   it('syncs activePath when the "path" search param changes after mount', async () => {
     const { container, rerender } = await renderLoaded();
-    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
+    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
 
     // No doc active yet — docs home is showing.
     expect(within(pane).getByText('Welcome to SpawnForge')).toBeInTheDocument();
@@ -386,23 +317,5 @@ describe('DocsPage', () => {
     rerender(<DocsPage />);
 
     expect(within(pane).getByText('Feature Alpha')).toBeInTheDocument();
-    expect(within(getNav()).getByRole('button', { name: 'Feature Alpha' })).toHaveAttribute('aria-current', 'page');
-    expect(within(getNav()).getByRole('button', { name: 'Setup Guide' })).not.toHaveAttribute('aria-current');
-    currentPathParam = 'features/b';
-    rerender(<DocsPage />);
-    expect(within(getNav()).getByRole('button', { name: 'Feature Beta' })).toHaveAttribute('aria-current', 'page');
-    expect(within(getNav()).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
-    currentPathParam = null;
-    rerender(<DocsPage />);
-    expect(getNav().querySelector('[aria-current]')).toBeNull();
-  });
-  it('moves the selected marker when another navigation item is clicked', async () => {
-    await renderLoaded();
-    const nav = getNav();
-    fireEvent.click(within(nav).getByRole('button', { name: 'Feature Alpha' }));
-    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).toHaveAttribute('aria-current', 'page');
-    fireEvent.click(within(nav).getByRole('button', { name: 'Feature Beta' }));
-    expect(within(nav).getByRole('button', { name: 'Feature Beta' })).toHaveAttribute('aria-current', 'page');
-    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
   });
 });

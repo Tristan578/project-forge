@@ -58,9 +58,9 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 
 | Library | Changelog Source | Current Version |
 |---------|-----------------|-----------------|
-| Bevy | https://github.com/bevyengine/bevy/releases | 0.19.1 |
+| Bevy | https://github.com/bevyengine/bevy/releases | 0.18.1 |
 | wasm-bindgen | https://github.com/rustwasm/wasm-bindgen/releases | =0.2.127 (pinned) |
-| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.35 |
+| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.34 |
 
 ## Procedure
 
@@ -77,17 +77,10 @@ Fetch the top releases for Tier 1 and Tier 2 systems. Only check Tier 3/4 when t
 
 Read the actual installed versions:
 
-Both commands `cd` to the repo root themselves rather than carrying a comment
-telling you to. The shell's working directory persists between steps, and this
-repo's own instructions are full of `cd web && …`, so "run from the repo root"
-is a precondition the next reader silently violates — and the failure then reads
-as a broken checkout rather than a wrong directory.
-
 ```bash
 # JavaScript dependencies
-cd "$(git rev-parse --show-toplevel)"
 node -e "
-const pkg = require('./web/package.json');
+const pkg = require('/Users/tristannolan/project-forge/web/package.json');
 const deps = {...pkg.dependencies, ...pkg.devDependencies};
 const tracked = ['next','@clerk/nextjs','stripe','@sentry/nextjs','posthog-js',
   '@upstash/redis','@neondatabase/serverless','drizzle-orm','ai','@ai-sdk/react',
@@ -95,20 +88,8 @@ const tracked = ['next','@clerk/nextjs','stripe','@sentry/nextjs','posthog-js',
 tracked.forEach(d => deps[d] && console.log(d + ': ' + deps[d]));
 "
 
-# Rust dependencies. Bevy and Rapier are declared as [dependencies.<name>]
-# TABLES, not top-level keys, so an anchored `^(bevy|bevy_rapier)` matched
-# neither — this step reported only wasm-bindgen while claiming to read "the
-# actual installed versions", and Bevy is the skill's own Tier 1 system.
-# Match both spellings and print the version line that follows a table header.
-cd "$(git rev-parse --show-toplevel)"
-awk '
-  /^(bevy|bevy_rapier[23]d|wasm-bindgen)[[:space:]]*=/ { print; next }
-  /^\[dependencies\.(bevy|bevy_rapier[23]d|wasm-bindgen)\]$/ {
-    name = $0; sub(/^\[dependencies\./, "", name); sub(/\]$/, "", name); pending = name; next
-  }
-  pending && /^version[[:space:]]*=/ { print pending " " $0; pending = ""; next }
-  /^\[/ { pending = "" }
-' engine/Cargo.toml
+# Rust dependencies
+grep -E '^(bevy|bevy_rapier|wasm-bindgen)\s' /Users/tristannolan/project-forge/engine/Cargo.toml
 ```
 
 ### Step 3: Generate Report
@@ -205,4 +186,4 @@ GitHub is a primary dependency (CI/CD, issue tracking, PR workflows, CLI). Check
 
 ## References
 
-- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.6.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.19, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency
+- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.6.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency

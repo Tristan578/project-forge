@@ -3,10 +3,8 @@
  */
 
 import { StateCreator } from 'zustand';
-import type { CommandResponse } from '@/hooks/useEngine';
 import { buildSetSpriteDataPayload } from '@/lib/sprite/sprite2dPayload';
-import type { ProjectType, SpriteData, Camera2dData, SortingLayerData, Grid2dSettings, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData, CollisionShape } from './types';
-import { applyCollisionShapeToLayers } from '@/lib/tilemap/collisionShapes';
+import type { ProjectType, SpriteData, Camera2dData, SortingLayerData, Grid2dSettings, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData } from './types';
 
 export interface SpriteSlice {
   projectType: ProjectType;
@@ -52,18 +50,6 @@ export interface SpriteSlice {
   removeTileset: (assetId: string) => void;
   setTilemapData: (entityId: string, data: TilemapData) => void;
   /**
-   * Request an authored shape change. The mirror updates only when the engine
-   * emits TILEMAP_CHANGED.
-   * @param entityId Existing mirrored tilemap entity.
-   * @param layerIndex Zero-based integer layer index.
-   * @param x Zero-based integer tile column.
-   * @param y Zero-based integer tile row.
-   * @param shape Supported stored silhouette; this does not enable runtime physics.
-   * @returns 'queued' when the engine acknowledges the request, before application.
-   * @throws If the target or shape is invalid, or the engine is unavailable or rejects the request.
-   */
-  setTileCollisionShape: (entityId: string, layerIndex: number, x: number, y: number, shape: CollisionShape) => 'queued';
-  /**
    * State-only mirror of what the engine reports. `null` means the entity has
    * no tilemap (the engine's `Option<&TilemapData>` is `None`), so the entry is
    * dropped rather than written as an empty map. Both dispatching siblings
@@ -79,19 +65,9 @@ export interface SpriteSlice {
   setTilemapActiveLayerIndex: (index: number | null) => void;
 }
 
-type SpriteDispatcher = (command: string, payload: unknown) => CommandResponse | void;
-let dispatchCommand: SpriteDispatcher | null = null;
+let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
 
-/**
- * Connect sprite actions to the engine transport, or detach it during teardown.
- * @param dispatcher Command transport, or null when the engine is unavailable.
- * Every dispatched action, collision-shape edits included, treats an explicit
- * `success: false` as the only rejection and a void/undefined response as
- * accepted — consistent with editorStore.ts's dispatcher contract and the
- * `setTileCollisionShape` implementation below. Only engine events confirm edits.
- * @returns Nothing; replaces the active transport for this slice.
- */
-export function setSpriteDispatcher(dispatcher: SpriteDispatcher | null): void {
+export function setSpriteDispatcher(dispatcher: (command: string, payload: unknown) => void): void {
   dispatchCommand = dispatcher;
 }
 
@@ -215,25 +191,6 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
   setTilemapData: (entityId, data) => {
     set(state => ({ tilemaps: { ...state.tilemaps, [entityId]: data } }));
     if (dispatchCommand) dispatchCommand('set_tilemap_data', { entityId, ...data });
-  },
-  setTileCollisionShape: (entityId, layerIndex, x, y, shape) => {
-    const tilemaps = get().tilemaps;
-    const tilemap = Object.hasOwn(tilemaps, entityId) ? tilemaps[entityId] : undefined;
-    if (!tilemap) throw new Error('No tilemap is available for this entity.');
-    const result = applyCollisionShapeToLayers(tilemap.layers, tilemap.mapSize, layerIndex, x, y, shape);
-    if (result.error) throw new Error(result.error);
-    // The engine decides no-ops against its current data. Comparing only the
-    // mirror here would lose the second of two edits queued before its update.
-    if (!dispatchCommand) throw new Error('The engine is not ready. Try again after it finishes loading.');
-    const response = dispatchCommand('set_tile_collision_shape', { entityId, layer: layerIndex, x, y, shape });
-    // Only an explicit `success: false` is a rejection — see the dispatcher
-    // contract documented in editorStore.ts. `undefined`/`void` (every test
-    // double, and any dispatcher that doesn't report per-command status) must
-    // not be treated as a failure.
-    if (response?.success === false) {
-      throw new Error(response.error ?? 'The engine did not accept the shape change. Please try again.');
-    }
-    return 'queued';
   },
   applyTilemapFromEngine: (entityId, data) => {
     set(state => {

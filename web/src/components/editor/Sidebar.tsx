@@ -1,6 +1,6 @@
 'use client';
 
-import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge, Sparkles, Music } from 'lucide-react';
+import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -36,12 +36,7 @@ function ToolButton({ icon, active, onClick, title }: ToolButtonProps) {
 }
 
 export function Sidebar() {
-  // Store-held, not local: the generation dialogs' unavailable notice opens
-  // Settings on the `keys` tab from inside the editor, instead of navigating
-  // away and tearing down the WASM session (#9725 p8).
-  const settingsTab = useWorkspaceStore((s) => s.settingsTab);
-  const openSettings = useWorkspaceStore((s) => s.openSettings);
-  const closeSettings = useWorkspaceStore((s) => s.closeSettings);
+  const [showSettings, setShowSettings] = useState(false);
   const [showComplexity, setShowComplexity] = useState(false);
   const gizmoMode = useEditorStore((s) => s.gizmoMode);
   const setGizmoMode = useEditorStore((s) => s.setGizmoMode);
@@ -292,13 +287,6 @@ export function Sidebar() {
         title="Audio Mixer"
       />
 
-      {/* Music Arrangement toggle */}
-      <ToolButton
-        icon={<Music size={20} />}
-        onClick={() => openPanel('music-arrangement')}
-        title="Music Arrangement"
-      />
-
       {/* AI Chat toggle */}
       <ToolButton
         icon={<MessageSquare size={20} />}
@@ -330,10 +318,10 @@ export function Sidebar() {
       {/* Settings */}
       <ToolButton
         icon={<Settings size={20} />}
-        onClick={() => openSettings('tokens')}
+        onClick={() => setShowSettings(true)}
         title="Settings"
       />
-      {settingsTab && <SettingsPanel initialTab={settingsTab} onClose={closeSettings} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </aside>
   );
 }

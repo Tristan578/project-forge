@@ -7,7 +7,6 @@ import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
 import { getStripe } from '@/lib/billing/stripe-client';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const purchaseSchema = z.object({
   package: z.enum(['spark', 'blaze', 'inferno']),
@@ -19,7 +18,7 @@ const PACKAGE_PRICE_IDS: Record<string, string | undefined> = {
   inferno: process.env.STRIPE_PRICE_TOKEN_INFERNO,
 };
 
-async function POST_impl(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -74,7 +73,3 @@ async function POST_impl(req: NextRequest) {
     return internalError('Failed to create checkout session');
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

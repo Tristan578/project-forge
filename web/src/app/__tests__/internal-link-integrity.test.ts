@@ -61,7 +61,6 @@ describe('internal link integrity (web)', () => {
     expect(seen.map((l) => l.raw).sort()).toEqual([
       '/settings?tab=billing',
       '/settings?tab=keys',
-      '/settings?tab=tokens',
     ]);
   });
 

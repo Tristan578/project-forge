@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useId } from 'react';
+import { useCallback } from 'react';
 import { useEditorStore, type LightData } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear, radToDeg, degToRad } from '@/lib/colorUtils';
@@ -9,10 +9,6 @@ export function LightInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryLight = useEditorStore((s) => s.primaryLight);
   const updateLight = useEditorStore((s) => s.updateLight);
-  // useId, not literal ids: the inspector can mount more than once, and a
-  // repeated id sends the second <label for> to the first panel's control.
-  const baseId = useId();
-  const fieldId = (key: string) => `${baseId}-${key}`;
 
   const handleUpdate = useCallback(
     (partial: Partial<LightData>) => {
@@ -53,9 +49,8 @@ export function LightInspector() {
       <div className="space-y-3">
         {/* Color */}
         <div className="flex items-center gap-2">
-          <label htmlFor={fieldId('color')} className="w-20 shrink-0 text-xs text-zinc-400">Color</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Color</label>
           <input
-            id={fieldId('color')}
             type="color"
             value={colorHex}
             onChange={(e) => {
@@ -69,9 +64,8 @@ export function LightInspector() {
 
         {/* Intensity */}
         <div className="flex items-center gap-2">
-          <label htmlFor={fieldId('intensity')} className="w-20 shrink-0 text-xs text-zinc-400">{intensityLabel}<InfoTooltip term="intensity" /></label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">{intensityLabel}<InfoTooltip term="intensity" /></label>
           <input
-            id={fieldId('intensity')}
             type="range"
             min={0}
             max={intensityMax}
@@ -91,9 +85,8 @@ export function LightInspector() {
         {/* Range (Point/Spot only) */}
         {!isDirectional && (
           <div className="flex items-center gap-2">
-            <label htmlFor={fieldId('range')} className="w-20 shrink-0 text-xs text-zinc-400">Range<InfoTooltip term="range" /></label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Range<InfoTooltip term="range" /></label>
             <input
-              id={fieldId('range')}
               type="range"
               min={1}
               max={100}
@@ -114,9 +107,8 @@ export function LightInspector() {
         {/* Radius (Point/Spot only) */}
         {!isDirectional && (
           <div className="flex items-center gap-2">
-            <label htmlFor={fieldId('radius')} className="w-20 shrink-0 text-xs text-zinc-400">Radius</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Radius</label>
             <input
-              id={fieldId('radius')}
               type="range"
               min={0}
               max={5}
@@ -138,9 +130,8 @@ export function LightInspector() {
         {isSpot && (
           <>
             <div className="flex items-center gap-2">
-              <label htmlFor={fieldId('inner-angle')} className="w-20 shrink-0 text-xs text-zinc-400">Inner Angle<InfoTooltip term="innerAngle" /></label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Inner Angle<InfoTooltip term="innerAngle" /></label>
               <input
-                id={fieldId('inner-angle')}
                 type="range"
                 min={0}
                 max={radToDeg(primaryLight.outerAngle)}
@@ -157,9 +148,8 @@ export function LightInspector() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor={fieldId('outer-angle')} className="w-20 shrink-0 text-xs text-zinc-400">Outer Angle<InfoTooltip term="outerAngle" /></label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Outer Angle<InfoTooltip term="outerAngle" /></label>
               <input
-                id={fieldId('outer-angle')}
                 type="range"
                 min={radToDeg(primaryLight.innerAngle)}
                 max={89}
@@ -180,9 +170,8 @@ export function LightInspector() {
 
         {/* Shadows */}
         <div className="flex items-center gap-2">
-          <label htmlFor={fieldId('shadows')} className="w-20 shrink-0 text-xs text-zinc-400">Shadows</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Shadows</label>
           <input
-            id={fieldId('shadows')}
             type="checkbox"
             checked={primaryLight.shadowsEnabled}
             onChange={(e) => handleUpdate({ shadowsEnabled: e.target.checked })}
@@ -195,9 +184,8 @@ export function LightInspector() {
         {primaryLight.shadowsEnabled && (
           <>
             <div className="flex items-center gap-2">
-              <label htmlFor={fieldId('depth-bias')} className="w-20 shrink-0 text-xs text-zinc-400">Depth Bias<InfoTooltip term="shadowDepthBias" /></label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Depth Bias<InfoTooltip term="shadowDepthBias" /></label>
               <input
-                id={fieldId('depth-bias')}
                 type="range"
                 min={0}
                 max={1}
@@ -214,9 +202,8 @@ export function LightInspector() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor={fieldId('normal-bias')} className="w-20 shrink-0 text-xs text-zinc-400">Normal Bias<InfoTooltip term="shadowNormalBias" /></label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Normal Bias<InfoTooltip term="shadowNormalBias" /></label>
               <input
-                id={fieldId('normal-bias')}
                 type="range"
                 min={0}
                 max={10}

@@ -1,21 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
-import { eq, and, inArray, desc, sql, or } from 'drizzle-orm';
-import { isQstashConfigured } from '@/lib/qstash/client';
+import { eq, and, inArray, desc } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson, serviceDegraded } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
-import { findProviderJobOwnerId } from '@/lib/generate/jobOwnership';
-import {
-  JobOwnershipUnavailableError,
-  JOB_OWNERSHIP_UNAVAILABLE_MESSAGE,
-} from '@/lib/generate/jobOwnershipError';
-import { asyncCapabilityForType } from '@/lib/generate/asyncTypeCapability';
-import { DB_PROVIDER } from '@/lib/config/providers';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,32 +14,13 @@ const createJobSchema = z.object({
   type: z.enum(['sprite', 'texture', 'model', 'sfx', 'voice', 'skybox', 'music', 'sprite_sheet', 'tileset']),
   prompt: z.string().min(1).max(2000),
   parameters: z.record(z.string(), z.unknown()).optional(),
-  resultUrl: generationResultUrlSchema.optional(),
   tokenCost: z.number().int().min(0).optional(),
   tokenUsageId: z.string().max(100).nullish(),
   entityId: z.string().max(100).nullish(),
 });
 
-/**
- * POST: Persist an authenticated user's generation job after submission.
- * Requires providerJobId (1–200 chars), provider (1–100), supported type, and
- * prompt (1–2000; stored at most 500). Optional parameters store placement and
- * metadata; tokenCost defaults to 0, tokenUsageId/entityId may be null.
- * Optional resultUrl preserves an inline synchronous artifact: HTTP URL at
- * most 2000 chars or non-empty PNG data URL at most 4 MiB characters.
- * Returns HTTP 201 {job:{id}}; auth/rate/validation errors use middleware,
- * and persistence failures return a fixed 500 response.
- *
- * Ownership (#10262): a providerJobId already bound to ANOTHER account is
- * refused with 409, and an ownership lookup that itself fails is refused
- * with 503 SERVICE_DEGRADED (retryable) — never inserted. The provider for
- * that lookup is derived server-side from `type`, so the client-supplied
- * `provider` string cannot steer it. LIMITATION: the derivation covers only
- * the async types (`ASYNC_TYPE_TO_DB_CAPABILITY`); `sfx` and `voice` never
- * produce a pollable job, no binding is ever written for them, and a row
- * created under one of those types is NOT checked against the bindings.
- */
-async function POST_impl(req: NextRequest) {
+// POST: Create a job record (called by client after generation API returns)
+export async function POST(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -60,43 +30,8 @@ async function POST_impl(req: NextRequest) {
     });
     if (mid.error) return mid.error;
 
-    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId, resultUrl } =
+    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId } =
       mid.body as z.infer<typeof createJobSchema>;
-
-    // #10262: this row is CLIENT-reported (fire-and-forget, client-supplied
-    // providerJobId), so it is never the ownership record status routes trust
-    // — see `src/lib/generate/jobOwnership.ts`. But it must not let a caller
-    // plant a row that CLAIMS someone else's already-bound job id, which would
-    // otherwise surface a stranger's job in this caller's own `GET /api/jobs`
-    // list (their id, but bound provider/providerJobId belonging to another
-    // account). Bound-to-this-user and never-bound are both accepted.
-    //
-    // The lookup provider is derived SERVER-SIDE from `type`, never read from
-    // the body: the client's `provider` is display data (GenerateSpriteDialog
-    // sends 'sdxl' where the server bound 'replicate', so a body-keyed lookup
-    // never matched on sprite), and a caller could send any string to dodge
-    // the check. A type with no async capability (`sfx`, `voice`) never has a
-    // pollable job, so no binding is ever written for it and there is nothing
-    // to look up — a row planted under such a type only ever appears in the
-    // planter's own list, and the status routes' own ownership check keeps
-    // the underlying result unreadable to them.
-    const ownershipCapability = asyncCapabilityForType(type);
-    if (ownershipCapability) {
-      let existingOwnerId: string | null;
-      try {
-        existingOwnerId = await findProviderJobOwnerId(DB_PROVIDER[ownershipCapability], providerJobId);
-      } catch (err) {
-        // "Cannot verify" is a retryable 503, not a silent "unbound" and not
-        // the generic 500 below. The insert is skipped either way.
-        if (err instanceof JobOwnershipUnavailableError) {
-          return serviceDegraded(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
-        }
-        throw err;
-      }
-      if (existingOwnerId && existingOwnerId !== mid.userId) {
-        return redactedJson({ error: 'This job belongs to another account' }, { status: 409 });
-      }
-    }
 
     const [job] = await queryWithResilience(() =>
       getDb()
@@ -111,7 +46,6 @@ async function POST_impl(req: NextRequest) {
           tokenCost: tokenCost ?? 0,
           tokenUsageId: tokenUsageId ?? null,
           entityId: entityId ?? null,
-          resultUrl: resultUrl ?? null,
         })
         .returning()
     );
@@ -119,26 +53,15 @@ async function POST_impl(req: NextRequest) {
     return NextResponse.json({ job: { id: job.id } }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/jobs', method: 'POST' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to create job' },
       { status: 500 }
     );
   }
 }
 
-/**
- * GET: List up to 50 owned jobs, newest first. status=active selects pending,
- * processing and downloading, PLUS durable jobs the server-side callback has
- * already finished (completed/failed) but no client has reflected yet
- * (imported = 0) — see #8892. all or an absent status includes every state.
- * HTTP 200 {durableCompletionEnabled, jobs} retains HTTP resultUrl values, but
- * inline artifacts are excluded in SQL and represented by resultUrl:null,
- * hasInlineResult:true. Fetch each flagged artifact with GET /api/jobs/{id}
- * during recovery. durableCompletionEnabled is a boolean only (whether the
- * QStash callback path is configured), never a key value.
- * Authentication errors use middleware; query failures return fixed HTTP 500.
- */
-async function GET_impl(req: NextRequest) {
+// GET: Fetch user's active (in-progress) jobs for hydration on page load
+export async function GET(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -148,24 +71,9 @@ async function GET_impl(req: NextRequest) {
 
     let conditions;
     if (statusFilter === 'active') {
-      // DURABLE COMPLETION (#8892). The QStash callback finalizes a job's row
-      // with no tab open, so on the next load the job is already terminal and
-      // a live-states-only filter dropped it from the UI: the asset finished
-      // and simply vanished. `imported` is the signal — the live client sets
-      // it when IT resolves a job (PATCH in generationStore.updateJob); the
-      // webhook never touches it. Scoped to rows the client marked durable at
-      // creation, because a legacy job is only ever finalized by a live client
-      // and a failed legacy row legitimately keeps imported = 0 forever.
       conditions = and(
         eq(generationJobs.userId, mid.userId!),
-        or(
-          inArray(generationJobs.status, ['pending', 'processing', 'downloading']),
-          and(
-            inArray(generationJobs.status, ['completed', 'failed']),
-            eq(generationJobs.imported, 0),
-            sql`${generationJobs.parameters}->>'durable' = 'true'`,
-          ),
-        ),
+        inArray(generationJobs.status, ['pending', 'processing', 'downloading'])
       );
     } else if (statusFilter && statusFilter !== 'all') {
       conditions = and(
@@ -178,35 +86,14 @@ async function GET_impl(req: NextRequest) {
 
     const jobs = await queryWithResilience(() =>
       getDb()
-        .select({
-          id: generationJobs.id, providerJobId: generationJobs.providerJobId,
-          provider: generationJobs.provider, type: generationJobs.type,
-          prompt: generationJobs.prompt, parameters: generationJobs.parameters,
-          status: generationJobs.status, progress: generationJobs.progress,
-          errorMessage: generationJobs.errorMessage,
-          // Keep potentially multi-MB PNGs inside the database, not this list.
-          resultUrl: sql<string | null>`CASE WHEN ${generationJobs.resultUrl} LIKE 'data:%' THEN NULL ELSE ${generationJobs.resultUrl} END`,
-          hasInlineResult: sql<boolean>`COALESCE(${generationJobs.resultUrl} LIKE 'data:%', FALSE)`,
-          resultMeta: generationJobs.resultMeta, imported: generationJobs.imported,
-          tokenCost: generationJobs.tokenCost, tokenUsageId: generationJobs.tokenUsageId,
-          entityId: generationJobs.entityId, createdAt: generationJobs.createdAt,
-          updatedAt: generationJobs.updatedAt, completedAt: generationJobs.completedAt,
-        })
+        .select()
         .from(generationJobs)
         .where(conditions)
         .orderBy(desc(generationJobs.createdAt))
         .limit(50)
     );
 
-    // STORE-AND-FORWARD (#9736). `errorMessage` below is a persisted column,
-    // written by `webhooks/generation-complete` and by this route's own PATCH.
-    // Every value written today is a fixed string, but this is a channel the
-    // catch-path lint rule structurally CANNOT see: a route can satisfy that
-    // rule and still return caught-error text a different route wrote earlier,
-    // possibly months ago. Redacting on the way out is the only control that
-    // covers rows already in the table.
-    return redactedJson({
-      durableCompletionEnabled: isQstashConfigured(),
+    return NextResponse.json({
       jobs: jobs.map((j) => ({
         id: j.id,
         providerJobId: j.providerJobId,
@@ -217,10 +104,7 @@ async function GET_impl(req: NextRequest) {
         status: j.status,
         progress: j.progress,
         errorMessage: j.errorMessage,
-        // Inline artifacts are fetched individually; multiple PNGs would exceed
-        // the host response limit in this list (for example character poses).
-        resultUrl: j.resultUrl?.startsWith('data:') ? null : j.resultUrl,
-        hasInlineResult: j.hasInlineResult,
+        resultUrl: j.resultUrl,
         resultMeta: j.resultMeta,
         imported: j.imported === 1,
         tokenCost: j.tokenCost,
@@ -233,14 +117,9 @@ async function GET_impl(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/jobs', method: 'GET' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to fetch jobs' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);
-export const GET = withEgressGuard(GET_impl);

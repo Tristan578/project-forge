@@ -46,43 +46,10 @@ export const BYOK_PROVIDERS = [
   'meshy',
   'hyper3d',
   'elevenlabs',
+  'suno',
 ] as const;
 
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
-
-/**
- * Providers a user can no longer ADD a key for, but may still hold a stored key
- * for from before they were retired. They are rejected by the key-issuing path
- * (PUT `/api/keys/[provider]`) yet must stay REMOVABLE (DELETE) so a user can
- * clear a stale credential — see `ApiKeyManager`'s "no longer offered" row.
- *
- * Suno is the live case (#9522): its music capability moved to ElevenLabs and
- * it has no public API, so no new Suno key can be minted, but historical keys
- * must still be deletable.
- */
-export const RETIRED_BYOK_PROVIDERS = ['suno'] as const;
-
-export type RetiredByokProvider = (typeof RETIRED_BYOK_PROVIDERS)[number];
-
-/**
- * Providers the DELETE key path accepts: every currently-addable provider plus
- * every retired one. A stored key for any of these can be removed.
- */
-export const REMOVABLE_BYOK_PROVIDERS = [
-  ...BYOK_PROVIDERS,
-  ...RETIRED_BYOK_PROVIDERS,
-] as const;
-
-/**
- * Whether a user could add this provider's key themselves — the single
- * predicate behind "is /api/keys/[provider] going to accept it" and "does
- * ApiKeyManager render a field for it". `/api/capabilities` uses it to decide
- * whether a missing key is fixable in Settings before telling anyone to go
- * there; Replicate, OpenAI and remove.bg are not (#9725 p8).
- */
-export function isByokProvider(provider: string): provider is ByokProvider {
-  return (BYOK_PROVIDERS as readonly string[]).includes(provider);
-}
 
 // ---------------------------------------------------------------------------
 // Backend identifiers
@@ -134,7 +101,7 @@ export const DIRECT_CAPABILITY_PROVIDER: Record<ProviderCapability, ProviderName
   texture: 'meshy',
   sfx: 'elevenlabs',
   voice: 'elevenlabs',
-  music: 'elevenlabs',
+  music: 'suno',
   image: 'openai',
   sprite: 'replicate',
   bg_removal: 'removebg',
@@ -153,7 +120,6 @@ export const DIRECT_CAPABILITY_PROVIDER: Record<ProviderCapability, ProviderName
  * value (e.g. 'openrouter'), TypeScript will error here instead of
  * silently passing and crashing at runtime with a Postgres enum violation.
  */
-import { UNAVAILABLE_LINKED_PREFAB_COMMANDS } from '@/lib/prefabs/prefabAvailability';
 import type { Provider } from '@/lib/db/schema';
 
 type DbCapability = 'model3d' | 'texture' | 'sfx' | 'voice' | 'music' | 'sprite' | 'bg_removal' | 'image' | 'chat' | 'embedding' | 'pixel_art';
@@ -165,7 +131,7 @@ export const DB_PROVIDER: Record<DbCapability, Provider> = {
   texture: 'meshy',
   sfx: 'elevenlabs',
   voice: 'elevenlabs',
-  music: 'elevenlabs',
+  music: 'suno',
   image: 'openai',
   sprite: 'replicate',
   bg_removal: 'removebg',
@@ -200,15 +166,16 @@ export const BACKEND_TO_PROVIDER: Partial<Record<BackendId, ProviderName>> = {
  *
  * This lived in three places before PF-1054, and the copy in
  * `lib/monitoring/healthChecks.ts` had drifted to a set of names
- * (`MESHY_API_KEY`, `ELEVENLABS_API_KEY`) that nothing else in the tree reads
- * and no environment sets — so the public status page reported a permanent
- * "AI Assistant: outage" against a working install.
+ * (`MESHY_API_KEY`, `ELEVENLABS_API_KEY`, `SUNO_API_KEY`) that nothing else in
+ * the tree reads and no environment sets — so the public status page reported a
+ * permanent "AI Assistant: outage" against a working install.
  */
 export const PLATFORM_KEY_ENV = {
   anthropic: 'ANTHROPIC_API_KEY',
   meshy: 'PLATFORM_MESHY_KEY',
   hyper3d: 'PLATFORM_HYPER3D_KEY',
   elevenlabs: 'PLATFORM_ELEVENLABS_KEY',
+  suno: 'PLATFORM_SUNO_KEY',
   openai: 'PLATFORM_OPENAI_KEY',
   replicate: 'PLATFORM_REPLICATE_KEY',
   removebg: 'PLATFORM_REMOVEBG_KEY',
@@ -231,10 +198,8 @@ export function getPlatformKeyEnvVar(provider: string): string | null {
  * Where a human mints each provider's platform key. `null` means the provider
  * has NO self-serve console — its key cannot be obtained by anyone, so every
  * capability it serves must be declared in `UNAVAILABLE_CAPABILITIES` (pinned
- * by `capabilityAvailability.test.ts`, per #9522). Every current provider has a
- * console; the guard stays in place so the next unobtainable provider fails CI
- * instead of shipping. (Suno was the historical `null` case; #9522 moved its
- * `music` capability to ElevenLabs and dropped `PLATFORM_SUNO_KEY` entirely.)
+ * by `capabilityAvailability.test.ts`, per #9522). Suno is the live case: no
+ * public API as of 2026-08, so `PLATFORM_SUNO_KEY` can never exist.
  *
  * URLs were confirmed against each vendor's current documentation for #9117;
  * the OpenAI path is the standard console location (platform.openai.com
@@ -245,6 +210,7 @@ export const PLATFORM_KEY_CONSOLE_URL: Record<PlatformKeyProvider, string | null
   meshy: 'https://www.meshy.ai/settings/api',
   hyper3d: 'https://developer.hyper3d.ai/',
   elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
+  suno: null,
   openai: 'https://platform.openai.com/api-keys',
   replicate: 'https://replicate.com/account/api-tokens',
   removebg: 'https://www.remove.bg/dashboard#api-key',
@@ -279,53 +245,6 @@ export interface CapabilityUnavailability {
 export const GATEWAY_CAPABILITIES = ['chat', 'embedding', 'image'] as const satisfies readonly ProviderCapability[];
 
 /**
- * Whether the gateway backend advertises this capability. The backend and
- * verification script read GATEWAY_CAPABILITIES; the credential resolver reads
- * the narrower RESOLVER_GATEWAY_CAPABILITIES, which excludes chat. This
- * predicate does not select a transport or prove upstream generation.
- * @param capability Server-derived provider capability to inspect.
- * @returns True for an advertised gateway capability, including chat.
- */
-export function isGatewayRoutedCapability(capability: ProviderCapability): boolean {
-  return (GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
-}
-
-/**
- * The subset of `GATEWAY_CAPABILITIES` whose PLATFORM path resolves through the
- * Vercel AI Gateway with NO fallback to a direct provider key — the list the
- * resolver (`getPlatformKey`) forces onto `AI_GATEWAY_API_KEY`. Deliberately
- * NARROWER than `GATEWAY_CAPABILITIES`:
- *
- *   - `image` and `embedding` are gateway-ONLY on the platform path (#9523):
- *     the platform no longer resolves `PLATFORM_OPENAI_KEY` for them, so a
- *     missing gateway key must fail rather than silently route around it.
- *   - `chat` is gateway-SERVED but NOT gateway-only. It stays in
- *     `GATEWAY_CAPABILITIES` (the vercel-gateway backend and the verify script
- *     read that list, and the gateway is production's primary chat backend),
- *     yet the chat path also has direct/OpenRouter/GitHub-Models backends
- *     (`CHAT_BACKENDS`) and `/api/generate/{localize,pacing}` resolve the
- *     provider's own `ANTHROPIC_API_KEY`. Forcing `chat` onto the no-fallback
- *     gateway key 500'd every direct-Anthropic deployment — the exact shape
- *     `web/.env.example` ships — whenever `AI_GATEWAY_API_KEY` was unset
- *     (#10074), so it is excluded here.
- *
- * The availability gates (`isCapabilityConfigured`, `/api/capabilities`) read
- * the same routing through `CAPABILITY_ENV_VARS`, so an environment they grade
- * configured has the matching credential policy; transport success is unverified.
- */
-export const RESOLVER_GATEWAY_CAPABILITIES = ['embedding', 'image'] as const satisfies readonly ProviderCapability[];
-
-/**
- * Whether the resolver forces a capability's PLATFORM key onto
- * `AI_GATEWAY_API_KEY` with no fallback (see `RESOLVER_GATEWAY_CAPABILITIES`).
- * @param capability Server-derived provider capability to inspect.
- * @returns True for image or embedding; false for chat and direct capabilities.
- */
-export function isResolverGatewayCapability(capability: ProviderCapability): boolean {
-  return (RESOLVER_GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
-}
-
-/**
  * Capabilities that must be refused everywhere — `/api/capabilities`, the
  * generation dialogs, and `createGenerationHandler` — regardless of which
  * keys are set, because no key can make them work. Declared in code, not in
@@ -336,11 +255,11 @@ export function isResolverGatewayCapability(capability: ProviderCapability): boo
  * one real artifact has been generated through it (the #9117 done-when).
  */
 export const UNAVAILABLE_CAPABILITIES: Partial<Record<ProviderCapability, CapabilityUnavailability>> = {
-  // `music` was declared unavailable while it routed to Suno (no public API).
-  // #9522 moved it to ElevenLabs — the same provider that already serves `sfx`
-  // and `voice` — so it is offered again whenever PLATFORM_ELEVENLABS_KEY is
-  // set. The map is intentionally empty; the machinery around it stays wired so
-  // the next unprovisionable capability can be declared here in one line.
+  music: {
+    reason:
+      'Music generation is not available yet. Upload your own track from the Asset panel, or generate a sound effect instead.',
+    issue: 9522,
+  },
 };
 
 /** The unavailability record for a capability, or null when it is offered. */
@@ -349,27 +268,6 @@ export function getCapabilityUnavailability(
 ): CapabilityUnavailability | null {
   return UNAVAILABLE_CAPABILITIES[capability] ?? null;
 }
-
-/**
- * User-facing feature name per capability — the vocabulary the Settings
- * panel, `/api/capabilities`, `useFeatureGating` and the public status page
- * all share. Anything that names a capability to a person reads from here (the
- * hook derives its `FEATURE_LABELS` from this table) so they cannot drift
- * (#9727 review: the health probe was emitting raw ids like `model3d` into the
- * public body while Settings said "3D Model Generation").
- */
-export const CAPABILITY_LABELS: Record<ProviderCapability, string> = {
-  chat: 'AI Chat',
-  embedding: 'Semantic Search',
-  image: 'Image Generation',
-  model3d: '3D Model Generation',
-  texture: 'Texture Generation',
-  sfx: 'Sound Effect Generation',
-  voice: 'Voice Generation',
-  music: 'Music Generation',
-  sprite: 'Sprite Generation',
-  bg_removal: 'Background Removal',
-};
 
 /**
  * The generation capability each MCP/chat command spends, for commands that
@@ -398,7 +296,7 @@ export const COMMAND_CAPABILITY: Readonly<Record<string, ProviderCapability>> = 
 /**
  * The capability each generate route spends, keyed by the `route:` string its
  * `createGenerationHandler` config declares. The handler's refuse-before-charge
- * gate (step 1b) reads this table when a route does not declare `capability`
+ * gate (step 1a) reads this table when a route does not declare `capability`
  * itself, so a route cannot be left ungated by omission — a test walks every
  * `web/src/app/api/generate/*\/route.ts` and fails on a route missing here.
  * `localize` and `pacing` are LLM calls on the chat path.
@@ -427,25 +325,17 @@ export const ROUTE_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
  * Replicate-only environment still fails the default sprite path. Read by
  * `/api/capabilities` and `web/scripts/verify-platform-generation.ts` so the
  * two cannot disagree (#9725 review, lesson 1).
- *
- * THE RESPONSE ALSO REPORTS EACH PROVIDER SEPARATELY. Availability is
- * all-or-nothing per the rule above, because the default request 500s when any
- * required key is absent; the per-provider breakdown is what lets a dialog say
- * WHICH path is missing rather than only that the capability is off (#9719).
- * The two are not in tension: the aggregate answers "may I offer this", the
- * breakdown answers "what is missing".
  */
 export const CAPABILITY_REQUIRED_PROVIDERS: Partial<Record<ProviderCapability, readonly PlatformKeyProvider[]>> = {
   sprite: ['replicate', 'openai'],
 };
 
 /**
- * Whether a command may be offered to the model. Withholds unfinished linked
- * prefab operations and provider capabilities declared unavailable. Static, so
- * safe in module-load tool tables.
+ * Whether a command may be offered to the model: true for every command that
+ * spends no capability, and for capability commands whose capability is not
+ * declared unavailable. Static, so safe in module-load tool tables.
  */
 export function isCommandAvailable(commandName: string): boolean {
-  if (UNAVAILABLE_LINKED_PREFAB_COMMANDS.has(commandName)) return false;
   const capability = COMMAND_CAPABILITY[commandName];
   return capability === undefined || getCapabilityUnavailability(capability) === null;
 }
@@ -537,7 +427,6 @@ export const CHAT_BACKEND_ENV_VARS: readonly string[] = CHAT_BACKENDS.flatMap((b
  * no fourth literal: import this.
  */
 export function isVercelRuntime(): boolean {
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness inside Boolean(); a blank env var and an absent one must read identically
   return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 }
 
@@ -553,79 +442,6 @@ export function resolveConfiguredChatBackend(): ChatBackendDescriptor | null {
     if (backend.envVars.some((envVar) => Boolean(process.env[envVar]))) return backend;
   }
   return null;
-}
-
-// ---------------------------------------------------------------------------
-// Capability -> env vars that can serve it (#9719)
-// ---------------------------------------------------------------------------
-
-/**
- * Every environment variable that can serve each capability on the platform
- * path. Read by `/api/capabilities` (feature gating) and by the AI Providers
- * health probe, so "configured" means the same thing to both — the probe
- * reported "up" with zero generation keys precisely because it graded a
- * different property than the endpoint users depend on (#9719, lesson 1).
- *
- * Chat is any chat backend. `embedding` and `image` are gateway-ONLY on the
- * platform path (#9523/#10074): the resolver forces `AI_GATEWAY_API_KEY` for
- * them and never falls back to `PLATFORM_OPENAI_KEY` or a multi-model router,
- * so listing those here would grade an environment configured that the
- * resolver then 500s on (lesson 1). They match the resolver by naming only the
- * gateway key; OIDC on Vercel is handled by the `isVercelRuntime()` branch in
- * `isCapabilityConfigured` / `/api/capabilities`, exactly as the resolver
- * accepts OIDC. An existing stored BYOK OpenAI credential retains precedence, resolved by
- * the BYOK branch of `resolveApiKey` / `/api/capabilities`, not this table.
- * Everything else needs its direct provider's key.
- */
-export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> = {
-  chat: CHAT_BACKEND_ENV_VARS,
-  embedding: [GATEWAY_KEY_ENV.vercelGateway],
-  image: [GATEWAY_KEY_ENV.vercelGateway],
-  model3d: [PLATFORM_KEY_ENV.meshy],
-  texture: [PLATFORM_KEY_ENV.meshy],
-  sfx: [PLATFORM_KEY_ENV.elevenlabs],
-  voice: [PLATFORM_KEY_ENV.elevenlabs],
-  music: [PLATFORM_KEY_ENV.elevenlabs],
-  // Independent sprite paths: OpenAI or Replicate.
-  sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite!.map((p) => PLATFORM_KEY_ENV[p]),
-  bg_removal: [PLATFORM_KEY_ENV.removebg],
-};
-
-/**
- * Whether the platform path can serve a capability in this environment: one
- * of its env vars is set, or it is gateway-served and the process runs on
- * Vercel (OIDC auto-auth needs no explicit key).
- */
-export function isCapabilityConfigured(capability: ProviderCapability): boolean {
-  // A capability that spends more than one key needs EVERY one of them, which
-  // is the rule `/api/capabilities` applies to this same constant
-  // (`missing.length === 0`). It read `.some()` here, so the two readers of one
-  // table disagreed: a Replicate-only deployment had the route reporting
-  // `sprite` unavailable while this said configured, and the AI Providers probe
-  // graded it healthy while every default sprite request 500'd. `sprite`
-  // resolves DALL-E 3 for every style but pixel-art, so one key genuinely
-  // cannot serve the default path.
-  const required = CAPABILITY_REQUIRED_PROVIDERS[capability];
-  if (required) {
-    return required.every((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]));
-  }
-  const envVars = CAPABILITY_ENV_VARS[capability];
-  const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
-  return vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
-}
-
-/**
- * Capabilities the platform path cannot serve here, in declaration order.
- *
- * A capability declared in `UNAVAILABLE_CAPABILITIES` is excluded: no key
- * could configure it, so listing it would read as an operator omission and
- * keep the AI Providers probe degraded for as long as the product decision
- * stands (#9727 review).
- */
-export function listUnconfiguredCapabilities(): ProviderCapability[] {
-  return PROVIDER_CAPABILITIES.filter(
-    (cap) => getCapabilityUnavailability(cap) === null && !isCapabilityConfigured(cap),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -664,46 +480,11 @@ export type SpriteProvider = (typeof SPRITE_PROVIDERS)[number];
 export const SPRITE_SIZES = ['32x32', '64x64', '128x128', '256x256', '512x512', '1024x1024'] as const;
 export type SpriteSize = (typeof SPRITE_SIZES)[number];
 
-/** The sprite styles the dialog offers; `auto` routing keys off this. */
-export const SPRITE_STYLES = ['pixel-art', 'hand-drawn', 'vector', 'realistic'] as const;
-export type SpriteStyle = (typeof SPRITE_STYLES)[number];
-
-/**
- * Which provider a sprite request will actually be served by.
- *
- * ONE definition, because the price depends on it and two copies drifted:
- * `/api/generate/sprite` resolved `auto` by style and charged
- * `SPRITE_TOKEN_COST` accordingly, while `GenerateSpriteDialog` hard-coded 15
- * for its quote AND its balance check. 15 is neither provider's price, so the
- * single-sprite tab was wrong for every generation — a 10-14 balance was
- * refused on a pixel-art request the server would have charged 10 for, and a
- * 15-19 balance submitted a request the server then rejected for 20 (#9741,
- * reported by Devin on #9727).
- *
- * The route and the dialog now both call this, so a future routing change
- * cannot move the charge without moving the quote.
- */
-export function resolveSpriteProvider(
-  style: SpriteStyle | undefined,
-  provider: SpriteProvider = 'auto',
-): Exclude<SpriteProvider, 'auto'> {
-  if (provider !== 'auto') return provider;
-  return style === 'pixel-art' ? 'sdxl' : 'dalle3';
-}
-
 /** Token costs per sprite generation provider */
 export const SPRITE_TOKEN_COST: Record<Exclude<SpriteProvider, 'auto'>, number> = {
   dalle3: 20,
   sdxl: 10,
 };
-
-/** What a single sprite costs, for the provider the request will resolve to. */
-export function spriteTokenCost(
-  style: SpriteStyle | undefined,
-  provider: SpriteProvider = 'auto',
-): number {
-  return SPRITE_TOKEN_COST[resolveSpriteProvider(style, provider)];
-}
 
 /** Estimated generation time per provider (seconds) */
 export const SPRITE_ESTIMATED_SECONDS: Record<Exclude<SpriteProvider, 'auto'>, number> = {
@@ -733,12 +514,3 @@ export const CIRCUIT_BREAKER_DEFAULTS = {
   minRequestsToEvaluate: 3,
   costAnomalyMultiplier: 2,
 } as const;
-
-/** Shared by the sprite route and dialog so provider selection cannot drift. */
-/**
- * Which platform key each sprite provider spends, so a dialog can gate on the
- * capability the request will actually resolve to rather than on `sprite` as a
- * whole (#9719). The resolver, the cost helper and the styles live once,
- * further up — this file carried a second copy of all three after the merge.
- */
-export const SPRITE_PROVIDER_KEY = { dalle3: 'openai', sdxl: 'replicate' } as const;

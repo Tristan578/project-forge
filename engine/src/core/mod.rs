@@ -55,7 +55,6 @@ pub mod post_processing;
 pub mod procedural_mesh;
 pub mod project_type;
 pub mod quality;
-pub mod render_errors;
 pub mod reparent;
 pub mod reverb_zone;
 /// Native `App` schedule smoke test for B0002-class (Res+ResMut of the same
@@ -81,7 +80,6 @@ pub mod snap;
 /// with the file rather than with this declaration.
 mod snapshot_producer_parity_tests;
 pub mod sprite;
-pub mod system_timing;
 pub mod terrain;
 pub mod tilemap;
 pub mod tileset;

@@ -23,13 +23,9 @@ vi.mock('@/lib/keys/resolver', () => {
     ApiKeyError,
   };
 });
-// Spread the actual module: `createGenerationHandler` reaches
-// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
-// via `@/lib/ai/tierAccess` / `@/lib/billing/tierPlans`, so a bare mock throws.
-vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
-  return { ...actual, getTokenCost: vi.fn().mockReturnValue(50) };
-});
+vi.mock('@/lib/tokens/pricing', () => ({
+  getTokenCost: vi.fn().mockReturnValue(50),
+}));
 vi.mock('@/lib/generate/elevenlabsClient', () => {
   const ElevenLabsClient = vi.fn(function (this: Record<string, unknown>) {
     this.generateSfx = vi.fn().mockResolvedValue({
@@ -269,8 +265,7 @@ describe('POST /api/generate/sfx', () => {
         'elevenlabs',
         50,
         'sfx_generation',
-        expect.objectContaining({ prompt: 'sword clash' }),
-        'sfx', // capability forwarded for gateway/direct routing (#9523)
+        expect.objectContaining({ prompt: 'sword clash' })
       );
     });
   });

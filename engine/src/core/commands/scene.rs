@@ -20,7 +20,6 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
     match command {
         "export_scene" => Some(handle_export_scene(payload.clone())),
         "load_scene" => Some(handle_load_scene(payload.clone())),
-        "validate_scene" => Some(handle_validate_scene(payload)),
         "new_scene" => Some(handle_new_scene(payload.clone())),
         "import_gltf" => Some(handle_import_gltf(payload.clone())),
         "load_texture" => Some(handle_load_texture(payload.clone())),
@@ -116,13 +115,6 @@ fn handle_export_scene(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
-/// Validate a scene synchronously without queueing or changing editor state.
-fn handle_validate_scene(payload: &serde_json::Value) -> super::CommandResult {
-    let json = payload.get("json").and_then(|value| value.as_str())
-        .ok_or("Missing 'json' field in validate_scene payload")?;
-    crate::core::scene_file::parse_scene_file(json).map(|_| ())
-}
-
 /// Handle load_scene command — receives JSON, queues full scene load.
 fn handle_load_scene(payload: serde_json::Value) -> super::CommandResult {
     let json = payload.get("json")
@@ -130,7 +122,6 @@ fn handle_load_scene(payload: serde_json::Value) -> super::CommandResult {
         .ok_or("Missing 'json' field in load_scene payload")?
         .to_string();
 
-    crate::core::scene_file::parse_scene_file(&json)?;
     if queue_scene_load_from_bridge(SceneLoadRequest { json }) {
         tracing::info!("Queued scene load");
         Ok(())
@@ -527,7 +518,7 @@ mod tests {
     #[test]
     fn load_scene_accepts_valid_json_field() {
         let result = run("load_scene", json!({
-            "json": crate::core::scene_file::test_scene_json()
+            "json": "{\"entities\":[]}"
         }));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not initialized"));
@@ -546,16 +537,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_scene_succeeds_without_a_pending_queue() {
-        assert!(run("validate_scene", json!({"json": crate::core::scene_file::test_scene_json()})).is_ok());
-    }
-
-    #[test]
-    fn invalid_scene_is_rejected_before_queueing() {
-        for command in ["validate_scene", "load_scene", "import_scene_json"] {
-            let error = run(command, json!({"json": "{}"})).unwrap_err();
-            assert!(error.contains("Invalid scene file"), "{error}");
-        }
+    fn load_scene_accepts_complex_scene_json() {
+        let result = run("load_scene", json!({
+            "json": "{\"entities\":[{\"id\":\"e1\",\"name\":\"Cube\",\"type\":\"cube\"}]}"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
     }
 
     // === new_scene ===

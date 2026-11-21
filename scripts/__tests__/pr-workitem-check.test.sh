@@ -52,7 +52,6 @@ run_case() {
   rm -f "$state"
   return "$status"
 }
-readonly -f run_case
 
 check_pass() {
   local name="$1" scenario="$2" expected="$3" out
@@ -66,7 +65,6 @@ check_pass() {
   fi
   rm -f "$out"
 }
-readonly -f check_pass
 
 echo "=== PR work-item verification tests ==="
 check_pass "a resolved closing issue bypasses PF search" linked 'PR closes 1 existing GitHub issue'

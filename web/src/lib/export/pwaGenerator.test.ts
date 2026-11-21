@@ -1,14 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { generateManifest, generateServiceWorker, generateInstallPrompt, generatePlaceholderIcons } from './pwaGenerator';
-
-// vitest 5 will not let a test assign over `document`, and this file never put
-// the real one back -- nine stubs, no restore. Unstubbing here is what makes the
-// stubs above local to their own tests instead of leaking into whatever runs
-// next in the same worker.
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe('pwaGenerator', () => {
   describe('generateManifest', () => {
@@ -250,7 +242,7 @@ describe('pwaGenerator', () => {
 
   describe('generatePlaceholderIcons', () => {
     beforeEach(() => {
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => {
           const canvas = {
             width: 0,
@@ -270,7 +262,7 @@ describe('pwaGenerator', () => {
           };
           return canvas;
         }),
-      } as unknown as Document);
+      } as unknown as Document;
     });
 
     it('generates 192x192 and 512x512 icons', async () => {
@@ -300,14 +292,14 @@ describe('pwaGenerator', () => {
         textBaseline: '',
       };
 
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => ({
           width: 192,
           height: 192,
           getContext: vi.fn(() => mockCtx),
           toDataURL: vi.fn(() => 'data:image/png;base64,test'),
         })),
-      } as unknown as Document);
+      } as unknown as Document;
 
       await generatePlaceholderIcons('Very Long Game Title');
       expect(mockCtx.fillText).toHaveBeenCalledWith('VE', 96, 96);
@@ -326,14 +318,14 @@ describe('pwaGenerator', () => {
         textBaseline: '',
       };
 
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => ({
           width: 192,
           height: 192,
           getContext: vi.fn(() => mockCtx),
           toDataURL: vi.fn(() => 'data:image/png;base64,test'),
         })),
-      } as unknown as Document);
+      } as unknown as Document;
 
       await generatePlaceholderIcons('Go');
       expect(mockCtx.fillText).toHaveBeenCalledWith('GO', 96, 96);
@@ -352,14 +344,14 @@ describe('pwaGenerator', () => {
         textBaseline: '',
       };
 
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => ({
           width: 192,
           height: 192,
           getContext: vi.fn(() => mockCtx),
           toDataURL: vi.fn(() => 'data:image/png;base64,test'),
         })),
-      } as unknown as Document);
+      } as unknown as Document;
 
       await generatePlaceholderIcons('Ace');
       expect(mockCtx.fillText).toHaveBeenCalledWith('ACE', 96, 96);
@@ -378,14 +370,14 @@ describe('pwaGenerator', () => {
         textBaseline: '',
       };
 
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => ({
           width: 192,
           height: 192,
           getContext: vi.fn(() => mockCtx),
           toDataURL: vi.fn(() => 'data:image/png;base64,test'),
         })),
-      } as unknown as Document);
+      } as unknown as Document;
 
       await generatePlaceholderIcons('Edge');
       expect(mockCtx.fillText).toHaveBeenCalledWith('ED', 96, 96);
@@ -393,7 +385,7 @@ describe('pwaGenerator', () => {
 
     it('still returns icon data URLs when ctx192 is null (getContext returns null)', async () => {
       let callCount = 0;
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => {
           callCount++;
           return {
@@ -412,7 +404,7 @@ describe('pwaGenerator', () => {
             toDataURL: vi.fn(() => 'data:image/png;base64,test'),
           };
         }),
-      } as unknown as Document);
+      } as unknown as Document;
 
       const icons = await generatePlaceholderIcons('My Game');
       expect(icons.icon192).toContain('data:image/png;base64');
@@ -421,7 +413,7 @@ describe('pwaGenerator', () => {
 
     it('still returns icon data URLs when ctx512 is null (getContext returns null)', async () => {
       let callCount = 0;
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => {
           callCount++;
           return {
@@ -440,7 +432,7 @@ describe('pwaGenerator', () => {
             toDataURL: vi.fn(() => 'data:image/png;base64,test'),
           };
         }),
-      } as unknown as Document);
+      } as unknown as Document;
 
       const icons = await generatePlaceholderIcons('My Game');
       expect(icons.icon192).toContain('data:image/png;base64');
@@ -448,14 +440,14 @@ describe('pwaGenerator', () => {
     });
 
     it('still returns icon data URLs when both contexts are null', async () => {
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => ({
           width: 0,
           height: 0,
           getContext: vi.fn(() => null),
           toDataURL: vi.fn(() => 'data:image/png;base64,empty'),
         })),
-      } as unknown as Document);
+      } as unknown as Document;
 
       const icons = await generatePlaceholderIcons('My Game');
       expect(icons.icon192).toContain('data:image/png;base64');
@@ -464,7 +456,7 @@ describe('pwaGenerator', () => {
 
     it('draws icons at the correct sizes (192 and 512)', async () => {
       const canvasSizes: number[] = [];
-      vi.stubGlobal('document', {
+      global.document = {
         createElement: vi.fn(() => {
           const canvas = {
             width: 0 as number,
@@ -490,7 +482,7 @@ describe('pwaGenerator', () => {
           });
           return canvas;
         }),
-      } as unknown as Document);
+      } as unknown as Document;
 
       await generatePlaceholderIcons('Game');
       expect(canvasSizes).toContain(192);

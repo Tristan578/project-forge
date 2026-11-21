@@ -68,7 +68,6 @@ The global `entityId` variable contains the ID of the entity the script is attac
 forge.getTransform(entityId)  // Get position, rotation, scale
 forge.setPosition(entityId, x, y, z)
 forge.setRotation(entityId, x, y, z)
-forge.setScale(entityId, x, y, z)
 forge.translate(entityId, dx, dy, dz)
 forge.rotate(entityId, dx, dy, dz)
 forge.spawn(type, { name, position })  // Returns new entity ID
@@ -90,6 +89,7 @@ forge.input.getAxis(action)        // -1 to 1 value
 ```typescript
 forge.physics.applyForce(entityId, fx, fy, fz)
 forge.physics.applyImpulse(entityId, fx, fy, fz)
+forge.physics.setVelocity(entityId, vx, vy, vz)
 forge.physics.isGrounded(entityId)  // boolean, synchronous — gate jumps on it
 ```
 

@@ -3,8 +3,6 @@ import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 interface DocEntry {
   path: string;
@@ -75,7 +73,7 @@ async function loadDocsRecursive(dir: string, basePath: string = ''): Promise<Do
   return entries;
 }
 
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'docs', 30, 60_000);
   if (limited) return limited;
   try {
@@ -95,15 +93,9 @@ async function GET_impl(req: NextRequest) {
     return response;
   } catch (err) {
     captureException(err, { route: '/api/docs' });
-    return redactedJson(
-      // `details` used to forward the caught error's text; it is on the
-      // Sentry event above instead (#9736).
-      { error: 'Failed to load documentation' },
+    return NextResponse.json(
+      { error: 'Failed to load documentation', details: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

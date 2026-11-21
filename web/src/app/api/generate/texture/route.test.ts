@@ -9,7 +9,6 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit } from '@/lib/rateLimit';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { refundTokens } from '@/lib/tokens/service';
-import { bindProviderJob } from '@/lib/generate/jobOwnership';
 
 const mockCreateTextToTexture = vi.hoisted(() => vi.fn());
 
@@ -44,9 +43,6 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 }));
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
-}));
-vi.mock('@/lib/generate/jobOwnership', () => ({
-  bindProviderJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 const makeRequest = (body: Record<string, unknown>) =>
@@ -135,17 +131,6 @@ describe('POST /api/generate/texture', () => {
     expect(data.provider).toBe('meshy');
     expect(data.status).toBe('pending');
     expect(data.usageId).toBeDefined();
-  });
-
-  it('binds the returned jobId to the caller for ownership (#10262)', async () => {
-    const user = makeUser();
-    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true, usageId: 'usage_1' });
-    mockCreateTextToTexture.mockResolvedValue({ taskId: 'task_tex_001' });
-
-    await POST(makeRequest({ prompt: 'stone wall texture' }));
-
-    expect(vi.mocked(bindProviderJob)).toHaveBeenCalledWith(user.id, 'meshy', 'task_tex_001');
   });
 
   it('returns 500 and captures exception on Meshy API error', async () => {

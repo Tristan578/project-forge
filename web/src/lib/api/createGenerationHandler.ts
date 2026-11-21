@@ -20,7 +20,6 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
-import { panelTierGateResponse } from './panelTierGate';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
@@ -29,19 +28,18 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { cachedGenerate } from './responseCache';
-import { runGenerationAgent, isGenerationAgentEnabled, GenerationTimeoutError } from './generationAgent';
+import { runGenerationAgent, isGenerationAgentEnabled } from './generationAgent';
 import {
   API_MAX_DURATION_STANDARD_GEN_S,
   deriveGenerationStepTimeoutMs,
 } from '@/lib/config/timeouts';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
-import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { getCapabilityUnavailability, ROUTE_CAPABILITY, type ProviderCapability } from '@/lib/config/providers';
-import { ErrorCode, redactedJson } from './errors';
+import { ErrorCode } from './errors';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -65,35 +63,23 @@ const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try
  *   nouns, so no provider text or server internal can reach the client through
  *   it (the property that earns the exemption from GENERIC_500_MESSAGE);
  * - "the upstream provider is degraded" is what actually happened, and 503
- *   keeps it out of the generic error rate that alerts the owner.
+ *   keeps it out of the generic error rate that pages someone.
  *
  * The metrics outcome is set to `empty_artifact` by the caller rather than left
  * to derive from the 503, which would file it under `provider_unavailable`
  * alongside real outages. Both 503s mean "try later" to the user and entirely
- * different things to whoever is investigating.
+ * different things to whoever is on call.
  *
  * `refunded` is passed rather than assumed. Both call sites refund before
  * formatting, but only when a platform deduction actually happened — a BYOK
  * request never charged anything, and a refund that itself throws is caught and
  * reported. Promising a refund in any of those cases is a support ticket.
- *
- * It takes the MESSAGE, not the error. Both call sites sit inside
- * `if (err instanceof EmptyArtifactError)`, and `spawnforge/no-raw-response-in-catch`
- * exempts a narrowed client-safe error's `message` but not the error object
- * itself — handing the whole error to a helper is how `err.cause.body` used to
- * ride out of a catch behind a narrowing that only justified the message.
  */
-function emptyArtifactResponse(baseMessage: string, refunded: boolean): NextResponse {
+function emptyArtifactResponse(err: EmptyArtifactError, refunded: boolean): NextResponse {
   const message = refunded
-    ? `${baseMessage}. Your tokens have been refunded — please try again.`
-    : `${baseMessage}. Please try again.`;
-  // `redactedJson`, not `NextResponse.json`. This helper is called FROM two
-  // catch blocks, so it is the one place in this repo that exercises the
-  // documented limit of `spawnforge/no-raw-response-in-catch`: the rule sees
-  // the call site, not the construction inside the callee (#9736). The message
-  // is safe by construction as described above; running it through the
-  // redactor costs nothing and closes the limit here rather than only noting it.
-  return redactedJson(
+    ? `${err.message}. Your tokens have been refunded — please try again.`
+    : `${err.message}. Please try again.`;
+  return NextResponse.json(
     { error: message, code: ErrorCode.SERVICE_UNAVAILABLE },
     { status: 503 }
   );
@@ -120,24 +106,6 @@ export interface GenerationHandlerConfig<TParams, TResult> {
 
   /** Provider name for API key resolution. Static or computed from validated params. */
   provider: Provider | ((params: TParams) => Provider);
-
-  /**
-   * The editor panel that fronts this route, as spelled in
-   * `PANEL_TIER_REQUIREMENTS` (`@/lib/ai/tierAccess`) — e.g. `'generate-model'`,
-   * `'generate-sound'`. Required, deliberately: before this field existed the
-   * only server-side tier check on a generation route was the resolver's
-   * starter-balance check, so a real hobbyist account (balance aside) could
-   * call a creator-gated route like `/api/generate/skybox` directly — a gap
-   * `effectiveTier`'s trial mapping widened to any $0 starter signup (#7715
-   * review round 2). Checked right after auth resolves the user, using
-   * `effectiveTier(user.tier, spendableTokensOf(user))` — the same rule
-   * `canAccessPanel` applies in the editor — and BEFORE the capability/kill
-   * switch checks, the response cache, and any token deduction, so a locked
-   * caller never spends rate-limit budget or a token on a request that was
-   * always going to be refused. Making the field required means `tsc` names
-   * any route that forgets it, rather than a gate that silently defaults open.
-   */
-  panel: string;
 
   /**
    * The capability this route serves (#9117). When it appears in
@@ -210,7 +178,7 @@ export interface GenerationHandlerConfig<TParams, TResult> {
     tokenCost: number;
     /**
      * Abort signal wired to the generation agent's per-step wall-clock deadline.
-     * Present when USE_GENERATION_AGENT or enforceRequestDeadline is enabled.
+     * Only present when the USE_GENERATION_AGENT flag is on (otherwise undefined).
      * Routes SHOULD forward it to their provider client / `fetch` so a hung call
      * aborts deterministically before the function `maxDuration`. Optional and
      * additive: existing routes that ignore it are unaffected.
@@ -243,13 +211,6 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   maxDurationSeconds?: number;
 
   /**
-   * Always enforce the route budget, including time spent before the provider
-   * call, with the configured refund buffer reserved. Use for synchronous
-   * providers that can otherwise outlive the host when the agent flag is off.
-   */
-  enforceRequestDeadline?: boolean;
-
-  /**
    * Durable server-side callback config (PF-906, #8816). When set AND QStash is
    * configured, the factory publishes a self-rescheduling QStash callback after
    * a successful provider submission, so the `generation_jobs` row is finalized
@@ -272,22 +233,6 @@ export interface GenerationHandlerConfig<TParams, TResult> {
     /** Initial callback delay in seconds (defaults to DEFAULT_CALLBACK_DELAY_SECONDS). */
     estimatedSeconds?: number;
   };
-
-  /**
-   * Extract the provider job id from a successful result for ownership
-   * binding (#10262): the id is bound to the calling user, server-side,
-   * BEFORE the response is sent — so the matching `/status` route can
-   * refuse a poll from anyone else. Return null for a result that needs no
-   * polling (e.g. a synchronous completion).
-   *
-   * Defaults to `asyncJob.providerJobId` when `asyncJob` is set, since both
-   * extract the same id from the same result shape — most routes need only
-   * one of the two. Set this explicitly when the route has no `asyncJob`
-   * (e.g. pixel-art, which has no `generation_type` enum member and
-   * therefore no durable QStash callback, but still exposes a status route
-   * that accepts a caller-supplied jobId).
-   */
-  jobIdForOwnership?: (result: TResult) => string | null;
 }
 
 /**
@@ -311,7 +256,6 @@ export function createGenerationHandler<TParams, TResult>(
   const {
     route,
     provider,
-    panel,
     capability,
     operation,
     rateLimitKey,
@@ -328,9 +272,7 @@ export function createGenerationHandler<TParams, TResult>(
     cacheKeyParams,
     cacheTtlSeconds,
     maxDurationSeconds = API_MAX_DURATION_STANDARD_GEN_S,
-    enforceRequestDeadline = false,
     asyncJob,
-    jobIdForOwnership = asyncJob?.providerJobId,
   } = config;
 
   /**
@@ -373,43 +315,6 @@ export function createGenerationHandler<TParams, TResult>(
     }
   }
 
-  /**
-   * Bind a just-issued provider job id to the calling user (#10262). Awaited
-   * inline — never via `after()` — because the whole point is for the
-   * binding to exist BEFORE the response (and the job id inside it) reaches
-   * the client; a poll can arrive the instant the client has the id. No-ops
-   * when the route declared no extractor, or the result carries no pollable
-   * job id (a synchronous completion). `bindProviderJob` itself never throws.
-   */
-  async function maybeBindJobOwnership(
-    result: TResult,
-    userId: string,
-    resolvedProvider: Provider,
-  ): Promise<void> {
-    if (!jobIdForOwnership) return;
-    let providerJobId: string | null;
-    try {
-      providerJobId = jobIdForOwnership(result);
-    } catch (err) {
-      // No providerJobId here by definition — extracting it is what threw —
-      // but the user is known, and an extractor that throws leaves THEIR job
-      // unbound (so their own next poll answers 404). Report enough to find
-      // them, matching the bind-failure catch below.
-      captureException(err, { route, action: 'job_ownership_extract', userId });
-      return;
-    }
-    if (!providerJobId) return;
-    try {
-      // `bindProviderJob` already never throws on its own (it reports a write
-      // failure to Sentry and swallows it), but this call site never trusts
-      // that from the outside: losing the binding must never cost the user
-      // their otherwise-successful generation.
-      await bindProviderJob(userId, resolvedProvider, providerJobId);
-    } catch (err) {
-      captureException(err, { route, action: 'job_ownership_bind', providerJobId, userId });
-    }
-  }
-
   // Per-route enforceable step timeout: derived from this route's maxDuration so
   // the agent's abort always fires before Vercel kills the function. A 150s base
   // cap (the old bug) could never fire on a 60s route — this clamps it.
@@ -436,18 +341,13 @@ export function createGenerationHandler<TParams, TResult>(
     params: TParams,
     apiKey: string,
     ctx: { userId: string; tier: string; usageId: string | undefined; tokenCost: number },
-    requestDeadlineAt: number,
   ): Promise<TResult> => {
-    if (!useAgent && !enforceRequestDeadline) {
+    if (!useAgent) {
       return execute(params, apiKey, ctx);
-    }
-    const remainingMs = enforceRequestDeadline ? requestDeadlineAt - Date.now() : stepTimeoutMs;
-    if (remainingMs <= 0) {
-      return Promise.reject(new GenerationTimeoutError(stepTimeoutMs));
     }
     return runGenerationAgent<TResult>({
       step: ({ signal }) => execute(params, apiKey, { ...ctx, abortSignal: signal }),
-      timeoutMs: remainingMs,
+      timeoutMs: stepTimeoutMs,
     });
   };
 
@@ -460,7 +360,6 @@ export function createGenerationHandler<TParams, TResult>(
   // on every pre-generation rejection. The wrapper fails open and returns the
   // response by identity.
   return withGenerationMetrics(route, async (request: NextRequest, mctx): Promise<NextResponse> => {
-    const requestDeadlineAt = Date.now() + stepTimeoutMs;
     // 1. Authenticate
     const authResult = await authenticateRequest();
     if (!authResult.ok) {
@@ -468,7 +367,7 @@ export function createGenerationHandler<TParams, TResult>(
       // returns 403 for a BANNED account (which the classifier would file under
       // bot_blocked, hiding ban-evasion volume inside bot traffic) and 503 when
       // the user-sync path is degraded — a Neon circuit-breaker signal that the
-      // classifier would file under provider_unavailable, raising an alert for an
+      // classifier would file under provider_unavailable, paging on-call for an
       // AI-provider incident that isn't happening. Name the real cause here; 401
       // and anything else fall through to classifyGenerationOutcome().
       if (authResult.response.status === 403) mctx.outcome = 'banned';
@@ -480,29 +379,7 @@ export function createGenerationHandler<TParams, TResult>(
     const tier = authResult.ctx.user.tier;
     mctx.tier = tier;
 
-    // 1a. Per-route panel tier gate (#7715 review round 2). The resolver's
-    // starter-balance check was the only server-side tier enforcement a
-    // generation route had, so a real hobbyist account (balance aside) could
-    // call a creator-gated route directly, and `effectiveTier`'s trial mapping
-    // widened that to a fresh $0 starter signup. `effectiveTier` applies the
-    // SAME rule the editor's `canAccessPanel` uses, so a caller is refused here
-    // exactly when its own panel would render `LockedPanelOverlay`. Checked
-    // right after auth resolves the user and BEFORE the capability/kill-switch
-    // checks, the response cache, and any token deduction, so a locked caller
-    // never spends rate-limit budget or a token on a request that was always
-    // going to be refused.
-    // The check itself lives in `panelTierGateResponse` (the balance-aware
-    // CREATE variant) so `voice/batch`, which resolves its key directly,
-    // applies the SAME rule and body. Status pollers run the POLL variant,
-    // `panelTierGateResponseForPoll`, which ignores the balance because the
-    // job they read was already paid for; see `./panelTierGate`.
-    const tierDenied = panelTierGateResponse(panel, authResult.ctx.user);
-    if (tierDenied) {
-      mctx.outcome = 'tier_required';
-      return tierDenied;
-    }
-
-    // 1b. Declared-unavailable capability (#9117). Static config, checked as
+    // 1a. Declared-unavailable capability (#9117). Static config, checked as
     // soon as the caller is known and BEFORE BotID, both rate limits, body
     // parsing and content safety: a capability with no provisionable provider
     // can never succeed, so a refusal must not spend the user's aggregate
@@ -522,7 +399,7 @@ export function createGenerationHandler<TParams, TResult>(
       );
     }
 
-    // 1c. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
+    // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.
     const botIdResponse = await checkBotIdGate();
     if (botIdResponse) {
@@ -554,7 +431,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
       rawBody = parsed as Record<string, unknown>;
     } catch {
-      return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
     // 4. Validate
@@ -613,7 +490,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
     } catch (err) {
       captureException(err, { route, action: 'resolve_billing_params' });
-      return redactedJson({ error: 'Internal pricing error' }, { status: 500 });
+      return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
     }
     mctx.provider = resolvedProvider;
     mctx.operation = resolvedOperation;
@@ -666,27 +543,14 @@ export function createGenerationHandler<TParams, TResult>(
             // Cache miss — deduct tokens and execute provider call
             // This runs only on cache miss — deduct tokens and execute
             const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
-            // Pass the resolved capability (#9523) so gateway-routed capabilities
-            // (image/embedding) resolve AI_GATEWAY_API_KEY instead of the
-            // provider's PLATFORM_* var. `effectiveCapability` is the same value
-            // the unavailability gate computed above (step 1b); `?? undefined`
-            // keeps the direct 5-arg route for a route with no declared capability.
-            const resolved = await resolveApiKey(
-              userId,
-              resolvedProvider,
-              tokenCost,
-              resolvedOperation,
-              metadata,
-              effectiveCapability ?? undefined
-            );
+            const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
             const apiKey = resolved.key;
             const usageId = resolved.usageId;
             // Charged for real (see the note at mctx.provider) — cache MISS only.
             if (usageId !== undefined) mctx.tokenCost = tokenCost;
 
             try {
-              const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
-              await maybeBindJobOwnership(generated, userId, resolvedProvider);
+              const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
               cacheMiss = { result: generated, usageId };
               return generated;
             } catch (err) {
@@ -736,7 +600,7 @@ export function createGenerationHandler<TParams, TResult>(
         return NextResponse.json(responseResult, { status: successStatus, headers });
       } catch (err) {
         if (err instanceof ApiKeyError) {
-          return redactedJson({ error: err.message, code: err.code }, { status: 402 });
+          return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
         }
         if (err instanceof EmptyArtifactError) {
           // The two nouns as structured extras, not just inside the message —
@@ -748,10 +612,10 @@ export function createGenerationHandler<TParams, TResult>(
             artifact: err.artifact,
           });
           mctx.outcome = 'empty_artifact';
-          return emptyArtifactResponse(err.message, tokensRefunded);
+          return emptyArtifactResponse(err, tokensRefunded);
         }
         captureException(err, { route });
-        return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
+        return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
       }
     }
 
@@ -761,36 +625,25 @@ export function createGenerationHandler<TParams, TResult>(
 
     try {
       const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
-      // Pass the resolved capability (#9523) — see the cached path above. Same
-      // `effectiveCapability ?? undefined` so gateway-routed capabilities resolve
-      // AI_GATEWAY_API_KEY and capability-less routes keep the direct route.
-      const resolved = await resolveApiKey(
-        userId,
-        resolvedProvider,
-        tokenCost,
-        resolvedOperation,
-        metadata,
-        effectiveCapability ?? undefined
-      );
+      const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
       apiKey = resolved.key;
       usageId = resolved.usageId;
       // Charged for real (see the note at mctx.provider) — uncached path.
       if (usageId !== undefined) mctx.tokenCost = tokenCost;
     } catch (err) {
       if (err instanceof ApiKeyError) {
-        return redactedJson({ error: err.message, code: err.code }, { status: 402 });
+        return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
       }
       // A non-ApiKeyError here is a server-side failure (missing platform key,
       // DB error, etc.). Re-throwing surfaced it as an uninstrumented unhandled
       // rejection with no Sentry signal and a generic framework 500. Convert it
       // to a structured 500 and alert Sentry, mirroring the cached path (#8597).
       captureException(err, { route });
-      return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
+      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
 
     try {
-      const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
-      await maybeBindJobOwnership(result, userId, resolvedProvider);
+      const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
       // Run the durable publish post-response (see cached path). Same asyncJob +
       // QStash gate so the dormant/non-async path never touches `after()`.
       const durableSubmission = asyncJob !== undefined && isQstashConfigured();
@@ -819,10 +672,10 @@ export function createGenerationHandler<TParams, TResult>(
           artifact: err.artifact,
         });
         mctx.outcome = 'empty_artifact';
-        return emptyArtifactResponse(err.message, tokensRefunded);
+        return emptyArtifactResponse(err, tokensRefunded);
       }
       captureException(err, { route });
-      return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
+      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
   });
 }

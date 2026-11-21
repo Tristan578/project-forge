@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useId } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Map, Sparkles, Play, RotateCcw } from 'lucide-react';
 import {
   LEVEL_TEMPLATES,
@@ -127,10 +127,6 @@ function RoomList({ layout }: { layout: LevelLayout }) {
 // ===== Main Panel =====
 
 export function LevelGeneratorPanel() {
-  // useId, not literal ids: the panel can mount more than once, and a
-  // repeated id sends the second <label for> to the first panel's control.
-  const baseId = useId();
-  const fieldId = (key: string) => `${baseId}-${key}`;
   const [description, setDescription] = useState('');
   const [layout, setLayout] = useState<LevelLayout | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -232,12 +228,12 @@ export function LevelGeneratorPanel() {
         {/* Constraint sliders */}
         <div className="space-y-2">
           <div>
-            <label htmlFor={fieldId('room-count')} className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+            <label htmlFor="room-count" className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Room Count</span>
               <span className="text-zinc-400">{roomCount}</span>
             </label>
             <input
-              id={fieldId('room-count')}
+              id="room-count"
               type="range"
               min={1}
               max={15}
@@ -247,12 +243,12 @@ export function LevelGeneratorPanel() {
             />
           </div>
           <div>
-            <label htmlFor={fieldId('enemy-density')} className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+            <label htmlFor="enemy-density" className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Enemy Density</span>
               <span className="text-zinc-400">{Math.round(enemyDensity * 100)}%</span>
             </label>
             <input
-              id={fieldId('enemy-density')}
+              id="enemy-density"
               type="range"
               min={0}
               max={100}
@@ -262,12 +258,12 @@ export function LevelGeneratorPanel() {
             />
           </div>
           <div>
-            <label htmlFor={fieldId('difficulty')} className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+            <label htmlFor="difficulty" className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Difficulty</span>
               <span className="text-zinc-400">{difficulty}/10</span>
             </label>
             <input
-              id={fieldId('difficulty')}
+              id="difficulty"
               type="range"
               min={1}
               max={10}

@@ -23,7 +23,8 @@
 | Rate Limiting | Upstash Redis | Distributed rate limiting | `EVAL return 1` via the limiter's own REST transport (read-only; billed per command; bounded by the shared fan-out budget) — `degraded` carries Upstash's error body when the command is refused or stalls | No |
 | AI (Anthropic) | Anthropic API | Chat, scene generation | HEAD `api.anthropic.com` | No |
 | AI (Meshy) | Meshy API | 3D model generation | Config check | No |
-| AI (ElevenLabs) | ElevenLabs API | SFX/voice/music generation | Config check | No |
+| AI (ElevenLabs) | ElevenLabs API | SFX/voice generation | Config check | No |
+| AI (music) | none — Suno has no public API; `music` is declared unavailable until #9522 moves it to ElevenLabs | Music generation | Declared unavailable in code | No |
 
 ### Critical vs Non-Critical
 
@@ -35,7 +36,7 @@ Only **Database (Neon)** and **Clerk** trigger HTTP 503 on the health endpoint. 
 
 | Metric | Target | Measurement | Alert Threshold |
 |--------|--------|-------------|-----------------|
-| Availability | 99.9% (8.7h downtime/year) | Synthetic health monitor (`/api/cron/health-monitor`, every ~15 min, when activated — see `docs/guides/health-monitor-cron.md`). No external multi-region monitor exists yet (PF-607, § 11) | A non-healthy result is reported to Sentry and notifies the owner (no paging; see `docs/operations/incident-response.md`) |
+| Availability | 99.9% (8.7h downtime/year) | External synthetic monitor (1-min interval, 3 regions) | 2 consecutive failures = page |
 | Health endpoint latency (p99) | < 3s | Sentry transaction traces | > 5s for 5 min |
 | Homepage TTFB (p95) | < 1.5s | Web Vitals reporting | > 3s for 10% of sessions |
 | LCP (p75) | < 2.5s | Web Vitals reporting | > 4s warning, > 6s critical |
@@ -71,7 +72,7 @@ Vercel Edge (CDN, routing, headers)
   |       +---> Anthropic API          -- AI chat, scene generation
   |       |       (ANTHROPIC_API_KEY)
   |       |
-  |       +---> Meshy / ElevenLabs         -- AI asset generation (music via ElevenLabs, #9522)
+  |       +---> Meshy / ElevenLabs         -- AI asset generation (music: unavailable, #9522)
   |       |
   |       +---> Cloudflare R2          -- asset upload/download (S3 API)
   |       |       (ASSET_R2_ACCESS_KEY_ID, ASSET_R2_SECRET_ACCESS_KEY, ASSET_BUCKET_NAME)
@@ -94,8 +95,8 @@ Vercel Edge (CDN, routing, headers)
 | **Clerk (Auth)** | Login, signup, all authenticated API routes, user tier checks | Public pages, health check, already-loaded editor sessions (until token expires) |
 | **Stripe** | New subscriptions, plan changes, webhook processing | Existing users retain current tier, all editing features work |
 | **Anthropic API** | AI chat, scene generation, compound AI actions | Manual editing, all non-AI features, asset import/export |
-| **R2 (Assets)** | Asset upload/download, marketplace, private publication-snapshot mirror (play falls back to the Postgres snapshot) | Editor with local assets, WASM engine (separate CDN), playing published games |
-| **Engine CDN** | New WASM loads for new visitors | Returning visitors with cached WASM; Vercel serves WASM from `/public/` when `NEXT_PUBLIC_ENGINE_CDN_URL` is unset (CD uploads to R2 only while the repository variable `R2_CDN_ENABLED` is `true`) |
+| **R2 (Assets)** | Asset upload/download, marketplace, published game hosting | Editor with local assets, WASM engine (separate CDN) |
+| **Engine CDN** | New WASM loads for new visitors | Returning visitors with cached WASM, Vercel fallback if R2_CDN_ENABLED=false |
 | **Upstash Redis** | Distributed rate limiting (falls back to in-memory per-instance) | All features; rate limiting still works per-instance |
 | **Sentry** | Error tracking, tracing, replay capture | All features; errors just go untracked |
 
@@ -122,7 +123,7 @@ Vercel Edge (CDN, routing, headers)
 
 ### CDN Down
 - New users cannot load WASM engine
-- Both loaders (`useEngine.getWasmBasePaths` for the editor, `loadPlayEngine.getPlayEngineBasePaths` for `/play`) fall through to the same-origin `/engine-pkg-*` copy served from `web/public/`, so a CDN outage degrades to a slower load rather than a broken page; `R2_CDN_ENABLED` is a GitHub repository variable that gates the CD upload AND selects which WASM URL `post-deploy-smoke.yml` probes (CDN when `true`, same-origin otherwise)
+- If `R2_CDN_ENABLED != 'true'`, Vercel serves WASM from `/public/` as fallback
 - Users with browser-cached WASM are unaffected
 
 ---
@@ -131,7 +132,7 @@ Vercel Edge (CDN, routing, headers)
 
 ### 5.1 Complete Outage (Site Unreachable)
 
-**Detection:** The synthetic health monitor (`/api/cron/health-monitor`, every ~15 min when activated — see `docs/guides/health-monitor-cron.md` before trusting its silence) reports a non-healthy result to Sentry, or a user reports it. No external synthetic monitor exists yet (PF-607).
+**Detection:** External synthetic monitor fires after 2 consecutive failures (~3 min). PagerDuty alert: "SpawnForge Unreachable".
 
 **Verification:**
 ```bash
@@ -171,9 +172,9 @@ vercel rollback <last-good-deployment-url> --yes --scope=<team> --token=$VERCEL_
 ```
 
 **Communication:**
-- No paging service is configured — see `docs/operations/incident-response.md` for how the owner is notified
-- Post in #incidents Slack channel, if one is configured in Sentry
-- If user-facing for > 15 min, post a user-facing update (there is no manually updated status page; https://spawnforge.ai/health shows live status automatically)
+- Page on-call engineer via PagerDuty (when PF-608 is implemented)
+- Post in #incidents Slack channel
+- If user-facing for > 15 min, update status page
 
 **Resolution Verification:**
 ```bash
@@ -294,8 +295,7 @@ curl -sI https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm | g
 **Mitigation:**
 ```bash
 # 1. If CDN is down but Vercel fallback works:
-#    Temporarily unset NEXT_PUBLIC_ENGINE_CDN_URL in Vercel env vars and redeploy (the engine loads from /public/).
-#    Set the GitHub variable R2_CDN_ENABLED=false for the same window, or post-deploy-smoke keeps probing the dead CDN and reports the deploy failed.
+#    Temporarily set R2_CDN_ENABLED=false in Vercel env vars and redeploy
 
 # 2. If WASM is missing from both CDN and Vercel:
 #    Check last successful CD run for WASM build artifacts:
@@ -435,99 +435,6 @@ gh run view <run-id>
 gh workflow run cd.yml
 ```
 
-### 5.9 Trial Token Grant Failure
-
-**Detection:** New users report 0 tokens or every AI panel locked right after
-signup. Sentry issues on `/api/auth/webhook` (alert rule 3 in
-`docs/sentry-alert-rules.md`), with `extra.context = trial-token-grant-failure`
-on the event.
-
-**Background:** the Clerk `user.created` webhook (`web/src/app/api/auth/webhook/route.ts`)
-calls `grantTrialTokens(user.id)` (`web/src/lib/billing/trial-grant.ts`,
-#7715) after `syncUserFromClerk`. One statement inserts a `credit_transactions`
-row with `source = 'trial_grant'` and `reference_id = users.id`, and sets
-`users.monthly_tokens = TRIAL_GRANT_TOKENS` only when that insert produced a
-row. A grant failure is captured and rethrown; a transient error goes to the
-route's in-memory retry queue, a permanent one answers 500 to Clerk.
-
-**Verification:**
-```sql
--- Very recent signups with no tokens at all: a non-zero count while the grant
--- is meant to be running is the symptom.
-SELECT count(*) FROM users
-WHERE monthly_tokens = 0 AND created_at > now() - interval '1 day';
-
--- Whether the audit row exists for one user (the arbiter of "already granted").
-SELECT id, amount, created_at FROM credit_transactions
-WHERE user_id = '<users.id>' AND source = 'trial_grant';
-```
-
-**Mitigation:**
-```bash
-# 1. Re-deliver the user.created event from the Clerk dashboard
-#    (Webhooks -> endpoint -> the event -> Resend). Safe to replay: the grant
-#    is idempotent at the database — the NOT EXISTS guard plus the partial
-#    unique index idx_credit_txn_idempotent (drizzle/0002) insert at most one
-#    trial_grant row per user, so a replay to an already-granted user is a no-op.
-
-# 2. Or grant directly with a one-off script (internal users.id, never the Clerk id):
-cd web && npx tsx -e "import('./src/lib/billing/trial-grant').then(m => m.grantTrialTokens('<users.id>'))"
-
-# 3. If the failures are transient (Neon connection errors), the route's retry
-#    queue replays the event on the next webhook delivery; check that recent
-#    signups recover before granting by hand.
-```
-
-**What the tokens open:** a `starter` account with spendable tokens is treated
-as `hobbyist` by the four AI gates — `effectiveTier` in
-`web/src/lib/ai/tierAccess.ts`, applied by `assertAiAccess` on `/api/chat` and
-`/api/game/decompose`, by the platform-key resolver, by
-`createGenerationHandler`'s per-route `panel` check (every `/api/generate/*`
-route, checked right after auth and before any token deduction — #7715 review
-round 2; `voice/batch`, which calls `resolveApiKey` directly, runs the same
-check through `panelTierGateResponse` in `web/src/lib/api/panelTierGate.ts`
-before resolving a key), and by the editor's panel gate (the profile route ships
-`spendableTokens` so the editor knows on first paint).
-
-**Status polls are the exception, on purpose.** Every `*/status` poller runs
-`panelTierGateResponseForPoll` instead, which does not read the live balance:
-a `starter` that has HELD tokens (`monthlyTokens > 0 || addonTokens > 0`)
-counts as `hobbyist` however many it has left, so creator-tier status routes
-stay refused. A spent trial still qualifies, because the grant sets
-`monthly_tokens` and spending only raises `monthly_tokens_used`. A `starter`
-that never held tokens (a signup the grant never reached, every column 0) is
-judged as `starter` and refused on hobbyist status routes too, as it was before
-#7715. The poll gate narrows who can reach a status route; it is not an
-ownership check. That is `verifyProviderJobOwner`
-(`web/src/lib/generate/jobOwnership.ts`, #10262), which each key-resolving
-status route runs after the gate and before `resolveApiKey`: a `jobId` not
-bound to the caller answers 404 (the client stops polling and refunds), and a
-failure of the lookup itself answers 503 `SERVICE_DEGRADED` (the client keeps
-polling) — so a DB incident shows up as 503s on the status routes, never as a
-wave of refunds. The resolver, likewise, skips its tier and balance checks for a
-zero-cost `STATUS_CHECK_OPERATION` call (the pollers and the QStash
-`generation-complete` callback). The polled job was paid for when it was
-created, and one generation can spend the whole grant (a tileset costs 50), so
-the balance-aware rule would refuse every poll of it: the result would never
-arrive, and the durable callback would finalize it as failed and refund it. The
-same check had been locking out a paid hobbyist whose last generation took the
-balance to exactly 0. A user whose grant
-landed but who still sees every AI panel locked has a stale profile (reload) or
-a balance of zero; the SQL above distinguishes the two. The Token Dashboard
-labels a `starter` balance "Trial Remaining" with a one-time, does-not-renew
-note and never shows "Next refill" for it — nothing refills a starter account.
-
-**Abuse boundary (known, accepted):** the grant is exactly-once **per
-account**. `users.email` is `NOT NULL UNIQUE` and `users.clerk_id` is unique
-(`web/src/lib/db/schema.ts`), so one email address receives at most one trial
-grant, enforced at the database. Nothing ties two accounts to one person: the
-Clerk payload carries no IP or device signal and the repository captures none
-(`sentryConfig.ts`'s `fingerprint` is Sentry error grouping, unrelated). A
-determined abuser using disposable or multiple email addresses can collect one
-grant per address. The blast radius is `TRIAL_GRANT_TOKENS` per fake account.
-Detection of that pattern is tracked in #10235 and is deliberately not built
-here.
-
 ---
 
 ## 6. Capacity Planning
@@ -554,10 +461,6 @@ here.
 - Each deploy uploads 4 variants to R2 CDN
 
 ### Monitoring Recommendations
-- **Synthetic health monitor** (`/api/cron/health-monitor`, every 15 min) — the only automated
-  outage detector between deploys. It is inert until `CRON_SECRET` is set in production, and it
-  inherits whatever `runAllHealthChecks()` reports. Activation, the evidence to attach, and the
-  alert-path rehearsal: `docs/guides/health-monitor-cron.md` (#9118).
 - Track R2 storage via Cloudflare Analytics
 - Track Neon storage via Neon Dashboard metrics
 - Track Vercel function invocations in Vercel Analytics
@@ -654,7 +557,7 @@ gh workflow run cd.yml
 # 1. Rotate the exposed key in the provider's dashboard:
 #    - Anthropic: console.anthropic.com > API Keys
 #    - Stripe: dashboard.stripe.com > Developers > API Keys
-#    - Meshy/ElevenLabs: respective dashboards (ElevenLabs covers SFX, voice AND music; see docs/guides/platform-keys.md)
+#    - Meshy/ElevenLabs: respective dashboards (Suno has none; see docs/guides/platform-keys.md)
 
 # 2. Update in Vercel env vars
 
@@ -734,7 +637,8 @@ Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degr
 | `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics | (empty) |
 | `ASSET_R2_ACCOUNT_ID` | R2 asset storage | (empty) |
 | `PLATFORM_MESHY_KEY` † | Meshy 3D gen | (empty — see `docs/guides/platform-keys.md`) |
-| `PLATFORM_ELEVENLABS_KEY` † | ElevenLabs audio — SFX, voice AND music (#9522) | (empty — see `docs/guides/platform-keys.md`) |
+| `PLATFORM_ELEVENLABS_KEY` † | ElevenLabs audio | (empty — see `docs/guides/platform-keys.md`) |
+| `PLATFORM_SUNO_KEY` † | Suno music — unobtainable; `music` is declared unavailable (#9522) | (empty) |
 | `ASSET_R2_ACCESS_KEY_ID` | R2 auth | (empty) |
 | `ASSET_R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
 | `ASSET_BUCKET_NAME` | R2 bucket | (empty) |
@@ -816,7 +720,7 @@ now opens (or comments on) a GitHub issue, so this is the list to watch:
 Watch `label:ci-failure` — every one of these carries it.
 
 All four go through `scripts/notify-workflow-failure.sh`. Two properties matter
-when responding:
+on-call:
 
 - **Deduped by key.** A recurring failure (the daily cron especially) comments on
   the issue it already opened rather than filing a new one each time, so the
@@ -834,7 +738,7 @@ entirely green.
 
 ### Gaps (Addressed by PF-607 through PF-617)
 - No external synthetic monitoring (PF-607)
-- No on-call rotation or paging, by decision — see `docs/decisions/2026-09-24-no-paging-or-on-call.md` and `docs/operations/incident-response.md` (PF-168, GH #7710)
+- No on-call rotation or paging (PF-608)
 - Health endpoint not rate-limited (PF-609)
 - Rate limiting is per-instance, not distributed (PF-610)
 - No client Web Vitals reporting (PF-611)
@@ -857,11 +761,11 @@ entirely green.
 
 | Alert Name | Condition | Severity | Action |
 |-----------|-----------|----------|--------|
-| DB Connection Failure | `Database (Neon)` health check returns "down" 2x in 5 min | P0 | Notify #incidents (no page) |
-| Auth Failure Spike | Clerk health check "down" for 5 min | P0 | Notify #incidents (no page) |
-| 5xx Error Rate | > 2% of requests return 5xx for 5 min | P1 | Notify #incidents (no page) |
-| AI Gen Failure Spike | AI provider errors > 10% for 15 min | P1 | Notify #incidents (no page) |
-| WASM Load Failure | Custom measurement `wasm_init_time` errors > 5% | P1 | Notify #incidents (no page) |
+| DB Connection Failure | `Database (Neon)` health check returns "down" 2x in 5 min | P0 | Page on-call |
+| Auth Failure Spike | Clerk health check "down" for 5 min | P0 | Page on-call |
+| 5xx Error Rate | > 2% of requests return 5xx for 5 min | P1 | Page on-call |
+| AI Gen Failure Spike | AI provider errors > 10% for 15 min | P1 | Notify #engineering-alerts |
+| WASM Load Failure | Custom measurement `wasm_init_time` errors > 5% | P1 | Notify #engineering-alerts |
 | High LCP | p75 LCP > 4s for 30 min | P2 | Notify #engineering-alerts |
 | Rate Limit Exhaustion | 429 responses > 20/min for 10 min | P2 | Investigate DDoS |
 | Cost Anomaly | Hourly AI spend > 2x rolling 7-day avg | P2 | Notify + review |
@@ -927,48 +831,6 @@ vercel env ls --scope=<team> | grep VERCEL_SKEW
 # Dashboard > spawnforge > Monitoring > filter: skew_protection = 'active'
 ```
 
-### The same toggle is a hard prerequisite for the docs deploy gate
-
-Everything above this point is about Skew Protection on `spawnforge`. This
-subsection is about a **second, unrelated** consumer of one of its setup steps,
-and it is placed after that explanation deliberately — the protection table and
-verification steps above describe Skew Protection only, not the docs gate.
-
-Step 2 of *Enable in the Vercel Dashboard* (**Automatically expose System
-Environment Variables**) is a **per-project** setting, and it must be enabled on
-**`spawnforge-docs`** as well as `spawnforge`. Nothing in the repository can set
-it.
-
-It is what makes `VERCEL_GIT_COMMIT_SHA` available to the build. `apps/docs`
-stamps that value into every page (`app/layout.tsx` → `lib/commit.ts` →
-`<meta name="spawnforge-docs-commit">`), and `cd.yml`'s `Deploy Docs` job ends
-with `scripts/post-deploy-docs-check.sh`, which **requires** the deployed page
-to carry the commit the run just published — a healthy body proves only that
-*something* is healthy, so the stamp is what proves the alias is serving *this*
-build (lessons-learned #1; `/api/health`'s `commit` field is the web app's
-equivalent).
-
-With the toggle **off** on `spawnforge-docs`, the page stamps `unknown`, and
-every docs deploy fails closed on:
-
-```
-the page reported no commit (no hex <meta name="spawnforge-docs-commit"> stamp)
-... an older build, or one built without VERCEL_GIT_COMMIT_SHA
-```
-
-That is a correct refusal, not a false alarm — but retrying cannot fix it. Turn
-the toggle on and redeploy. Do **not** work around it by adding
-`VERCEL_GIT_COMMIT_SHA` as a project environment variable: that pins one SHA
-into every future build, and the gate then fails permanently with the
-"DIFFERENT build" diagnosis instead. To confirm without a deploy:
-
-```bash
-# The stamp must be hex, not 'unknown'
-curl -s https://docs.spawnforge.ai/mcp | grep -o '<meta name="spawnforge-docs-commit"[^>]*>'
-```
-
-See also `apps/docs/README.md` → Environment Variables.
-
 ---
 
 ## 14. Known Technical Debt
@@ -984,10 +846,24 @@ See also `apps/docs/README.md` → Environment Variables.
 
 ---
 
-## 15. Incident Response Checklist
+## 15. On-Call Checklist
 
-The incident-response process (severity model, first response, mitigation,
-resolution) is defined once, in `docs/operations/incident-response.md`. Use the
-runbooks in § 5 of this document for service-specific recovery. There is no
-on-call rotation or paging — see
-`docs/decisions/2026-09-24-no-paging-or-on-call.md`.
+When paged, follow this sequence:
+
+1. **Acknowledge** the page within 5 minutes
+2. **Assess** severity:
+   - Check `https://spawnforge.ai/api/health`
+   - Check Sentry for error spikes
+   - Check Vercel deployment status
+   - Check open `label:ci-failure` issues — automated rollbacks, a red
+     security-alerts cron, and post-deploy smoke failures all land there
+     (§11, "Where automated failures land")
+3. **Classify**: P0 (site down), P1 (major feature broken), P2 (degraded performance)
+4. **Mitigate** using the appropriate runbook above
+5. **Communicate** in #incidents with:
+   - What is happening
+   - What is affected
+   - What you are doing
+   - ETA for resolution (or "investigating")
+6. **Resolve** and verify with health checks + smoke tests
+7. **Post-mortem** within 24 hours for P0/P1 incidents

@@ -11,8 +11,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { reserveTokenBudget, releaseUnusedBudget, recordStepUsage } from '@/lib/tokens/budget';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const MAX_PIPELINE_TOKENS = 1_000_000;
 
@@ -40,7 +38,7 @@ const requestSchema = z.discriminatedUnion('action', [
   releaseSchema,
 ]);
 
-async function POST_impl(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -52,7 +50,7 @@ async function POST_impl(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return redactedJson(
+    return NextResponse.json(
       { error: 'validation_error', details: ['Invalid JSON body'] },
       { status: 400 },
     );
@@ -97,7 +95,3 @@ async function POST_impl(req: NextRequest) {
     remaining: result.remaining,
   });
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

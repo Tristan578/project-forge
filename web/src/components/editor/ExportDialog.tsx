@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef, useId } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { X, Download, Loader2, Palette, Code, Check, AlertTriangle } from 'lucide-react';
 import { exportGame, downloadBlob } from '@/lib/export/exportEngine';
 import { useEditorStore } from '@/stores/editorStore';
@@ -21,10 +21,6 @@ interface ExportDialogProps {
 }
 
 export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
-  // useId, not literal ids: the panel can mount more than once, and a
-  // repeated id sends the second <label for> to the first panel's control.
-  const baseId = useId();
-  const fieldId = (key: string) => `${baseId}-${key}`;
   const sceneName = useEditorStore((s) => s.sceneName);
   const isExporting = useEditorStore((s) => s.isExporting);
   const setExporting = useEditorStore((s) => s.setExporting);
@@ -344,9 +340,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
           {/* Resolution */}
           <div>
-            <label htmlFor={fieldId('resolution')} className="mb-1 block text-xs font-medium text-zinc-300">Resolution</label>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Resolution</label>
             <select
-              id={fieldId('resolution')}
               value={resolution}
               onChange={(e) => setResolution(e.target.value as 'responsive' | '1920x1080' | '1280x720')}
               disabled={isExporting}
@@ -361,9 +356,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
           {/* Orientation Lock — not applicable to embeds (inherits parent orientation) */}
           {mode !== 'embed' && (
             <div>
-              <label htmlFor={fieldId('orientation-lock')} className="mb-1 block text-xs font-medium text-zinc-300">Orientation Lock</label>
+              <label className="mb-1 block text-xs font-medium text-zinc-300">Orientation Lock</label>
               <select
-                id={fieldId('orientation-lock')}
                 value={orientationLock}
                 onChange={(e) => setOrientationLock(e.target.value as 'none' | 'landscape' | 'portrait')}
                 disabled={isExporting}
@@ -379,10 +373,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
           {/* Background Color */}
           <div>
-            <label htmlFor={fieldId('background-color')} className="mb-1 block text-xs font-medium text-zinc-300">Background Color</label>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Background Color</label>
             <div className="flex items-center gap-2">
               <input
-                id={fieldId('background-color')}
                 type="color"
                 value={bgColor}
                 onChange={(e) => setBgColor(e.target.value)}
@@ -391,7 +384,6 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
               />
               <input
                 type="text"
-                aria-label="Background color hex value"
                 value={bgColor}
                 onChange={(e) => setBgColor(e.target.value)}
                 disabled={isExporting}
@@ -418,9 +410,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
           {/* Texture Compression */}
           <div>
-            <label htmlFor={fieldId('texture-compression')} className="mb-1 block text-xs font-medium text-zinc-300">Texture Compression</label>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Texture Compression</label>
             <select
-              id={fieldId('texture-compression')}
               value={compressionPreset}
               onChange={(e) => {
                 const key = e.target.value;
@@ -441,11 +432,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
               <div className="mt-2 space-y-2 rounded border border-zinc-700 bg-zinc-800/50 p-3">
                 <div>
                   <div className="flex items-center justify-between">
-                    <label htmlFor={fieldId('compression-quality')} className="text-xs font-medium text-zinc-300">Quality</label>
+                    <label className="text-xs font-medium text-zinc-300">Quality</label>
                     <span className="text-xs text-zinc-400">{compressionQuality}%</span>
                   </div>
                   <input
-                    id={fieldId('compression-quality')}
                     type="range"
                     min={0}
                     max={100}
@@ -481,9 +471,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
             {showLoadingCustomization && (
               <div className="space-y-3 rounded border border-zinc-700 bg-zinc-800/50 p-3">
                 <div>
-                  <label htmlFor={fieldId('progress-style')} className="mb-1 block text-xs font-medium text-zinc-300">Progress Style</label>
+                  <label className="mb-1 block text-xs font-medium text-zinc-300">Progress Style</label>
                   <select
-                    id={fieldId('progress-style')}
                     value={loadingConfig.progressStyle}
                     onChange={(e) => setLoadingConfig({ ...loadingConfig, progressStyle: e.target.value as LoadingScreenConfig['progressStyle'] })}
                     disabled={isExporting}
@@ -500,7 +489,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   <label className="mb-1 block text-xs font-medium text-zinc-300">Loading Title</label>
                   <input
                     type="text"
-                    value={loadingConfig.title ?? ''}
+                    value={loadingConfig.title || ''}
                     onChange={(e) => setLoadingConfig({ ...loadingConfig, title: e.target.value || undefined })}
                     disabled={isExporting}
                     placeholder="Optional"
@@ -512,7 +501,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   <label className="mb-1 block text-xs font-medium text-zinc-300">Loading Subtitle</label>
                   <input
                     type="text"
-                    value={loadingConfig.subtitle ?? ''}
+                    value={loadingConfig.subtitle || ''}
                     onChange={(e) => setLoadingConfig({ ...loadingConfig, subtitle: e.target.value || undefined })}
                     disabled={isExporting}
                     placeholder="Optional"
@@ -522,9 +511,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label htmlFor={fieldId('loading-background')} className="mb-1 block text-xs font-medium text-zinc-300">Background</label>
+                    <label className="mb-1 block text-xs font-medium text-zinc-300">Background</label>
                     <input
-                      id={fieldId('loading-background')}
                       type="color"
                       value={loadingConfig.backgroundColor}
                       onChange={(e) => setLoadingConfig({ ...loadingConfig, backgroundColor: e.target.value })}
@@ -533,9 +521,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                     />
                   </div>
                   <div>
-                    <label htmlFor={fieldId('loading-progress-color')} className="mb-1 block text-xs font-medium text-zinc-300">Progress Color</label>
+                    <label className="mb-1 block text-xs font-medium text-zinc-300">Progress Color</label>
                     <input
-                      id={fieldId('loading-progress-color')}
                       type="color"
                       value={loadingConfig.progressBarColor}
                       onChange={(e) => setLoadingConfig({ ...loadingConfig, progressBarColor: e.target.value })}

@@ -4,12 +4,10 @@ import { gameLikes } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
-async function POST_impl(
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -53,11 +51,11 @@ async function POST_impl(
     return NextResponse.json({ liked: true, likeCount: Number(count[0].count) });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/like', method: 'POST' });
-    return redactedJson({ error: 'Failed to like game' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to like game' }, { status: 500 });
   }
 }
 
-async function DELETE_impl(
+export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -85,11 +83,6 @@ async function DELETE_impl(
     return NextResponse.json({ liked: false, likeCount: Number(count[0].count) });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/like', method: 'DELETE' });
-    return redactedJson({ error: 'Failed to unlike game' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to unlike game' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);
-export const DELETE = withEgressGuard(DELETE_impl);

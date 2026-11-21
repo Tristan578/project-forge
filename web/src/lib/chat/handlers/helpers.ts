@@ -5,7 +5,6 @@
 import { z } from 'zod';
 import type { MaterialData, LightData, PhysicsData, SceneNode } from './types';
 import { F32_SAFE_MAX, zVec2, zVec3, zVec4 } from './types';
-import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
 
 // ===== Compound Action Types =====
 
@@ -15,12 +14,6 @@ export interface CompoundResult {
   entityIds: Record<string, string>;
   operations: Array<{ action: string; success: boolean; entityId?: string; error?: string }>;
   summary: string;
-  /**
-   * Every game-component value the tool did not apply as asked, each tagged
-   * with the entity it landed on (PF-1148). Always present; empty when nothing
-   * was adjusted. `summary` says the same thing in sentences.
-   */
-  corrections: readonly GameComponentFieldCorrection[];
 }
 
 export interface GameplayAnalysis {
@@ -176,15 +169,10 @@ const zPartialPhysics = z.object({
 
 /**
  * Build a compound result from operation list.
- *
- * `corrections` are the game-component values the call did not apply as asked
- * (PF-1148); they are carried as they are and said in the summary, each under
- * the name of the entity it landed on.
  */
 export function buildCompoundResult(
   operations: Array<{ action: string; success: boolean; entityId?: string; error?: string }>,
-  nameToId: Record<string, string>,
-  corrections: readonly GameComponentFieldCorrection[] = [],
+  nameToId: Record<string, string>
 ): CompoundResult {
   const successCount = operations.filter((op) => op.success).length;
   const success = successCount === operations.length;
@@ -196,15 +184,12 @@ export function buildCompoundResult(
     ? `Partial success: ${successCount}/${operations.length} entities created. Entity IDs: ${Object.entries(nameToId).map(([name, id]) => `${name}=${id}`).join(', ')}`
     : `Failed to create entities. ${operations.filter((op) => !op.success).length} errors.`;
 
-  const nameOf = (entityId: string) => Object.entries(nameToId).find(([, id]) => id === entityId)?.[0];
-
   return {
     success,
     partialSuccess,
     entityIds: nameToId,
     operations,
-    summary: withCorrectionSummary(summary, corrections, nameOf),
-    corrections,
+    summary,
   };
 }
 
@@ -287,18 +272,9 @@ export function buildPhysicsFromPartial(partialPhysics: Record<string, unknown>)
 
 /**
  * Infer entity type from SceneNode components.
- *
- * Component names are the engine's wire vocabulary, emitted by
- * `detect_components` in `engine/src/core/scene_graph.rs`. `TerrainEnabled` is
- * checked first because a terrain surface also carries `Mesh3d`, and a bare
- * `Mesh3d` match would misclassify it. There is deliberately no `'Sprite'` /
- * `'SpriteData'` branch: that wire contract emits neither string, so such a
- * branch is dead — a node classifies through the shared `'unknown'` fallback
- * instead (see PF-1162 / #9263).
  */
 export function inferEntityType(node: SceneNode): string {
   const components = node.components || [];
-  if (components.includes('TerrainEnabled')) return 'terrain';
   if (components.includes('PointLight')) return 'point_light';
   if (components.includes('DirectionalLight')) return 'directional_light';
   if (components.includes('SpotLight')) return 'spot_light';

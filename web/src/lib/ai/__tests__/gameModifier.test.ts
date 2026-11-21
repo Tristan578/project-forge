@@ -417,12 +417,8 @@ describe('buildSceneContext', () => {
     expect(typeMap['Terrain']).toBe('terrain');
     expect(typeMap['DLight']).toBe('directional_light');
     expect(typeMap['SLight']).toBe('spot_light');
-    // PF-1162: 'SpriteData' is not emitted by the engine wire contract and a
-    // componentless node has nothing to match, so both fall through the shared
-    // helper to 'unknown' (previously the private copies returned 'sprite' and
-    // 'entity' respectively).
-    expect(typeMap['Spr']).toBe('unknown');
-    expect(typeMap['Empty']).toBe('unknown');
+    expect(typeMap['Spr']).toBe('sprite');
+    expect(typeMap['Empty']).toBe('entity');
   });
 });
 

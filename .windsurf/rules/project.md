@@ -18,11 +18,11 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 
 | Library | Version | Notes |
 |---------|---------|-------|
-| Bevy | 0.19 | wgpu 29, WebGPU primary |
-| bevy_rapier3d/2d | 0.35 | `default-features=false` |
-| bevy_hanabi | 0.19 | GPU particles, WebGPU only |
+| Bevy | 0.18 | wgpu 27, WebGPU primary |
+| bevy_rapier3d/2d | 0.33 | `default-features=false` |
+| bevy_hanabi | 0.18 | GPU particles, WebGPU only |
 | transform-gizmo-bevy | 0.9 | Local fork at `.transform-gizmo-fork/` |
-| bevy_panorbit_camera | 0.35 | `yaw`/`pitch`/`radius` |
+| bevy_panorbit_camera | 0.34 | `yaw`/`pitch`/`radius` |
 | Zustand | 5.x | React state |
 | Next.js | 16.x | React framework |
 | Clerk | — | Authentication |
@@ -65,8 +65,7 @@ cd web && npx eslint --max-warnings 0          # Lint (ZERO warnings)
 cd web && npx tsc --noEmit                      # TypeScript
 cd web && npx vitest run                        # Unit tests (2200+)
 cd web && npx vitest run --coverage             # With coverage
-# MCP server: type-check first (vitest does not type-check)
-cd mcp-server && npx tsc --noEmit && npx vitest run
+cd mcp-server && npx vitest run                 # MCP server tests
 cd web && npx playwright test                   # E2E (requires WASM build)
 ```
 

@@ -8,8 +8,6 @@ import { moderateContent } from '@/lib/moderation/contentFilter';
 import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const commentSchema = z.object({
   content: z.string().trim().min(1).max(1000),
@@ -19,7 +17,7 @@ const commentSchema = z.object({
 export const dynamic = 'force-dynamic';
 
 // Get comments for a game
-async function GET_impl(
+export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -54,7 +52,6 @@ async function GET_impl(
       content: c.content,
       parentId: c.parentId,
       authorId: c.authorId,
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
       authorName: c.authorName || 'Unknown',
       createdAt: c.createdAt.toISOString(),
     }));
@@ -62,7 +59,7 @@ async function GET_impl(
     return NextResponse.json({ comments: formattedComments });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/comment', method: 'GET' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to fetch comments' },
       { status: 500 }
     );
@@ -70,7 +67,7 @@ async function GET_impl(
 }
 
 // Post a comment
-async function POST_impl(
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -141,7 +138,6 @@ async function POST_impl(
           content: comment.content,
           parentId: comment.parentId,
           authorId: mid.userId!,
-          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored displayName is unset, same as absent; falls back to a display placeholder
           authorName: author[0]?.displayName || 'Unknown',
           createdAt: comment.createdAt.toISOString(),
         },
@@ -150,14 +146,9 @@ async function POST_impl(
     );
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/comment', method: 'POST' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to post comment' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);
-export const POST = withEgressGuard(POST_impl);

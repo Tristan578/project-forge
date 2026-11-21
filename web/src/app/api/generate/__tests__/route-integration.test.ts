@@ -11,14 +11,6 @@
  */
 
 vi.mock('server-only', () => ({}));
-vi.mock('next/server', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('next/server')>()),
-  after: vi.fn(),
-}));
-vi.mock('@/lib/qstash/client', () => ({
-  isQstashConfigured: vi.fn(() => false),
-  publishGenerationCallback: vi.fn().mockResolvedValue(undefined),
-}));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -45,25 +37,18 @@ vi.mock('@/lib/keys/resolver', () => ({
   ApiKeyError: class extends Error { code: string; constructor(c: string, m: string) { super(m); this.code = c; } },
 }));
 
-// Spread the actual module: `assertAiAccess`/`createGenerationHandler` reach
-// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
-// via `@/lib/billing/tierPlans`, so a bare mock throws.
-vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
-  return {
-    ...actual,
-    getTokenCost: vi.fn().mockReturnValue(10),
-    TOKEN_COSTS: {
-      sprite_generation_dalle3: 20,
-      sprite_generation_replicate: 10,
-      sprite_sheet_cost_per_frame: 15,
-      tileset_generation: 50,
-      pixel_art_replicate: 10,
-      pixel_art_openai: 20,
-      localize_cost_per_chunk: 5,
-    },
-  };
-});
+vi.mock('@/lib/tokens/pricing', () => ({
+  getTokenCost: vi.fn().mockReturnValue(10),
+  TOKEN_COSTS: {
+    sprite_generation_dalle3: 20,
+    sprite_generation_replicate: 10,
+    sprite_sheet_cost_per_frame: 15,
+    tileset_generation: 50,
+    pixel_art_replicate: 10,
+    pixel_art_openai: 20,
+    localize_cost_per_chunk: 5,
+  },
+}));
 
 vi.mock('@/lib/ai/contentSafety', () => ({
   sanitizePrompt: vi.fn((text: string) => ({ safe: true, filtered: text })),
@@ -99,21 +84,11 @@ vi.mock('@/lib/db/client', () => ({
   ),
 }));
 
-// Job-ownership binding (#10262) is covered by its own unit tests
-// (jobOwnership.test.ts) and by createGenerationHandler.qstash.test.ts;
-// isolate it here so the mocked `getDb()` above (no `insert`) doesn't
-// silently fail inside `bindProviderJob` on every async route's success path.
-vi.mock('@/lib/generate/jobOwnership', () => ({
-  bindProviderJob: vi.fn().mockResolvedValue(undefined),
-}));
-
 // Provider client mocks
 vi.mock('@/lib/generate/elevenlabsClient', () => ({
   ElevenLabsClient: vi.fn(function (this: Record<string, unknown>) {
     this.generateSfx = vi.fn().mockResolvedValue({ audioBase64: 'base64==', durationSeconds: 5 });
     this.generateVoice = vi.fn().mockResolvedValue({ audioBase64: 'base64==', durationSeconds: 3 });
-    // #9522: music now routes to ElevenLabs, resolving audio inline.
-    this.generateMusic = vi.fn().mockResolvedValue({ audioBase64: 'base64music==', durationSeconds: 30 });
   }),
 }));
 
@@ -122,6 +97,12 @@ vi.mock('@/lib/generate/meshyClient', () => ({
     this.createTextTo3D = vi.fn().mockResolvedValue({ taskId: 'meshy-1' });
     this.createImageTo3D = vi.fn().mockResolvedValue({ taskId: 'meshy-2' });
     this.createTextToTexture = vi.fn().mockResolvedValue({ taskId: 'meshy-3' });
+  }),
+}));
+
+vi.mock('@/lib/generate/sunoClient', () => ({
+  SunoClient: vi.fn(function (this: Record<string, unknown>) {
+    this.createMusic = vi.fn().mockResolvedValue({ taskId: 'suno-1' });
   }),
 }));
 
@@ -151,7 +132,7 @@ vi.mock('@/lib/config/providers', async (importOriginal) => ({
   // pre-existing pins this suite asserts against.
   ...(await importOriginal<typeof import('@/lib/config/providers')>()),
   DB_PROVIDER: {
-    chat: 'anthropic', sfx: 'elevenlabs', voice: 'elevenlabs', music: 'elevenlabs',
+    chat: 'anthropic', sfx: 'elevenlabs', voice: 'elevenlabs', music: 'suno',
     model3d: 'meshy', texture: 'meshy', sprite: 'replicate', image: 'openai',
   },
   SPRITE_SIZES: ['32x32', '64x64', '128x128', '256x256', '512x512', '1024x1024'],
@@ -191,7 +172,6 @@ vi.mock('@/lib/i18n/gameLocalization', () => ({
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
-import { isQstashConfigured } from '@/lib/qstash/client';
 
 const mockAuth = vi.mocked(authenticateRequest);
 const mockResolve = vi.mocked(resolveApiKey);
@@ -217,7 +197,6 @@ beforeEach(() => {
     ctx: { user: { id: 'user-int', tier: 'pro' } as any, clerkId: 'clerk-int' },
   });
   mockResolve.mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-int' });
-  vi.mocked(isQstashConfigured).mockReturnValue(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -242,16 +221,15 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(data.audioBase64).toBe('base64==');
   });
 
-  // #9522: music moved to ElevenLabs and resolves synchronously, returning
-  // audio inline like sfx/voice — no jobId, no polling.
-  it('music: valid request → 201 with audioBase64 inline (ElevenLabs)', async () => {
+  // #9117 / #9522: music is declared unavailable until it moves to ElevenLabs.
+  // The route refuses 503 before the key resolves, so no jobId is ever minted.
+  it('music: valid request → 503 SERVICE_UNAVAILABLE (declared unavailable, #9522)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(503);
     const data = await res.json();
-    expect(data.audioBase64).toBe('base64music==');
-    expect(data.provider).toBe('elevenlabs');
-    expect(data.jobId).toBeUndefined();
+    expect(data.code).toBe('SERVICE_UNAVAILABLE');
+    expect(data.details).toEqual({ capability: 'music', issue: 9522 });
   });
 
   it('skybox: valid request → 201 with jobId', async () => {
@@ -500,12 +478,12 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     expect(data.provider).toBe('elevenlabs');
   });
 
-  it('music: runs through the agent — 201 with audio inline (#9522)', async () => {
+  it('music: the unavailable gate precedes the agent — 503, no usageId minted (#9117)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(503);
     const data = await res.json();
-    expect(data.audioBase64).toBe('base64music==');
+    expect(data.usageId).toBeUndefined();
   });
 
   it('model: 201 with jobId AND usageId preserved through the agent', async () => {
@@ -632,14 +610,12 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     expect(instance.createTextToTexture.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('test 17 — music route: ElevenLabsClient.generateMusic receives ctx.abortSignal (#9522)', async () => {
-    const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+  it('test 17 — music route: SunoClient is never constructed while music is declared unavailable (#9117)', async () => {
+    const { SunoClient } = await import('@/lib/generate/sunoClient');
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const instance = vi.mocked(ElevenLabsClient).mock.instances.at(-1) as any;
-    expect(instance.generateMusic.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(res.status).toBe(503);
+    expect(vi.mocked(SunoClient)).not.toHaveBeenCalled();
   });
 
   it('test 17 — sfx route: ElevenLabsClient.generateSfx receives ctx.abortSignal', async () => {
@@ -864,28 +840,16 @@ describe('generate routes match the published OpenAPI response contract', () => 
       `POST ${routePath} ${status} body ${JSON.stringify(body)} `
         + `violates the spec: ${JSON.stringify(validate.errors)}`,
     ).toBe(true);
-    // The union validator checks types and the provider discriminator above.
-    // Compare every property against the matching documented response variant.
-    const schema = routePath === '/api/generate/sprite' && status === 201
-      ? contract.componentSchema((body as { provider: string }).provider === 'dalle3'
-        ? 'SpriteSyncGenerationJob' : 'SpriteAsyncGenerationJob')
-      : contract.operationSchema('post', routePath, status);
-    // Strict sprite schemas explicitly distinguish required and optional keys.
-    // Absent optional fields are valid; present fields still undergo the full diff.
-    const propertySchema = routePath === '/api/generate/sprite' && status === 201
-      ? { ...schema, properties: Object.fromEntries(
-        Object.entries(schema.properties as Record<string, unknown>).filter(([key]) =>
-          (schema.required as string[]).includes(key) || Object.hasOwn(body as object, key)),
-      ) }
-      : schema;
-    expect(diffAgainstSpec(propertySchema, body)).toEqual(expectedDivergences);
+    expect(
+      diffAgainstSpec(contract.operationSchema('post', routePath, status), body),
+    ).toEqual(expectedDivergences);
   }
 
-  it('POST /api/generate/music 201 matches the inline AudioResult (#9522)', async () => {
+  it('POST /api/generate/music 503 matches Error (declared unavailable, #9117)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
-    expectContract('/api/generate/music', 201, await res.json());
+    expect(res.status).toBe(503);
+    expectContract('/api/generate/music', 503, await res.json());
   });
 
   it('POST /api/generate/skybox 201 matches GenerationJob', async () => {
@@ -912,75 +876,10 @@ describe('generate routes match the published OpenAPI response contract', () => 
   it('POST /api/generate/sprite 201 matches GenerationJob', async () => {
     const { POST } = await import('@/app/api/generate/sprite/route');
     const res = await POST(makeRequest('http://test/api/generate/sprite', {
-      prompt: 'hero character', size: '64x64', provider: 'sdxl', removeBackground: true,
+      prompt: 'hero character', size: '64x64', removeBackground: true,
     }));
     expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body.backgroundRemoval).toBe('unsupported');
-    expectContract('/api/generate/sprite', 201, body);
-  });
-
-  it('POST /api/generate/sprite 201 documents the completed body without polling', async () => {
-    const { SpriteClient } = await import('@/lib/generate/spriteClient');
-    vi.mocked(SpriteClient).mockImplementationOnce(function (this: Record<string, unknown>) {
-      this.generateSprite = vi.fn().mockResolvedValue({
-        taskId: 'provider-image', status: 'completed',
-        resultUrl: 'data:image/png;base64,YWJj', backgroundRemoval: 'not-requested',
-      });
-    } as never);
-    const { POST } = await import('@/app/api/generate/sprite/route');
-    const res = await POST(makeRequest('http://test/api/generate/sprite', {
-      prompt: 'hero character', provider: 'dalle3', removeBackground: false,
-    }));
-    expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body.jobId).toBe('dalle3-sync:usage-int');
-    expect(body.resultUrl).toBe('data:image/png;base64,YWJj');
-    expectContract('/api/generate/sprite', 201, body);
-    const validate = contract.operation('post', '/api/generate/sprite', 201);
-    const { resultUrl: _resultUrl, ...missingImage } = body;
-    expect(validate(missingImage)).toBe(false);
-    expect(validate({ ...body, backgroundRemoval: 'unsupported' })).toBe(false);
-    expect(validate({ ...body, provider: 'sdxl' })).toBe(false);
-  });
-
-  it.each(['starting', 'processing', 'succeeded', 'failed', 'canceled', 'aborted'])(
-    'POST SDXL sprite documents forwarded Replicate status %s', async (status) => {
-      const { SpriteClient } = await import('@/lib/generate/spriteClient');
-      vi.mocked(SpriteClient).mockImplementationOnce(function (this: Record<string, unknown>) {
-        this.generateSprite = vi.fn().mockResolvedValue({ taskId: 'prediction-1', status });
-      } as never);
-      const { POST } = await import('@/app/api/generate/sprite/route');
-      const res = await POST(makeRequest('http://test/api/generate/sprite', {
-        prompt: 'hero character', provider: 'sdxl', removeBackground: false,
-      }));
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.status).toBe(status);
-      expectContract('/api/generate/sprite', 201, body);
-    },
-  );
-
-  it.each(['sdxl', 'dalle3'] as const)('POST sprite %s documents the configured durable extension', async (provider) => {
-    vi.mocked(isQstashConfigured).mockReturnValue(true);
-    if (provider === 'dalle3') {
-      const { SpriteClient } = await import('@/lib/generate/spriteClient');
-      vi.mocked(SpriteClient).mockImplementationOnce(function (this: Record<string, unknown>) {
-        this.generateSprite = vi.fn().mockResolvedValue({
-          taskId: 'provider-image', status: 'completed',
-          resultUrl: 'data:image/png;base64,YWJj', backgroundRemoval: 'not-requested',
-        });
-      } as never);
-    }
-    const { POST } = await import('@/app/api/generate/sprite/route');
-    const res = await POST(makeRequest('http://test/api/generate/sprite', {
-      prompt: 'hero character', provider, removeBackground: false,
-    }));
-    expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body.durable).toBe(true);
-    expectContract('/api/generate/sprite', 201, body);
-    expect(contract.operation('post', '/api/generate/sprite', 201)({ ...body, durable: false })).toBe(false);
+    expectContract('/api/generate/sprite', 201, await res.json());
   });
 
   it('POST /api/generate/sprite-sheet 201 matches GenerationJob', async () => {

@@ -4,14 +4,12 @@
  */
 
 import { z } from 'zod';
-import { backgroundRemovalWarning } from '@/lib/generation/backgroundRemoval';
 import type { ToolHandler, ExecutionResult } from './types';
-import { ownEntry, parseArgs } from './types';
+import { parseArgs } from './types';
 import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
 import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
-import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { DIRECT_CAPABILITY_PROVIDER, getCapabilityUnavailability } from '@/lib/config/providers';
 import { STATUS_ENDPOINTS, resolveStatusEndpoint } from '@/lib/generation/statusEndpoints';
@@ -21,7 +19,7 @@ export function makeJobId(): string {
   return `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Track a pending import or asynchronous generation, preserving inline artifacts. */
+/** Track an async generation job in the generation store. */
 export function trackJob(opts: {
   jobId: string;
   providerJobId: string;
@@ -34,8 +32,6 @@ export function trackJob(opts: {
   autoPlace?: boolean;
   targetEntityId?: string;
   materialSlot?: string;
-  resultUrl?: string;
-  metadata?: Record<string, unknown>;
 }) {
   useGenerationStore.getState().addJob({
     id: opts.jobId,
@@ -52,8 +48,6 @@ export function trackJob(opts: {
     autoPlace: opts.autoPlace,
     targetEntityId: opts.targetEntityId,
     materialSlot: opts.materialSlot,
-    resultUrl: opts.resultUrl,
-    metadata: opts.metadata,
   });
 }
 
@@ -80,11 +74,6 @@ async function queryStatus(
   statusUrl: string,
   jobId: string
 ): Promise<ExecutionResult> {
-  const localJob = Object.values(useGenerationStore.getState().jobs).find((job) => job.jobId === jobId);
-  if (jobId.startsWith('dalle3-sync:')) {
-    if (!localJob?.resultUrl) return { success: false, error: 'Synchronous sprite result is unavailable. Refresh saved jobs before retrying.' };
-    return { success: true, result: { jobId, status: 'completed', progress: 100, resultUrl: localJob.resultUrl } };
-  }
   const response = await fetch(`${statusUrl}?jobId=${encodeURIComponent(jobId)}`);
   if (!response.ok) {
     return { success: false, error: 'Failed to query generation status' };
@@ -337,7 +326,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     // Find entity name for SFX context enrichment
-    const entityName = p.data.entityId ? ownEntry(ctx.store.sceneGraph.nodes, p.data.entityId)?.name : undefined;
+    const entityName = p.data.entityId ? ctx.store.sceneGraph.nodes[p.data.entityId]?.name : undefined;
     const result = await generateFetch('/api/generate/sfx', {
       prompt: enrichSfxPrompt(p.data.prompt, entityName, ctx.store),
       durationSeconds: p.data.durationSeconds ?? 5,
@@ -479,24 +468,6 @@ export const generationHandlers: Record<string, ToolHandler> = {
         entityId: musicEntityId && musicAutoPlace ? musicEntityId : undefined,
         sink: ctx.store,
       });
-      // In-app AI parity with GenerateMusicDialog (#9854): the chat tool's
-      // generated track must land as an editable clip in the Music Arrangement
-      // editor, not only attach to an entity. `typeof`/`Number.isFinite`, not
-      // `||`, so a 0-length report cannot mask a real duration with the
-      // default — but 0 itself is not a real duration for generated music
-      // either: `buildClip`'s `clampTrimWindow` treats a 0 source duration as
-      // "unknown" and substitutes a 0.05s floor, leaving the clip's own
-      // `sourceDurationSeconds: 0` while `trimEnd` is non-zero (#10058).
-      // `> 0`, matching the async path in `useGenerationPolling.ts`.
-      const durationSeconds =
-        typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds) && data.durationSeconds > 0
-          ? data.durationSeconds
-          : p.data.durationSeconds ?? 30;
-      useMusicArrangementStore.getState().addGeneratedClip({
-        sourceUrl: assetName,
-        durationSeconds,
-        name: assetName,
-      });
       return {
         success: true,
         result: { message: `Music generated and imported as "${assetName}".` },
@@ -558,8 +529,6 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
       durable: data.durable === true,
-      resultUrl: data.status === 'completed' && typeof data.resultUrl === 'string' ? data.resultUrl : undefined,
-      metadata: { backgroundRemoval: data.backgroundRemoval },
       entityId: spriteTargetId,
       autoPlace: p.data.autoPlace ?? !!spriteTargetId,
       targetEntityId: spriteTargetId,
@@ -568,7 +537,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     return {
       success: true,
       result: {
-        message: `Sprite generation started. Job ID: ${data.jobId}. Estimated time: ~${data.estimatedSeconds}s. ${backgroundRemovalWarning(data.backgroundRemoval) ?? ''}`.trim(),
+        message: `Sprite generation started. Job ID: ${data.jobId}. Estimated time: ~${data.estimatedSeconds}s.`,
         jobId: data.jobId,
       },
     };
@@ -623,7 +592,6 @@ export const generationHandlers: Record<string, ToolHandler> = {
 
     // Generate each pose as a separate sprite generation job
     const jobIds: string[] = [];
-    const removalWarnings = new Set<string>();
     for (const pose of p.data.poses) {
       const basePrompt = enrichPrompt(p.data.prompt, 'sprite', ctx.store);
       const prompt = `${basePrompt} - ${pose} pose`;
@@ -634,8 +602,6 @@ export const generationHandlers: Record<string, ToolHandler> = {
         removeBackground: true,
       });
       if (result.ok) {
-        const warning = backgroundRemovalWarning(result.data.backgroundRemoval);
-        if (warning) removalWarnings.add(warning);
         const localId = makeJobId();
         trackJob({
           jobId: localId,
@@ -645,8 +611,6 @@ export const generationHandlers: Record<string, ToolHandler> = {
           provider: (result.data.provider as string) ?? 'dalle3',
           usageId: result.data.usageId as string | undefined,
           durable: result.data.durable === true,
-          resultUrl: result.data.status === 'completed' && typeof result.data.resultUrl === 'string' ? result.data.resultUrl : undefined,
-          metadata: { backgroundRemoval: result.data.backgroundRemoval },
         });
         jobIds.push(result.data.jobId as string);
       }
@@ -659,7 +623,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     return {
       success: true,
       result: {
-        message: `Character generation started for ${jobIds.length}/${p.data.poses.length} poses. ${Array.from(removalWarnings).join(' ')}`.trim(),
+        message: `Character generation started for ${jobIds.length}/${p.data.poses.length} poses.`,
         jobIds,
       },
     };
@@ -721,10 +685,6 @@ export const generationHandlers: Record<string, ToolHandler> = {
     // two maps can never drift (#8762) — every pollable type, including
     // pixel-art / sprite_sheet / tileset, resolves here.
 
-    if (p.data.jobId.startsWith('dalle3-sync:')) {
-      return queryStatus('/api/generate/sprite/status', p.data.jobId);
-    }
-
     // If type is specified, use it directly
     if (p.data.type) {
       const route = resolveStatusEndpoint(p.data.type);
@@ -752,10 +712,26 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ assetId: z.string().min(1) }), args);
     if (p.error) return p.error;
 
+    // Generate a new version with background removed via sprite endpoint
+    const result = await generateFetch('/api/generate/sprite', {
+      prompt: `Remove background from existing asset`,
+      sourceAssetId: p.data.assetId,
+      removeBackground: true,
+    });
+    if (!result.ok) {
+      return {
+        success: true,
+        result: {
+          message: `Background removal is not available as a standalone operation. Use generate_sprite with removeBackground: true instead.`,
+        },
+      };
+    }
+    const { data } = result;
     return {
       success: true,
       result: {
-        message: 'Background removal of an existing asset is not available. Generate a new sprite with generate_sprite and removeBackground: true instead; this will create a new image.',
+        message: `Background removal started. Job ID: ${data.jobId}.`,
+        jobId: data.jobId,
       },
     };
   },

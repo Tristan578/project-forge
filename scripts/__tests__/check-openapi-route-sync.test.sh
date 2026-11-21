@@ -50,9 +50,7 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
-readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
-readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 command -v jq  >/dev/null 2>&1 || { echo "jq not found — required to run these tests"; exit 1; }
@@ -69,18 +67,14 @@ make_repo() {
   mkdir -p "$repo/api"
   echo "$repo"
 }
-readonly -f make_repo
 
 # Write the spec / allowlist verbatim.
 write_spec()      { printf '%s' "$2" > "$1/spec.json"; }
-readonly -f write_spec
 write_allowlist() { printf '%s' "$2" > "$1/allowlist.json"; }
-readonly -f write_allowlist
 
 # add_route <repo> <segments> — create api/<segments>/route.ts. <segments> may
 # contain literal [param], [...rest] and (group) dirs (quoted, so no globbing).
 add_route() { mkdir -p "$1/api/$2" && : > "$1/api/$2/route.ts"; }
-readonly -f add_route
 
 # Run the gate inside $repo with the three inputs pointed at the throwaway tree;
 # echo "<exit>|<output>". $2 overrides the api dir (default 'api') for the
@@ -93,7 +87,6 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
-readonly -f run_gate
 
 EMPTY_ALLOWLIST='{"categories":{},"routes":{}}'
 
@@ -378,9 +371,8 @@ if [ -f "$CI_YML" ]; then
   # file, so the mutation takes effect in the very run that should have caught
   # it. Count the key at ITS OWN indent level first (4 spaces = job level; a
   # deeper-indented step `if:` is legitimate and must not be counted) and
-  # require exactly one. actionlint (the `actionlint` job, #8719) flags
-  # duplicate keys, but it runs from this same PR-controlled file — this pin
-  # is the independent backstop (#9031).
+  # require exactly one. actionlint flags duplicate keys, but it is not wired
+  # into this repo's CI — this pin is the backstop (#9031).
   oa_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$oa_block" || true)"
   if [ "$oa_if_count" -ne 1 ]; then
     fail "openapi-route-sync job has $oa_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"

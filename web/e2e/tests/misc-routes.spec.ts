@@ -134,21 +134,12 @@ test.describe('Misc Routes @ui', () => {
       }
     });
 
-    // #9522 moved music from Suno (no public API, permanently unprovisionable)
-    // to ElevenLabs — the same provider serving sfx/voice. The E2E environment
-    // configures no PLATFORM_ELEVENLABS_KEY, so music is unavailable for the
-    // ordinary reason (missing key, BYOK-configurable in Settings) rather than
-    // the old #9522 unprovisionable dead-end. Session responses still stay
-    // private regardless of which capabilities are available.
-    test('music is BYOK-configurable via ElevenLabs and session responses stay private', async ({ request }) => {
+    test('music is declared unavailable and session responses stay private', async ({ request }) => {
       const response = await getCapabilities(request);
       expect(response.headers()['cache-control']).toContain('private');
       const body = await response.json();
-      const music = body.capabilities.find((c: { capability: string }) => c.capability === 'music');
-      expect(music).toMatchObject({ available: false, byokConfigurable: true });
-      expect(music.unprovisionable).toBeUndefined();
-      expect(music.issue).toBeUndefined();
-      expect(music.hint).toContain('ElevenLabs');
+      expect(body.capabilities.find((c: { capability: string }) => c.capability === 'music'))
+        .toMatchObject({ available: false, unprovisionable: true, issue: 9522 });
       expect(body.available).not.toContain('music');
       expect(body.unavailable).toContain('music');
     });

@@ -90,30 +90,6 @@ describe('GET /api/health', () => {
     expect(res.status).toBe(503);
   });
 
-  // #9719/#9727: the public body strips `error` and `details`, so a probe's
-  // `summary` is the only thing that tells a status-page visitor WHAT is
-  // degraded. With only the gateway key set, AI Providers must say which
-  // generation features are unavailable — by their user-facing labels.
-  it('carries the AI Providers summary into the public body when generation keys are missing', async () => {
-    vi.stubEnv('VERCEL', '');
-    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
-
-    const { GET } = await import('./route');
-    const body = await (await GET(makeReq())).json();
-
-    const ai = body.services.find((s: { name: string }) => s.name === 'AI Providers');
-    expect(ai?.status).toBe('degraded');
-    expect(ai?.summary).toContain('3D Model Generation');
-    expect(ai?.summary).not.toContain('PLATFORM_');
-    // #9522: music now routes to ElevenLabs, so with no PLATFORM_ELEVENLABS_KEY
-    // it is unconfigured on the platform path like its sibling sfx/voice
-    // capabilities and IS listed here — by its user-facing label, and (since
-    // ElevenLabs is a BYOK provider) under the "your own API key" clause.
-    expect(ai?.summary).toContain('Music Generation');
-    expect(ai?.details).toBeUndefined();
-  });
-
   it('should return 200 when all critical services healthy', async () => {
     vi.resetModules();
     vi.stubEnv('DATABASE_URL', 'postgresql://test');

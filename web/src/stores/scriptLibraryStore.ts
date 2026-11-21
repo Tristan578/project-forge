@@ -110,15 +110,7 @@ export function importScript(json: string): LibraryScript | null {
   try {
     const data = JSON.parse(json);
     if (!data.name || !data.source) return null;
-    // An imported file is untyped user input: only a real string description
-    // and a real array of string tags are kept. `?? []` let `"tags": ""`
-    // through as a string, and the next search or render called `.some` /
-    // `.join` on it (#9565 review round 2).
-    const description = typeof data.description === 'string' ? data.description : '';
-    const tags = Array.isArray(data.tags)
-      ? data.tags.filter((t: unknown): t is string => typeof t === 'string')
-      : [];
-    return saveScript(data.name, data.source, description, tags);
+    return saveScript(data.name, data.source, data.description || '', data.tags || []);
   } catch {
     return null;
   }

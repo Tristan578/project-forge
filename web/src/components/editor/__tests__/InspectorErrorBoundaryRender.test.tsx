@@ -50,10 +50,7 @@ describe('InspectorErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </InspectorErrorBoundary>
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('Material failed to render');
-    const retry = screen.getByRole('button', { name: 'Retry' });
-    expect(retry).toHaveAttribute('type', 'button');
-    expect(retry).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-[var(--sf-accent)]');
+    expect(screen.getByText('Material failed to render')).toBeInTheDocument();
   });
 
   it('renders alert triangle icon in fallback', () => {

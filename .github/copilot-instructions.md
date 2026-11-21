@@ -4,7 +4,7 @@
 
 SpawnForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot monorepo:
 
-- **engine/** — Rust (Bevy 0.19) compiled to WebAssembly via wasm-bindgen. Pure game logic in `engine/src/core/`, JS interop bridge in `engine/src/bridge/`.
+- **engine/** — Rust (Bevy 0.18) compiled to WebAssembly via wasm-bindgen. Pure game logic in `engine/src/core/`, JS interop bridge in `engine/src/bridge/`.
 - **web/** — TypeScript/React (Next.js 16) editor frontend. State via Zustand store slices. Strict TypeScript, zero ESLint warnings.
 - **mcp-server/** — TypeScript MCP server exposing engine commands as AI-callable tools via WebSocket.
 
@@ -73,9 +73,9 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 - Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.3.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
+**Coverage thresholds (CI-enforced):** statements 83 · branches 75 · functions 78 · lines 85
 
 **Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
 <!-- AGENTIC-SYNC:END -->
@@ -87,32 +87,6 @@ See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync deta
 - `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
 - The JSON map file is a cache. SQLite columns are authoritative.
 - Tickets from other local projects are NEVER synced (they have `sync_repo = NULL`).
-
-## Plan Mode (Copilot CLI)
-
-This repository is spec-first. `.claude/CLAUDE.md` says "Spec-First: Never implement
-without an approved spec in `specs/`". In Copilot CLI, enter plan mode before you
-implement a subtask. Have Copilot write the implementation plan, check it against the
-ticket's acceptance criteria, and only then leave plan mode. The plan is not a spec. If
-the work needs a spec, it still goes in `specs/`.
-
-Ways to enter it, checked against `copilot --help` and `copilot help commands` for
-Copilot CLI 1.0.88:
-
-- `/plan` creates an implementation plan before coding.
-- `copilot --plan` (or `--mode plan`) starts a session in plan mode.
-- To start every new interactive session in plan mode, set the `defaultMode` setting to
-  `plan` with `/settings` at user scope. Do not use `/settings --repo`. That writes
-  `.github/copilot/settings.json` inside the repository, and a personal preference
-  must not be committed there.
-
-Do not combine `--plan` with `--mode autopilot` here. That combination approves the
-plan automatically and implements it, which skips the review step this section exists
-for.
-
-To trust this checkout so Copilot CLI stops asking on every start, follow
-`docs/guides/copilot-cli-trusted-folders.md`. The trust list is local state and is never
-committed.
 
 ## Security
 
@@ -206,7 +180,7 @@ bash .claude/tools/validate-all.sh              # Everything
 
 For full architecture rules, ECS patterns, and library APIs, see:
 - `.claude/CLAUDE.md` — Full project constitution
-- `.claude/rules/bevy-api.md` — Bevy 0.19 API patterns
+- `.claude/rules/bevy-api.md` — Bevy 0.18 API patterns
 - `.claude/rules/entity-snapshot.md` — ECS snapshot patterns
 - `.claude/rules/web-quality.md` — ESLint & React patterns
 - `.claude/rules/library-apis.md` — Third-party library APIs

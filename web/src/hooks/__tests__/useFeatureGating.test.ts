@@ -29,7 +29,7 @@ function mockCapabilitiesResponse(
       { capability: 'texture', available: false, label: 'Texture Generation', requiredProviders: ['Meshy'], hint: 'Configure Meshy API key in Settings to enable Texture Generation.' },
       { capability: 'sfx', available: false, label: 'Sound Effect Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.' },
       { capability: 'voice', available: false, label: 'Voice Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Voice Generation.' },
-      { capability: 'music', available: false, label: 'Music Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Music Generation.' },
+      { capability: 'music', available: false, label: 'Music Generation', requiredProviders: ['Suno'], hint: 'Configure Suno API key in Settings to enable Music Generation.' },
       { capability: 'sprite', available: false, label: 'Sprite Generation', requiredProviders: ['Replicate'], hint: 'Configure Replicate API key in Settings to enable Sprite Generation.' },
       { capability: 'bg_removal', available: false, label: 'Background Removal', requiredProviders: ['remove.bg'], hint: 'Configure remove.bg API key in Settings to enable Background Removal.' },
     ],
@@ -421,20 +421,5 @@ describe('capabilities cache freshness (#9725)', () => {
     await waitFor(() => expect(hook.result.current.loading).toBe(false));
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalledWith('/api/capabilities', expect.objectContaining({ cache: 'no-store' }));
-  });
-});
-
-// #9727 review: `CAPABILITY_LABELS` in lib/config/providers claims to be the one
-// vocabulary Settings, /api/capabilities and the status page share. A second
-// byte-identical table in this hook is exactly the drift that claim denies.
-describe('feature labels', () => {
-  it('derives every label from the shared CAPABILITY_LABELS table', async () => {
-    const { FEATURE_CAPABILITY_MAP, FEATURE_LABELS } = await import('@/hooks/useFeatureGating');
-    const { CAPABILITY_LABELS } = await import('@/lib/config/providers');
-    for (const [featureId, caps] of Object.entries(FEATURE_CAPABILITY_MAP)) {
-      expect(FEATURE_LABELS[featureId as keyof typeof FEATURE_LABELS], featureId).toBe(
-        caps.map((cap) => CAPABILITY_LABELS[cap]).join(' + '),
-      );
-    }
   });
 });

@@ -22,27 +22,17 @@ import { useEffect, useRef } from 'react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
-import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { getStatusEndpoint } from '@/lib/generation/statusEndpoints';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
-import { showPersistentError, showSuccess } from '@/lib/toast';
-import { withRetryGuidance } from '@/lib/generate/retryGuidance';
-import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
+import { showSuccess } from '@/lib/toast';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
 const MAX_POLL_DURATION_MS = 5 * 60 * 1000;
-/**
- * Fallback source length for an async-generated music clip when neither the
- * status route nor the post-process metadata reports one. Matches the music
- * dialog's default request duration so a length-less job still yields a
- * sensibly sized clip rather than a zero-length one.
- */
-const DEFAULT_MUSIC_CLIP_SECONDS = 30;
 
 interface StatusResponse {
   jobId: string;
@@ -54,40 +44,6 @@ interface StatusResponse {
   durationSeconds?: number;
 }
 
-/** A machine code such as `TIER_REQUIRED` or `SERVICE_DEGRADED`: never user-facing text. */
-const MACHINE_CODE = /^[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
-
-/**
- * The user-facing sentence in a non-OK status-route body, or `null` when the
- * body carries none. Status routes put two shapes on the wire: most write the
- * sentence in `error` (`{ error: 'Could not read … Please try again.' }`,
- * the 402 key errors, the 429 rate limit), while the tier gate and the auth
- * layer put a CODE in `error` and the sentence in `message`
- * (`{ error: 'TIER_REQUIRED', message: 'This feature requires … plan' }`,
- * `SERVICE_DEGRADED`, `ACCOUNT_BANNED`). So `message` wins when it is a
- * non-empty string, `error` is the fallback, and a bare code is never
- * returned. Without the last rule, polling that gives up would leave a
- * persistent toast reading "TIER_REQUIRED".
- */
-function statusErrorText(body: unknown): string | null {
-  if (!body || typeof body !== 'object') return null;
-  const { message, error } = body as { message?: unknown; error?: unknown };
-  for (const candidate of [message, error]) {
-    if (typeof candidate === 'string' && candidate.trim() !== '' && !MACHINE_CODE.test(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-/** The subset of GET /api/jobs/[id] the durable-completion path reads. */
-interface DurableJobRow {
-  status: string;
-  resultUrl: string | null;
-  resultMeta: unknown;
-  errorMessage: string | null;
-}
-
 export function useGenerationPolling() {
   const jobs = useGenerationStore((s) => s.jobs);
   const updateJob = useGenerationStore((s) => s.updateJob);
@@ -95,27 +51,6 @@ export function useGenerationPolling() {
   const startedAtRef = useRef<Record<string, number>>({});
   const durablePollsRef = useRef<Record<string, () => void>>({});
   const inFlightPollsRef = useRef<Record<string, true>>({});
-  /**
-   * Jobs whose hydrated-terminal sync (#8892) is in flight. `handleCompletion`
-   * mutates `jobs` mid-flight, which re-runs the `[jobs]` effect that started
-   * the sync; this is what stops it starting a second one for the same job.
-   */
-  const syncingRef = useRef<Set<string>>(new Set());
-  /**
-   * The most recent message a status route sent with a non-OK response.
-   *
-   * #9736 replaced eight status routes' 500 bodies with sentences written for
-   * the user, and every one of them was dead copy: this poller threw on
-   * `!response.ok` BEFORE reading the body and swallowed the throw in a
-   * console.error, so a persistently failing status route showed a stalled
-   * progress bar for five minutes and then the bare "Generation timed out".
-   * Keeping the last message here is what actually puts the route's sentence in
-   * front of the person. Polling still CONTINUES on a non-OK read — a single
-   * 500 is usually transient — so this only surfaces once the job gives up.
-   * The one exception is a 404, which is the status route's ownership refusal
-   * (#10262) and is handled as terminal at the read site, never through here.
-   */
-  const lastStatusErrorRef = useRef<Record<string, string>>({});
 
   // On mount: drain any refunds that failed in a previous session
   useEffect(() => {
@@ -183,114 +118,28 @@ export function useGenerationPolling() {
       if (inFlightPollsRef.current[id]) return;
       inFlightPollsRef.current[id] = true;
       try {
-      // Synchronous providers (the DALL-E sprite path, #9734) return the
-      // finished image in the POST response body, which the dialog stores as
-      // the job's `resultUrl`. Import it directly and skip the status
-      // round-trip entirely: a base64 `data:` URL (post background-removal, up
-      // to several MB) must never be threaded through the `?jobId=` query
-      // string, where `+` decodes to a space and the request-line size limit is
-      // exceeded. A normal pollable job carries no `resultUrl` until it
-      // completes, so its presence on a still-`pending` job is the marker for
-      // an inline synchronous result.
-      const inlineJob = useGenerationStore.getState().jobs[id];
-      if (inlineJob && inlineJob.status === 'pending' && inlineJob.resultUrl) {
-        updateJob(id, { status: 'downloading', progress: 100 });
-        await handleCompletion(id, type, {
-          jobId,
-          status: 'completed',
-          progress: 100,
-          resultUrl: inlineJob.resultUrl,
-        });
-        stopPolling(id);
-        return;
-      }
-
       const startedAt = startedAtRef.current[id] ?? Date.now();
       startedAtRef.current[id] = startedAt;
       // Keep the existing five-minute overall cap independent of focus events
       // or the selected safety interval.
       if (Date.now() - startedAt >= MAX_POLL_DURATION_MS) {
         await triggerRefund(id);
-        // Prefer whatever the status route last told us. "Generation timed
-        // out" is accurate but useless when the real story is "the status
-        // route has been returning 500 for five minutes".
-        //
-        // The FALLBACK carries `RETRY_GUIDANCE`, because this is the common
-        // case, not an edge one: `lastStatusErrorRef` is deleted on every
-        // successful poll, so an ordinary slow provider that never reaches a
-        // terminal state lands here with nothing but the bare sentence. That is
-        // the exact defect `retryGuidance.ts` was written for — a message that
-        // names the condition and gives someone whose five-minute generation
-        // just ended in an indefinite red toast nothing to do about it. A
-        // status route's own message already carries its guidance, so it is
-        // passed through unchanged.
-        failJob(id, lastStatusErrorRef.current[id] ?? withRetryGuidance('Generation timed out'));
-        delete lastStatusErrorRef.current[id];
+        updateJob(id, {
+          status: 'failed',
+          error: 'Generation timed out',
+        });
         stopPolling(id);
         return;
       }
 
-      // DURABLE COMPLETION, DB FIRST (#8892). When the QStash callback path is
-      // configured, the job's own row is finalized server-side with no tab
-      // open, so it is the authoritative source and the provider status route
-      // is only the fallback. A transient failure here never blocks: the poll
-      // falls through to the provider read below exactly as before.
-      if (durable && useGenerationStore.getState().durableCompletionEnabled) {
-        const durableJob = useGenerationStore.getState().jobs[id];
-        if (durableJob?.dbId) {
-          try {
-            const dbRes = await fetch(`/api/jobs/${encodeURIComponent(durableJob.dbId)}`);
-            if (dbRes.ok) {
-              const dbJob = (await dbRes.json()) as DurableJobRow;
-              if (await settleFromDurableRow(id, type, jobId, dbJob)) {
-                stopPolling(id);
-                return;
-              }
-            }
-          } catch (err) {
-            console.error('DB job status check error:', err);
-          }
-        }
-      }
-
       try {
         const endpoint = getStatusEndpoint(type);
-        // Encode the jobId: the status route reads it via
-        // `searchParams.get('jobId')`, which decodes `application/x-www-form-
-        // urlencoded`, so a raw `+`/`&`/`#`/space in a provider id would be
-        // corrupted or truncated. Provider prediction ids are url-safe today,
-        // but encoding is the correct contract and defends any id shape (#9734).
-        const response = await fetch(`${endpoint}?jobId=${encodeURIComponent(jobId)}`);
+        const response = await fetch(`${endpoint}?jobId=${jobId}`);
 
         if (!response.ok) {
-          // Read the body BEFORE throwing. The route's message is written for
-          // the user and is the only place that says what actually went wrong.
-          const body: unknown = await response.json().catch(() => null);
-          const message = statusErrorText(body);
-
-          // A 404 is TERMINAL, not transient (#10262). The only 404 a status
-          // route sends is its ownership refusal: the polled job id is not
-          // bound to this account, and nothing about polling again changes
-          // that. Two legitimate owners hit it too — a job in flight when the
-          // ownership table shipped (no binding row) and a job whose bind
-          // write failed — and before this branch both were indistinguishable
-          // from a 500, so the poller retried every 3 s for five minutes
-          // before refunding. Stop now, refund now, and show the route's
-          // sentence (it carries its own next step; the fallback gets one
-          // appended, like the timeout below).
-          if (response.status === 404) {
-            await triggerRefund(id);
-            failJob(id, message ?? withRetryGuidance('Generation job not found'));
-            delete lastStatusErrorRef.current[id];
-            stopPolling(id);
-            return;
-          }
-
-          if (message) lastStatusErrorRef.current[id] = message;
           throw new Error(`Status check failed: ${response.status}`);
         }
 
-        delete lastStatusErrorRef.current[id];
         const data: StatusResponse = await response.json();
 
         if (data.status === 'completed') {
@@ -303,11 +152,10 @@ export function useGenerationPolling() {
           stopPolling(id);
         } else if (data.status === 'failed') {
           await triggerRefund(id);
-          // Same rule as the timeout fallback above: the provider reported a
-          // terminal failure with no message of its own, so the bare sentence
-          // gets the next step appended.
-          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank job error is unset; falls back to a generated retry message
-          failJob(id, data.error || withRetryGuidance('Generation failed'));
+          updateJob(id, {
+            status: 'failed',
+            error: data.error || 'Generation failed',
+          });
 
           // Stop polling
           stopPolling(id);
@@ -336,95 +184,6 @@ export function useGenerationPolling() {
 
     // Immediate first poll
     void poll();
-  }
-
-  /**
-   * Apply a DB row the durable callback finalized. Returns true when the row was
-   * terminal and has been reflected (imported or refunded + failed), false when
-   * it is still in flight and the caller should keep polling.
-   *
-   * `refundTokens` is idempotent on usageId (the webhook's own
-   * finalizeFailedAndRefund has usually run already), so the client-side refund
-   * here cannot double-refund; what it adds is the balance refresh and the
-   * toast, which only a live client can do.
-   */
-  async function settleFromDurableRow(
-    id: string,
-    type: string,
-    jobId: string,
-    dbJob: DurableJobRow,
-  ): Promise<boolean> {
-    if (dbJob.status === 'completed') {
-      // A hydrated row is already 'downloading' (hydrateFromServer). Writing it
-      // again would change nothing on screen and would PATCH the finalized row
-      // back to a live status: if the tab closed mid-import, the next load
-      // would hydrate a 'downloading' row that nothing ever settles.
-      if (useGenerationStore.getState().jobs[id]?.status !== 'downloading') {
-        updateJob(id, { status: 'downloading', progress: 100 });
-      }
-      // For a texture, resultMeta IS the { albedo: url, ... } maps object the
-      // completion branch iterates (pollProviderStatus stores status.maps there).
-      const maps =
-        type === 'texture' && dbJob.resultMeta && typeof dbJob.resultMeta === 'object'
-          ? (dbJob.resultMeta as Record<string, string>)
-          : undefined;
-      await handleCompletion(id, type, {
-        jobId,
-        status: 'completed',
-        progress: 100,
-        resultUrl: dbJob.resultUrl ?? undefined,
-        maps,
-      });
-      return true;
-    }
-    if (dbJob.status === 'failed') {
-      await triggerRefund(id);
-      // Same rule as the provider-failure branch: the message a server route
-      // wrote is passed through; the bare fallback gets the next step appended.
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank job error is unset; falls back to a generated retry message
-      failJob(id, dbJob.errorMessage || withRetryGuidance('Generation failed'));
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * The row read for a hydrated completed job failed, so its import has not
-   * started. Put it back to the terminal status the server reported rather
-   * than leave a 'downloading' spinner that nothing is working on. LOCAL ONLY:
-   * `updateJob` would PATCH `completed` + `imported: true`, marking the row
-   * reflected without importing it and dropping it from the next load's list.
-   * `needsCompletionSync` stays set, so the next sync attempt retries.
-   */
-  function restoreHydratedTerminal(id: string) {
-    const current = useGenerationStore.getState().jobs[id];
-    if (current?.status !== 'downloading' || current.needsCompletionSync !== true) return;
-    useGenerationStore.setState((state) => {
-      const job = state.jobs[id];
-      if (!job || job.status !== 'downloading' || job.needsCompletionSync !== true) return state;
-      return { jobs: { ...state.jobs, [id]: { ...job, status: 'completed' } } };
-    });
-  }
-
-  /**
-   * One confirmation for a job the durable callback finished while no tab was
-   * open (#8892). Without it the job's only trace is a spinner that appears on
-   * load and quietly disappears. Called only from the completion-sync effect,
-   * which runs once per hydrated job, so a job completed live in this session
-   * never gets it; a failed row gets the failure toast `failJob` already shows.
-   */
-  function announceFinishedWhileAway(id: string) {
-    const job = useGenerationStore.getState().jobs[id];
-    if (job?.status !== 'completed') return;
-    const label = ESTIMATED_TIMES[job.type]?.label ?? 'generation';
-    // Say "added to your project" only when the import actually placed it:
-    // with autoPlace off (or no target entity) the result is recorded, not used.
-    const placed = job.metadata?.autoPlaced === true || job.type === 'skybox';
-    showSuccess(
-      placed
-        ? `Your ${label} finished while you were away and was added to your project.`
-        : `Your ${label} finished while you were away.`,
-    );
   }
 
   async function handleCompletion(id: string, type: string, data: StatusResponse) {
@@ -579,25 +338,6 @@ export function useGenerationPolling() {
         const store = useEditorStore.getState();
         store.importAudio(base64, assetName);
 
-        // Async/jobId path parity with the sync branch (#9854): a track that
-        // arrives via job polling (the durable QStash path, or any non-instant
-        // ElevenLabs response) must also land as an editable clip in the Music
-        // Arrangement editor, not only attach to an entity. Duration comes from
-        // the status route (`data.durationSeconds`) or the post-process
-        // metadata; `Number.isFinite`, not `||`, so a 0 cannot mask a real
-        // value — and a missing duration falls back to the arrangement default.
-        const clipDurationSeconds =
-          typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds) && data.durationSeconds > 0
-            ? data.durationSeconds
-            : typeof ppResult.metadata.durationSeconds === 'number' && Number.isFinite(ppResult.metadata.durationSeconds) && ppResult.metadata.durationSeconds > 0
-              ? ppResult.metadata.durationSeconds
-              : DEFAULT_MUSIC_CLIP_SECONDS;
-        useMusicArrangementStore.getState().addGeneratedClip({
-          sourceUrl: assetName,
-          durationSeconds: clipDurationSeconds,
-          name: assetName,
-        });
-
         // Attach looping music audio to target entity
         // Use targetEntityId (from autoPlace) or fall back to legacy entityId
         const entityId = job.targetEntityId ?? job.entityId;
@@ -734,110 +474,17 @@ export function useGenerationPolling() {
       // upstream, #8757). triggerRefund is idempotent server-side (refundTokens uses a
       // CTE ON CONFLICT keyed on usageId) and polling has already stopped by the time
       // this branch is reached, so it fires at most once per job.
-      const refunded = await triggerRefund(id);
-      failJob(id, err instanceof Error ? err.message : 'Download failed', {
-        userFacing: false,
-        refunded,
+      await triggerRefund(id);
+      updateJob(id, {
+        status: 'failed',
+        error: err instanceof Error ? err.message : 'Download failed',
       });
     }
   }
 
-  /**
-   * Mark a job failed AND tell the user, with a message written FOR the user.
-   *
-   * Writing the message to the store is not showing it. `GenerationStatus`
-   * returns null when no job is pending/processing/downloading, so marking the
-   * only job failed unmounts the one component that renders the message at the
-   * instant it is written; with another job still running, the dropdown that
-   * would show it is closed by default. The status routes' messages were
-   * carefully worded and reached nobody. A toast is the part that makes them
-   * arrive (#9736).
-   *
-   * THREE THINGS THE FIRST VERSION OF THIS GOT WRONG, all found by review.
-   *
-   *  - It toasted `err.message` from the completion path, so 'No result URL',
-   *    'No texture maps' and 'Downloaded file is not a valid GLB model' were
-   *    promoted from a dropdown that is closed by default to the primary
-   *    user-facing channel, untranslated. For the audience this product targets,
-   *    'No texture maps' is indistinguishable from a crash. Internal diagnostics
-   *    now go to `job.error` and to the console; the TOAST gets fixed, actionable
-   *    text. A message that came from a server route is written for the user by
-   *    definition and is passed through.
-   *
-   *    THAT PREMISE WAS HALF FALSE and a fifth board caught it: the eight
-   *    status routes emitted 'Texture generation produced no maps', 'Model
-   *    generation produced no file' and siblings — the same register as the
-   *    strings this change removed, and with no next step for someone whose
-   *    five-minute generation just ended in an indefinite red toast. Rather
-   *    than filter them here (which would make the pass-through rule
-   *    unpredictable), the ROUTES were fixed: each now names what happened and
-   *    what to do about it. So "a server route wrote it for the user" is now
-   *    true of every string that reaches this line, and the tests in each
-   *    `status/route.test.ts` pin the wording.
-   *  - It used `showError`, which inherits sonner's 4 s auto-dismiss. This is a
-   *    TERMINAL failure on a job that may have run for five minutes in the
-   *    background while the person was looking elsewhere, and once the toast
-   *    expires there is no surface left that renders `job.error` at all — the
-   *    message is unrecoverable. `showPersistentError` is what `lib/toast.ts`
-   *    documents for exactly this class.
-   *  - It passed no toast id, so N concurrent jobs hitting the same timeout
-   *    emitted N identical stacked toasts.
-   *
-   *    THE FIRST FIX FOR THAT DID NOT WORK, and a sixth board caught it: the id
-   *    was `generation-failed-${id}` where `id` is the JOB id, so N concurrent
-   *    jobs had N DISTINCT keys and still produced N toasts. `toast.ts` states
-   *    the actual mechanism — "an id turns N concurrent failures that produce
-   *    the same MESSAGE into one toast" — so collapsing them requires a
-   *    MESSAGE-derived key, which is what the id is now. Batch-generating assets
-   *    that fail together leaves one dismissable toast rather than a stack of
-   *    indefinite ones, and two jobs that failed for genuinely different reasons
-   *    still get a toast each.
-   *
-   *  - AND THE REFUND PROMISE WAS NOT TRUE. The internal-failure branch said
-   *    "Your tokens have been refunded" unconditionally, from a call site that
-   *    runs after `triggerRefund` — which returns without refunding anything
-   *    when the job has no `usageId` (BYOK and cache-hit jobs, where no tokens
-   *    were deducted to begin with), and which on failure only queues the refund
-   *    for a FUTURE session. In both cases the user was told, in an indefinite
-   *    red toast, that money had already come back. `retryGuidance.ts` writes the
-   *    rule this broke twenty lines away ("promising one that did not occur is a
-   *    support ticket") and `emptyArtifactResponse` takes an explicit `refunded`
-   *    boolean for the same reason. So does this now: `triggerRefund` REPORTS
-   *    whether it refunded, and the sentence claims a refund only when one
-   *    actually happened. When it did not, the toast says nothing about tokens
-   *    rather than guessing.
-   */
-  function failJob(
-    id: string,
-    message: string,
-    options?: { userFacing?: boolean; refunded?: boolean },
-  ) {
-    // The store keeps the real diagnostic — the dropdown and any bug report
-    // still show what actually happened.
-    updateJob(id, { status: 'failed', error: message });
-    const text =
-      options?.userFacing === false
-        ? options.refunded === true
-          ? 'That generation could not be finished. Your tokens have been refunded — try again, or pick a different style.'
-          : 'That generation could not be finished. Try again, or pick a different style.'
-        : message;
-    // MESSAGE-derived, not job-derived: sonner dedupes by id, so this is what
-    // collapses N concurrent failures with the same wording into one toast.
-    showPersistentError(text, { id: `generation-failed:${text}` });
-  }
-
-  /**
-   * Refund the tokens a failed job was charged, and REPORT whether it happened.
-   *
-   * The boolean is the point. `failJob` used to promise a refund from a call
-   * site that could not know — this returns `false` for a job with no `usageId`
-   * (BYOK and cache hits are never charged tokens, so there is nothing to
-   * return) and `false` when the refund API fails after three attempts and the
-   * work is queued for a future session.
-   */
-  async function triggerRefund(id: string): Promise<boolean> {
+  async function triggerRefund(id: string) {
     const job = useGenerationStore.getState().jobs[id];
-    if (!job?.usageId) return false;
+    if (!job?.usageId) return;
 
     try {
       await retryWithBackoff(
@@ -864,7 +511,6 @@ export function useGenerationPolling() {
       );
       await useUserStore.getState().fetchBalance();
       showSuccess('Tokens refunded for the failed generation.');
-      return true;
     } catch (err) {
       console.error('Token refund failed after retries — queuing for next session:', err);
       enqueueFailedRefund({
@@ -873,7 +519,6 @@ export function useGenerationPolling() {
         amount: 0,
         timestamp: Date.now(),
       });
-      return false;
     }
   }
 
@@ -921,53 +566,6 @@ export function useGenerationPolling() {
   // Moving the effect below the declarations is behaviour-identical: both of the
   // other effects have `[]` deps and register cleanup only, so the mount order
   // this changes is not observable.
-  // Hydrated-terminal jobs (#8892): the durable callback finished them while no
-  // tab was open, the list route returned them because imported = 0, and
-  // hydrateFromServer marked them. They are NOT active, so the polling effect
-  // below never sees them; this is the only path that runs their import or
-  // refund. The row is re-fetched rather than trusted from hydration so both
-  // this path and the poll fast path read one source, GET /api/jobs/[id].
-  useEffect(() => {
-    for (const job of Object.values(jobs)) {
-      if (job.needsCompletionSync !== true || !job.dbId) continue;
-      if (syncingRef.current.has(job.id)) continue;
-      syncingRef.current.add(job.id);
-      const { id, dbId, type, jobId } = job;
-      void (async () => {
-        try {
-          const res = await fetch(`/api/jobs/${encodeURIComponent(dbId)}`);
-          if (!res.ok) {
-            // Leave needsCompletionSync set so a later load retries.
-            console.error(`Durable completion sync failed: ${res.status}`);
-            restoreHydratedTerminal(id);
-            return;
-          }
-          const dbJob = (await res.json()) as DurableJobRow;
-          const settled = await settleFromDurableRow(id, type, jobId, dbJob);
-          updateJob(id, { needsCompletionSync: false });
-          if (settled) {
-            announceFinishedWhileAway(id);
-            // Mark the row reflected so the list route stops returning it.
-            // The failed branch's own status sync carries no `imported` (the
-            // store never sends false, and the route ignores false), so this
-            // and that unordered PATCH cannot race the row back to 0.
-            fetch(`/api/jobs/${encodeURIComponent(dbId)}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imported: true }),
-            }).catch((err) => console.error('Failed to mark job imported:', err));
-          }
-        } catch (err) {
-          console.error('Durable completion sync error:', err);
-          restoreHydratedTerminal(id);
-        } finally {
-          syncingRef.current.delete(id);
-        }
-      })();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs]);
-
   useEffect(() => {
     const activeJobs = Object.values(jobs).filter(
       (j) => j.status === 'pending' || j.status === 'processing'

@@ -10,19 +10,11 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Search, X } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 
-/** Optional result-count context for the hierarchy search field. */
 interface HierarchySearchProps {
-  /** Matching entity count; omitted by default and shown only for nonempty input. */
+  /** Number of entities matching the filter */
   matchCount?: number;
 }
 
-/**
- * Updates the store filter after 150ms while rendering input edits immediately.
- * Clear/Escape reset the filter; Escape and Enter blur the input. Ctrl/Cmd+F
- * focuses search when another text field does not own focus.
- * @param props Optional matching-entity count for the current filter.
- * @returns A labelled search field, optional count and named clear button.
- */
 export function HierarchySearch({ matchCount }: HierarchySearchProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -146,9 +138,8 @@ export function HierarchySearch({ matchCount }: HierarchySearchProps) {
           )}
           {hasValue && (
             <button
-              type="button"
               onClick={handleClear}
-              className="p-0.5 text-neutral-500 hover:text-neutral-300 rounded hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
+              className="p-0.5 text-neutral-500 hover:text-neutral-300 rounded hover:bg-neutral-700"
               title="Clear filter (Esc)"
               aria-label="Clear search filter"
             >

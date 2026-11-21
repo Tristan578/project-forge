@@ -98,9 +98,9 @@ function TreeItem({
               key={child.id}
               node={child}
               depth={depth + 1}
-              {...(selectedId !== undefined && { selectedId })}
+              selectedId={selectedId}
               expandedIds={expandedIds}
-              {...(onSelect !== undefined && { onSelect })}
+              onSelect={onSelect}
               onToggleExpand={onToggleExpand}
             />
           ))}
@@ -158,9 +158,9 @@ export function TreeView({
           key={node.id}
           node={node}
           depth={0}
-          {...(selectedId !== undefined && { selectedId })}
+          selectedId={selectedId}
           expandedIds={expandedSet}
-          {...(onSelect !== undefined && { onSelect })}
+          onSelect={onSelect}
           onToggleExpand={handleToggle}
         />
       ))}

@@ -5,8 +5,6 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const createLeaderboardSchema = z.object({
   name: z.string().trim().min(1).max(64),
@@ -30,7 +28,7 @@ async function verifyGameOwnership(gameId: string, userId: string) {
 }
 
 // GET /api/publish/[id]/leaderboards — list all leaderboards for a game
-async function GET_impl(
+export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -64,12 +62,12 @@ async function GET_impl(
     return NextResponse.json({ leaderboards: boards });
   } catch (err) {
     captureException(err, { route: '/api/publish/[id]/leaderboards', method: 'GET' });
-    return redactedJson({ error: 'Failed to list leaderboards' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to list leaderboards' }, { status: 500 });
   }
 }
 
 // POST /api/publish/[id]/leaderboards — create a new leaderboard
-async function POST_impl(
+export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -120,14 +118,9 @@ async function POST_impl(
   } catch (err) {
     const pgErr = err as { code?: string };
     if (pgErr.code === '23505') {
-      return redactedJson({ error: 'A leaderboard with this name already exists for this game' }, { status: 409 });
+      return NextResponse.json({ error: 'A leaderboard with this name already exists for this game' }, { status: 409 });
     }
     captureException(err, { route: '/api/publish/[id]/leaderboards', method: 'POST' });
-    return redactedJson({ error: 'Failed to create leaderboard' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to create leaderboard' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);
-export const POST = withEgressGuard(POST_impl);

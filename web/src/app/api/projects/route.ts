@@ -4,7 +4,6 @@ import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { apiError, internalError } from '@/lib/api/errors';
 import { z } from 'zod';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -15,7 +14,7 @@ const createProjectSchema = z.object({
  * GET /api/projects
  * List all projects for the authenticated user.
  */
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -37,7 +36,7 @@ async function GET_impl(req: NextRequest) {
  * Create a new project.
  * Body: { name: string, sceneData: object }
  */
-async function POST_impl(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -54,13 +53,6 @@ async function POST_impl(req: NextRequest) {
   } catch (error) {
     const err = error as Error & { limit?: number };
     if (err.message === 'Project limit exceeded') {
-      // The only value read from the caught error here is `err.limit`, a number
-      // that `lib/projects/service.ts` attaches itself. The sentence is ours and
-      // no upstream text can reach it. The rule's `instanceof` exemption does
-      // not apply because this error is narrowed by MESSAGE rather than by type;
-      // typing it would ripple through the remix route and four suites, which is
-      // a refactor this security fix should not be carrying.
-      // eslint-disable-next-line spawnforge/no-raw-response-in-catch -- err.limit is a number we set; see above
       return apiError(
         403,
         `Your plan allows ${err.limit} project${err.limit === 1 ? '' : 's'}. Upgrade to create more.`,
@@ -72,8 +64,3 @@ async function POST_impl(req: NextRequest) {
     return internalError();
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);
-export const POST = withEgressGuard(POST_impl);

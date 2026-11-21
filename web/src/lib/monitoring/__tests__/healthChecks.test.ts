@@ -11,10 +11,6 @@ describe('healthChecks', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
-    // `vi.spyOn(Date, 'now')` is not a stubbed global: unstubAllGlobals leaves
-    // it armed, and a leftover mockReturnValueOnce would shift the next test's
-    // clock.
-    vi.restoreAllMocks();
     vi.resetModules();
   });
 
@@ -55,57 +51,6 @@ describe('healthChecks', () => {
       const services = [
         { name: 'A', status: 'down' as const, latencyMs: 0, lastChecked: '' },
         { name: 'B', status: 'degraded' as const, latencyMs: 1, lastChecked: '' },
-      ];
-      expect(computeOverallStatus(services)).toBe('down');
-    });
-
-    // #9727 review: a degradation caused by a deliberate configuration state
-    // (no PLATFORM_* key — production's documented steady state) must not pin
-    // the public banner amber forever. A signal that never changes is read as
-    // noise, and the real AI-provider outage then looks identical to the
-    // baseline (lesson 13). The per-service entry still says `degraded`.
-    it('ignores a configurationOnly degradation when deriving the overall status', async () => {
-      const { computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
-      const services = [
-        { name: 'A', status: 'healthy' as const, latencyMs: 1, lastChecked: '' },
-        {
-          name: 'AI Providers',
-          status: 'degraded' as const,
-          latencyMs: 0,
-          lastChecked: '',
-          configurationOnly: true,
-        },
-      ];
-      expect(computeOverallStatus(services)).toBe('healthy');
-    });
-
-    it('still reports degraded when an ordinary degradation sits beside a configurationOnly one', async () => {
-      const { computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
-      const services = [
-        {
-          name: 'AI Providers',
-          status: 'degraded' as const,
-          latencyMs: 0,
-          lastChecked: '',
-          configurationOnly: true,
-        },
-        { name: 'Rate Limiting (Upstash)', status: 'degraded' as const, latencyMs: 2, lastChecked: '' },
-      ];
-      expect(computeOverallStatus(services)).toBe('degraded');
-    });
-
-    // The marker exempts a degradation, never an outage: `down` means nothing
-    // AI-shaped can be served, which is an incident whatever set the flag.
-    it('never lets configurationOnly suppress a down service', async () => {
-      const { computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
-      const services = [
-        {
-          name: 'AI Providers',
-          status: 'down' as const,
-          latencyMs: 0,
-          lastChecked: '',
-          configurationOnly: true,
-        },
       ];
       expect(computeOverallStatus(services)).toBe('down');
     });
@@ -156,28 +101,6 @@ describe('healthChecks', () => {
       ];
       const sanitized = sanitizeForPublic(services);
       expect(sanitized[0].error).toBeUndefined();
-      expect(sanitized[0].details).toBeUndefined();
-    });
-
-    // #9719: `summary` is the one field a probe may use to say WHAT is wrong
-    // in public terms (capability names), so it must survive sanitization
-    // while `error` and `details` are still stripped.
-    it('preserves the public-safe summary while stripping error and details', async () => {
-      const { sanitizeForPublic } = await import('@/lib/monitoring/healthChecks');
-      const services = [
-        {
-          name: 'AI Providers',
-          status: 'degraded' as const,
-          latencyMs: 0,
-          lastChecked: '',
-          error: 'PLATFORM_MESHY_KEY unset',
-          summary: 'Unavailable: model3d, texture',
-          details: { generationProviders: { meshy: false } },
-        },
-      ];
-      const sanitized = sanitizeForPublic(services);
-      expect(sanitized[0].summary).toBe('Unavailable: model3d, texture');
-      expect(sanitized[0].error).toBe('AI Providers is degraded');
       expect(sanitized[0].details).toBeUndefined();
     });
   });
@@ -262,243 +185,19 @@ describe('healthChecks', () => {
       expect(result.error).toContain('STRIPE_SECRET_KEY not configured');
     });
 
-    // #9719: presence of STRIPE_SECRET_KEY is not evidence Stripe will accept
-    // it. The probe performs ONE authenticated, credit-free request — Retrieve
-    // balance, `GET https://api.stripe.com/v1/balance` with
-    // `Authorization: Bearer <secret key>` (https://docs.stripe.com/api/balance/balance_retrieve,
-    // https://docs.stripe.com/api/authentication) — and grades the answer.
-    // The request shape pinned here is Stripe's, not ours (lesson 14).
-    it('returns healthy with real latency when Stripe accepts the key on GET /v1/balance', async () => {
+    it('returns healthy when STRIPE_SECRET_KEY is set', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      const fetchMock = vi.fn(async () => new Response('{"object":"balance","livemode":false}', { status: 200 }));
-      vi.stubGlobal('fetch', fetchMock);
-      // Real latency = the clock read around the probe, not a constant 0:
-      // drive Date.now so the measured span is observable without sleeping.
-      vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(1_012);
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.status).toBe('healthy');
-      expect(result.latencyMs).toBe(12);
       expect(result.details?.secretKeyConfigured).toBe(true);
-      expect(result.details?.probe).toBe('GET /v1/balance');
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-      expect(url).toBe('https://api.stripe.com/v1/balance');
-      expect(init.method).toBe('GET');
-      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk_test_abc');
-    });
-
-    // Stripe's documented meanings (https://docs.stripe.com/api/errors):
-    //   401 — "No valid API key provided."          → every charge will fail: DOWN
-    //   403 — "The API key doesn't have permissions   → the key authenticated;
-    //          to perform the request."                 a restricted key without
-    //                                                   `balance:read` cannot be
-    //                                                   graded by THIS probe
-    it('returns down with an auth error when Stripe rejects the key (401)', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_revoked');
-      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"type":"invalid_request_error"}}', { status: 401 })));
-      vi.spyOn(Date, 'now').mockReturnValueOnce(2_000).mockReturnValueOnce(2_007);
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('down');
-      expect(result.latencyMs).toBe(7);
-      expect(result.error).toMatch(/401/);
-      expect(result.error).toMatch(/rejected|auth/i);
-      expect(result.error).not.toContain('sk_test_revoked');
-      // `summary` survives sanitizeForPublic into the unauthenticated body, so
-      // it says what a visitor can act on ("don't try to buy right now"), never
-      // which credential the operator has to fix.
-      expect(result.summary).toBe('Payments are unavailable');
-      expect(result.summary).not.toMatch(/key|Stripe|401/i);
-    });
-
-    // 403 is an ACCEPTED response for the mode rule (the key authenticated),
-    // but it is NOT evidence that payments work: the probe could not run. A
-    // restricted `rk_live_` key with `checkout_sessions:write` only answers 403
-    // forever, and grading that `healthy` would keep reporting green after the
-    // checkout scope was revoked — the exact green-while-broken state #9719
-    // exists to remove (lesson 9: a check that could not run must not report
-    // success; #9727 review).
-    it('degrades on 403 — the key authenticated but the probe could not grade payments', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'rk_test_restricted');
-      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"type":"invalid_request_error"}}', { status: 403 })));
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('degraded');
-      // Operator detail only: the missing scope and what to do about it. No
-      // public summary — a visitor cannot act on a Stripe key's scopes, and
-      // this is not a payment outage.
-      expect(result.error).toContain('balance:read');
-      expect(result.error).toMatch(/403/);
-      expect(result.summary).toBeUndefined();
-      expect(result.details?.probeResult).toBe('key accepted; balance not readable by this key (403)');
-    });
-
-    // Under undici an unconsumed body holds the socket out of the connection
-    // pool until GC. This probe is driven by unauthenticated /health,
-    // /api/health and /api/status plus a 15-minute cron, so it is the
-    // highest-volume body-discarding fetch in the tree (#9727 review).
-    it('releases the Stripe response body after reading the status', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      const cancel = vi.fn(async () => undefined);
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async () => ({ status: 200, body: { cancel } }) as unknown as Response),
-      );
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('healthy');
-      expect(cancel).toHaveBeenCalledTimes(1);
-    });
-
-    // Releasing the socket is best-effort: a body that refuses to cancel must
-    // not turn an accepted key into a degraded verdict.
-    it('still grades the key when cancelling the response body rejects', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async () => ({
-          status: 200,
-          body: { cancel: async () => { throw new TypeError('already locked'); } },
-        }) as unknown as Response),
-      );
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('healthy');
-    });
-
-    // The socket must actually be abandoned at the deadline, not just the
-    // promise dropped — a hung Stripe would otherwise keep the lambda alive
-    // past `maxDuration` while `withTimeout` had already "returned".
-    it('bounds the probe with AbortSignal.timeout and reports the timeout with real latency', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
-      const fetchMock = vi.fn(async () => {
-        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
-      });
-      vi.stubGlobal('fetch', fetchMock);
-      vi.spyOn(Date, 'now').mockReturnValueOnce(5_000).mockReturnValueOnce(8_004);
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(timeoutSpy).toHaveBeenCalledWith(3_000);
-      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-      expect(init.signal).toBeInstanceOf(AbortSignal);
-      expect(result.status).toBe('degraded');
-      expect(result.error).toMatch(/timed out after 3000ms/);
-      expect(result.latencyMs).toBe(3_004);
-    });
-
-    it('returns degraded (never throws) on a transient network failure, with the latency it cost', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET'); }));
-      vi.spyOn(Date, 'now').mockReturnValueOnce(9_000).mockReturnValueOnce(9_250);
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('degraded');
-      expect(result.error).toContain('ECONNRESET');
-      expect(result.latencyMs).toBe(250);
-    });
-
-    // A test-mode key in production accepts every request and charges nobody.
-    // Stripe accepts it (200), so only the key prefix can reveal the mismatch
-    // (https://docs.stripe.com/keys#test-live-modes).
-    it.each([
-      [200, 'healthy'],
-      [401, 'down'],
-      [403, 'degraded'],
-    ] as const)('grades Stripe HTTP %s in stable staging running on the Production target as %s', async (status, expected) => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_staging_fixture');
-      vi.stubEnv('VERCEL_ENV', 'production');
-      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
-      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
-      const fetchMock = vi.fn(async () => new Response('{}', { status }));
-      vi.stubGlobal('fetch', fetchMock);
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe(expected);
-      expect(result.details?.mode).toBe('test');
-      expect(fetchMock).toHaveBeenCalledWith('https://api.stripe.com/v1/balance', expect.objectContaining({ method: 'GET' }));
-      if (status === 403) expect(result.error).toContain('balance:read');
-      expect(result.error ?? '').not.toContain('sk_test_staging_fixture');
-    });
-
-    it('returns degraded when a test-mode key is running in production', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      vi.stubEnv('VERCEL_ENV', 'production');
-      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
-      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"object":"balance","livemode":false}', { status: 200 })));
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('degraded');
-      expect(result.error).toContain('test-mode');
-      // Naming a key-mode misconfiguration on the public status page tells
-      // anyone polling it that checkout is not taking real money. The degraded
-      // badge is the public signal; the reason stays in `error`/`details`.
-      expect(result.summary).toBeUndefined();
-      expect(result.details?.mode).toBe('test');
-    });
-
-    // 403 means Stripe ACCEPTED the key, so it is an accepted response like a
-    // 2xx and must be graded by the same mode rule. Grading it healthy first
-    // let a restricted test-mode key pass in production (#9727 review).
-    it('degrades a restricted test-mode key in production even though 403 is "accepted"', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'rk_test_restricted');
-      vi.stubEnv('VERCEL_ENV', 'production');
-      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
-      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{}}', { status: 403 })));
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('degraded');
-      expect(result.error).toContain('test-mode');
-      expect(result.details?.probeResult).toBe('key accepted; balance not readable by this key (403)');
-    });
-
-    it('returns healthy for a live key in production and a test key in preview', async () => {
-      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"object":"balance"}', { status: 200 })));
-
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_live_abc');
-      vi.stubEnv('VERCEL_ENV', 'production');
-      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
-      let { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      let result = await checkPayments();
-      expect(result.status).toBe('healthy');
-      expect(result.details?.mode).toBe('live');
-
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      vi.stubEnv('VERCEL_ENV', 'preview');
-      ({ checkPayments } = await import('@/lib/monitoring/healthChecks'));
-      result = await checkPayments();
-      expect(result.status).toBe('healthy');
-      expect(result.details?.mode).toBe('test');
-    });
-
-    it('returns degraded on a Stripe 5xx', async () => {
-      vi.resetModules();
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
-      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkPayments();
-      expect(result.status).toBe('degraded');
-      expect(result.error).toMatch(/503/);
     });
 
     it('reports webhook secret presence in details', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
       vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_xyz');
-      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.details?.webhookSecretConfigured).toBe(true);
@@ -784,112 +483,31 @@ describe('healthChecks', () => {
       expect(result.details?.chatBackend).toBeNull();
       expect(result.details?.chatBackendConfigured).toBe(false);
       expect(result.error).toContain('No chat backend is configured');
-      // Public vocabulary: the feature label a visitor sees in Settings, and
-      // the BYOK caveat, not "chat backend".
-      expect(result.summary).toBe('AI Chat is unavailable without your own API key');
-      expect(result.summary).not.toMatch(/backend|PLATFORM_|API_KEY/);
-      // No chat backend at all is a real outage, not a deferred provisioning
-      // decision: it must keep driving the banner and the Sentry page (#9727).
-      expect(result.configurationOnly).toBeUndefined();
     });
 
-    // #9719: the gateway key serves chat only. With no generation key set the
-    // paid offer is mostly unavailable, so the probe must say so — and say
-    // WHICH capabilities — in the public body, not only in stripped details.
-    it('returns degraded naming every unconfigured capability when only the gateway key is set', async () => {
+    it('returns healthy on the gateway key alone, with zero generation keys set', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
-      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
-      const result = await checkAiProviders();
-      expect(result.status).toBe('degraded');
-      expect(result.details?.chatBackend).toBe('vercel-gateway');
-      expect(result.details?.generationConfiguredCount).toBe(0);
-      const missing = result.details?.unconfiguredCapabilities as string[];
-      expect(missing).toEqual(
-        expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal']),
-      );
-      expect(missing).not.toContain('chat');
-      expect(result.error).toContain('model3d');
-      // Public-safe summary survives sanitizeForPublic; it carries the
-      // user-facing feature labels (CAPABILITY_LABELS) — the vocabulary the
-      // status page's visitors already know — never ids or env var names.
-      // The probe grades the PLATFORM path only, so the public copy must not
-      // tell a creator whose own Meshy/ElevenLabs keys work that those features
-      // are down (#9727 review).
-      expect(result.summary).toBe(
-        'Available only with your own API key: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation, Music Generation. Unavailable on this platform: Sprite Generation, Background Removal',
-      );
-      expect(result.summary).not.toContain('PLATFORM_');
-      // #9522: music now shares the ElevenLabs key, so it is a normal
-      // byok-configurable unconfigured capability, listed like sfx/voice.
-      expect(missing).toContain('music');
-      expect(result.summary).toContain('Music Generation');
-      // #9727 review: this verdict is production's documented steady state
-      // (docs/guides/platform-keys.md — provisioning is deliberately
-      // deferred), so it is marked as a configuration state. The service entry
-      // still reads `degraded`; the marker is what keeps it out of the public
-      // `overall` and out of the 15-minute synthetic-monitor page.
-      expect(result.configurationOnly).toBeUndefined();
-    });
-
-    it('suppresses only explicitly declared missing capabilities and detects later key loss', async () => {
-      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
-      // #9522: music joins the ElevenLabs-served capabilities, so with no
-      // ElevenLabs key it is unconfigured too and must be in the declared set.
-      vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,music,sprite,bg_removal');
-      vi.stubEnv('PLATFORM_MESHY_KEY', 'provisioned');
-      const { checkAiProviders, computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
-      const baseline = await checkAiProviders();
-      expect(baseline.configurationOnly).toBe(true);
-      expect(computeOverallStatus([baseline])).toBe('healthy');
-      vi.stubEnv('PLATFORM_MESHY_KEY', '');
-      const regression = await checkAiProviders();
-      expect(regression.configurationOnly).toBeUndefined();
-      expect(regression.details?.unconfiguredCapabilities).toContain('model3d');
-      expect(computeOverallStatus([regression])).toBe('degraded');
-    });
-
-    it.each(['', '*', 'model3d,texture,sfx,voice,sprite,bg_removal,typo'])('does not suppress missing keys for an absent or invalid declaration (%s)', async (declaration) => {
-      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
-      vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', declaration);
-      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
-      expect((await checkAiProviders()).configurationOnly).toBeUndefined();
-    });
-
-    // #9522: music now shares PLATFORM_ELEVENLABS_KEY with sfx/voice, so a fully
-    // provisioned platform (ElevenLabs key present) covers music too and is green.
-    it('returns healthy when a chat backend and every provisionable generation key are configured', async () => {
-      vi.resetModules();
-      vi.stubEnv('VERCEL', '');
-      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
-      vi.stubEnv('PLATFORM_MESHY_KEY', 'x');
-      vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'x');
-      vi.stubEnv('PLATFORM_OPENAI_KEY', 'x');
-      vi.stubEnv('PLATFORM_REPLICATE_KEY', 'x');
-      vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'x');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
       expect(result.status).toBe('healthy');
-      expect(result.details?.unconfiguredCapabilities).toEqual([]);
+      expect(result.details?.chatBackend).toBe('vercel-gateway');
+      // Generation keys are an informational facet only — they never move status.
+      expect(result.details?.generationConfiguredCount).toBe(0);
       expect(result.error).toBeUndefined();
-      expect(result.summary).toBeUndefined();
-      expect(result.configurationOnly).toBeUndefined();
     });
 
-    it('resolves the gateway via Vercel OIDC with no explicit key at all (chat is not "down")', async () => {
+    it('returns healthy via Vercel OIDC with no explicit key at all', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '1');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      // Not 'down': chat resolves. Not 'healthy' either — no generation key
-      // is set, and #9719 makes that a degraded state, not a footnote.
-      expect(result.status).toBe('degraded');
+      expect(result.status).toBe('healthy');
       expect(result.details?.chatBackend).toBe('vercel-gateway');
-      expect(result.details?.unconfiguredCapabilities).not.toContain('chat');
     });
 
-    it('names only the capabilities that remain unconfigured once some keys are set', async () => {
+    it('reports platform generation keys without changing status', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
@@ -897,20 +515,12 @@ describe('healthChecks', () => {
       vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el_abc');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      expect(result.status).toBe('degraded');
+      expect(result.status).toBe('healthy');
       expect(result.details?.generationConfiguredCount).toBe(2);
       const providers = result.details?.generationProviders as Record<string, boolean>;
       expect(providers.meshy).toBe(true);
       expect(providers.elevenlabs).toBe(true);
-      // #9522: Suno is gone from PLATFORM_KEY_ENV, so it is no longer probed.
-      expect(providers.suno).toBeUndefined();
-      const missing = result.details?.unconfiguredCapabilities as string[];
-      expect(missing).not.toContain('model3d');
-      expect(missing).not.toContain('sfx');
-      expect(missing).toContain('sprite');
-      // #9522: music shares the ElevenLabs key, which is set here, so it is
-      // configured and not reported as an omission.
-      expect(missing).not.toContain('music');
+      expect(providers.suno).toBe(false);
     });
 
     it('stays down when generation keys are set but no chat backend is', async () => {
@@ -929,18 +539,8 @@ describe('healthChecks', () => {
       vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-abc');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      // Deterministic under #9719: the direct backend resolves chat, so the
-      // probe is not `down`; but a direct-only deployment routes nothing else,
-      // so every other capability is unconfigured and the probe is `degraded`.
-      // `not.toBe('down')` also passed on a false-green `healthy` (lesson 11).
-      expect(result.status).toBe('degraded');
+      expect(result.status).toBe('healthy');
       expect(result.details?.chatBackend).toBe('direct');
-      const missing = result.details?.unconfiguredCapabilities as string[];
-      expect(missing).toContain('embedding');
-      expect(missing).toContain('image');
-      expect(missing).not.toContain('chat');
-      expect(result.summary).toContain('Semantic Search');
-      expect(result.summary).toContain('Image Generation');
     });
   });
 
@@ -1092,39 +692,6 @@ describe('healthChecks', () => {
       expect(result.status).toBe('healthy');
       expect(result.details?.backend).toBe('direct');
       expect(mockFetch).toHaveBeenCalledWith('https://api.anthropic.com', { method: 'HEAD' });
-    });
-
-    it('reports wifConfigured (#8858) only when all three ANTHROPIC_WIF_* vars are set, and never their values', async () => {
-      const { ANTHROPIC_WIF_REQUIRED_ENV_NAMES } = await import('@/lib/config/anthropicWif');
-      expect(ANTHROPIC_WIF_REQUIRED_ENV_NAMES).toHaveLength(3);
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
-      vi.stubEnv('VERCEL', '');
-      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
-
-      const run = async () => {
-        vi.resetModules();
-        const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
-        return checkChatBackend();
-      };
-
-      for (const name of ANTHROPIC_WIF_REQUIRED_ENV_NAMES) vi.stubEnv(name, '');
-      expect((await run()).details?.wifConfigured).toBe(false);
-
-      ANTHROPIC_WIF_REQUIRED_ENV_NAMES.forEach((name, i) => vi.stubEnv(name, `wif-secret-value-${i}`));
-      const configured = await run();
-      expect(configured.details?.wifConfigured).toBe(true);
-      expect(configured.details?.configured).toBe(true);
-      expect(JSON.stringify(configured)).not.toContain('wif-secret-value');
-
-      vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV_NAMES[1], '');
-      expect((await run()).details?.wifConfigured).toBe(false);
-
-      // Also surfaced when no chat backend resolves at all.
-      vi.stubEnv('ANTHROPIC_API_KEY', '');
-      ANTHROPIC_WIF_REQUIRED_ENV_NAMES.forEach((name, i) => vi.stubEnv(name, `wif-secret-value-${i}`));
-      const noBackend = await run();
-      expect(noBackend.details?.configured).toBe(false);
-      expect(noBackend.details?.wifConfigured).toBe(true);
     });
 
     it('accepts 4xx responses as healthy (host is reachable)', async () => {
@@ -1308,70 +875,6 @@ describe('healthChecks', () => {
       expect(report.version).toBe('abcdef12');
       expect(report.timestamp).toBeDefined();
       expect(['healthy', 'degraded', 'down']).toContain(report.overall);
-    });
-
-    // The "six outbound probes" fact is the cost model the shared fan-out
-    // budget is sized against, and it is hand-restated in ten places:
-    // healthChecks.ts (getCachedHealthReport's header), api/health/route.ts
-    // (x2), api/status/route.ts (x2), api/status/route.test.ts,
-    // healthFanoutBudget.ts, app/health/page.tsx, app/__tests__/health-page.test.tsx
-    // and api/cron/health-monitor/route.ts's `maxDuration` comment. A comment
-    // is not a check (lesson 9), so this counts the real fan-out: the seventh
-    // probe someone adds fails here instead of silently making all ten wrong.
-    it('a full fan-out costs exactly six outbound probes', async () => {
-      vi.resetModules();
-      // Fully configured, so every check takes its network path rather than
-      // short-circuiting on a missing env var — a probe skipped for want of a
-      // key would undercount and the assertion would pass vacuously.
-      vi.stubEnv('DATABASE_URL', 'postgres://user:pw@db.neon.tech/spawnforge');
-      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
-      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'tok');
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://cdn.example.com');
-      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_x');
-      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_clerk');
-      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
-      vi.stubEnv('VERCEL', '');
-
-      // Neon speaks over its own transport, so it is counted through the
-      // driver rather than through `fetch`.
-      const neonQuery = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
-      vi.doMock('@neondatabase/serverless', () => ({
-        neon: () => neonQuery,
-      }));
-
-      const fetchMock = vi.fn(async (input: unknown) => {
-        const url = typeof input === 'string' ? input : String((input as { url?: string })?.url);
-        // The CDN probe reads Content-Type; everything else reads the status.
-        return new Response('{}', {
-          status: 200,
-          headers: url.endsWith('.wasm')
-            ? { 'content-type': 'application/wasm' }
-            : { 'content-type': 'text/javascript' },
-        });
-      });
-      vi.stubGlobal('fetch', fetchMock);
-
-      const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
-      await runAllHealthChecks();
-
-      // One probe per outbound destination. The engine CDN fetches two assets
-      // (forge_engine.js and forge_engine_bg.wasm) in one probe, so hosts —
-      // not raw fetch calls — are what the budget is sized in.
-      const hosts = new Set(
-        fetchMock.mock.calls.map(([input]) => new URL(String(input)).host),
-      );
-      expect(hosts).toEqual(
-        new Set([
-          'cdn.example.com',
-          'api.clerk.com',
-          'ai-gateway.vercel.sh',
-          'redis.upstash.io',
-          'api.stripe.com',
-        ]),
-      );
-      expect(neonQuery).toHaveBeenCalledTimes(1);
-      expect(hosts.size + 1).toBe(6);
     });
 
     it('overall is down when DB is unavailable and no keys configured', async () => {

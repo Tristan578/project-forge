@@ -56,33 +56,20 @@ vi.mock('@/lib/tokens/service', () => ({
   deductTokens: vi.fn(),
 }));
 
-// Real implementation behind a spy (#8858): the provider-guard tests need to
-// prove it is NEVER called for non-Anthropic providers, and the Anthropic tests
-// run the real exchange against a stubbed `fetch`.
-const actualWif = await vi.importActual<typeof import('@/lib/ai/wifCredential')>('@/lib/ai/wifCredential');
-vi.mock('@/lib/ai/wifCredential', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/ai/wifCredential')>();
-  return { ...actual, resolveAnthropicClientAuth: vi.fn(actual.resolveAnthropicClientAuth) };
-});
-
 // ---------------------------------------------------------------------------
 // Subject + imported mocks for assertion
 // ---------------------------------------------------------------------------
 
-import { resolveApiKey, resolveByokOrPlatformKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
-import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { resolveApiKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
 import * as dbClient from '@/lib/db/client';
 import * as encryption from '@/lib/keys/encryption';
 import * as tokenService from '@/lib/tokens/service';
-import * as wifCredential from '@/lib/ai/wifCredential';
-import { ANTHROPIC_WIF_REQUIRED_ENV } from '@/lib/config/anthropicWif';
 
 const mockDeductTokens = vi.mocked(tokenService.deductTokens);
 const mockGetDb = vi.mocked(dbClient.getDb);
 const mockQueryWithResilience = vi.mocked(dbClient.queryWithResilience);
 const mockDecryptProviderKey = vi.mocked(encryption.decryptProviderKey);
 const mockEncryptProviderKey = vi.mocked(encryption.encryptProviderKey);
-const mockResolveAnthropicClientAuth = vi.mocked(wifCredential.resolveAnthropicClientAuth);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -138,9 +125,6 @@ function resetMocks() {
   // object is a different contract, and this function is meant to RESTORE the
   // default rather than quietly redefine it.
   mockEncryptProviderKey.mockImplementation(() => ({ encrypted: 'enc-abc', iv: 'iv-abc' }));
-  // Restore the real WIF resolution (reset dropped it) and its module cache.
-  mockResolveAnthropicClientAuth.mockImplementation(actualWif.resolveAnthropicClientAuth);
-  wifCredential.resetAnthropicCredentialCache();
 }
 
 // ---------------------------------------------------------------------------
@@ -214,13 +198,13 @@ describe('resolveApiKey - platform key', () => {
     delete process.env['PLATFORM_MESHY_KEY'];
   });
 
-  it('throws TIER_NOT_ALLOWED for a starter account with nothing to spend', async () => {
-    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 })]);
+  it('throws TIER_NOT_ALLOWED for starter tier', async () => {
+    wireDb([], [makeUser({ tier: 'starter' })]);
     await expect(resolveApiKey('user-1', 'meshy', 50, 'texture_generation')).rejects.toThrow(ApiKeyError);
   });
 
-  it('TIER_NOT_ALLOWED code is set on the starter tier error, including a spent trial', async () => {
-    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 })]);
+  it('TIER_NOT_ALLOWED code is set on starter tier error', async () => {
+    wireDb([], [makeUser({ tier: 'starter' })]);
     let caught: ApiKeyError | null = null;
     try {
       await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
@@ -228,15 +212,6 @@ describe('resolveApiKey - platform key', () => {
       caught = e as ApiKeyError;
     }
     expect(caught?.code).toBe('TIER_NOT_ALLOWED');
-  });
-
-  it('resolves the platform key and deducts for a starter account holding trial tokens (#7715)', async () => {
-    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 0, monthlyTotal: 50, addon: 0, total: 0, nextRefillDate: null }, usageId: 'u-trial' });
-    const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
-    expect(result.type).toBe('platform');
-    expect(result.usageId).toBe('u-trial');
-    expect(mockDeductTokens).toHaveBeenCalledWith('user-1', 'texture_generation', 50, 'meshy', undefined);
   });
 
   it('throws NO_KEY_CONFIGURED for non-pro with zero balance', async () => {
@@ -329,366 +304,6 @@ describe('resolveApiKey - platform key', () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveApiKey — status poll of an already-paid job (#7715)
-// ---------------------------------------------------------------------------
-
-describe('resolveApiKey - status poll (tokenCost 0 AND STATUS_CHECK_OPERATION, #7715)', () => {
-  const SPENT_STARTER = { tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 };
-  const HOBBYIST_AT_ZERO = { tier: 'hobbyist', monthlyTokens: 100, monthlyTokensUsed: 100, addonTokens: 0 };
-
-  async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
-    try {
-      await p;
-    } catch (e) {
-      return (e as ApiKeyError).code;
-    }
-    return undefined;
-  }
-
-  beforeEach(() => {
-    resetMocks();
-    process.env['PLATFORM_MESHY_KEY'] = 'platform-meshy-secret';
-  });
-
-  afterEach(() => {
-    delete process.env['PLATFORM_MESHY_KEY'];
-  });
-
-  it('resolves the platform key for a starter whose trial grant is spent, with no deduction and no usage record', async () => {
-    wireDb([], [makeUser(SPENT_STARTER)]);
-    const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
-    expect(result).toEqual({ type: 'platform', key: 'platform-meshy-secret', metered: true });
-    expect(result.usageId).toBeUndefined();
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('resolves the platform key for a hobbyist at exactly 0 (the lockout that predates the trial)', async () => {
-    wireDb([], [makeUser(HOBBYIST_AT_ZERO)]);
-    const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
-    expect(result.type).toBe('platform');
-    expect(result.key).toBe('platform-meshy-secret');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('still prefers a BYOK key over the platform key', async () => {
-    wireDb([makeBYOKKey()], [makeUser(SPENT_STARTER)]);
-    const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
-    expect(result).toEqual({ type: 'byok', key: 'decrypted:encrypted-meshy-key', metered: false });
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('still throws when the platform key is not configured, without deducting', async () => {
-    delete process.env['PLATFORM_MESHY_KEY'];
-    wireDb([], [makeUser(SPENT_STARTER)]);
-    await expect(resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION)).rejects.toThrow('Platform key not configured');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  // Each half of the condition is required. These two cases are what make
-  // `tokenCost === 0` and `operation === STATUS_CHECK_OPERATION` each
-  // load-bearing: dropping either half from the resolver turns one of them red.
-  it('enforces BOTH checks for STATUS_CHECK_OPERATION with a non-zero cost', async () => {
-    wireDb([], [makeUser(SPENT_STARTER)]);
-    expect(await codeOf(resolveApiKey('user-1', 'meshy', 10, STATUS_CHECK_OPERATION))).toBe('TIER_NOT_ALLOWED');
-    wireDb([], [makeUser(HOBBYIST_AT_ZERO)]);
-    expect(await codeOf(resolveApiKey('user-1', 'meshy', 10, STATUS_CHECK_OPERATION))).toBe('NO_KEY_CONFIGURED');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('enforces BOTH checks for a zero-cost call under any other operation', async () => {
-    wireDb([], [makeUser(SPENT_STARTER)]);
-    expect(await codeOf(resolveApiKey('user-1', 'meshy', 0, 'texture_generation'))).toBe('TIER_NOT_ALLOWED');
-    wireDb([], [makeUser(HOBBYIST_AT_ZERO)]);
-    expect(await codeOf(resolveApiKey('user-1', 'meshy', 0, 'texture_generation'))).toBe('NO_KEY_CONFIGURED');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveApiKey — gateway-routed capability (#9523)
-// ---------------------------------------------------------------------------
-
-describe('resolveApiKey - gateway-routed capability (#9523)', () => {
-  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
-
-  beforeEach(() => {
-    resetMocks();
-    vi.stubEnv('VERCEL', '');
-    vi.stubEnv('VERCEL_ENV', '');
-    vi.stubEnv('PLATFORM_REPLICATE_KEY', '');
-    vi.stubEnv('PLATFORM_OPENAI_KEY', '');
-    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
-  });
-
-  afterEach(() => vi.unstubAllEnvs());
-
-  it.each(['image', 'embedding'] as const)(
-    'resolves AI_GATEWAY_API_KEY for %s with no PLATFORM_OPENAI_KEY set',
-    async (capability) => {
-      wireDb([], [makeUser({ tier: 'pro' })]);
-      mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw' });
-      const result = await resolveApiKey('user-1', 'openai', 20, `${capability}_generation`, undefined, capability);
-      expect(result.type).toBe('platform');
-      expect(result.key).toBe('gw-secret');
-      expect(result.metered).toBe(true);
-      expect(result.usageId).toBe('u-gw');
-    },
-  );
-
-  it('does NOT throw "Platform key not configured" for a gateway capability when its old PLATFORM_* var is absent', async () => {
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw2' });
-    await expect(
-      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
-    ).resolves.toMatchObject({ type: 'platform', key: 'gw-secret' });
-  });
-
-  it('deducts tokens against the capability provider, identically to the direct path', async () => {
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw3' });
-    const meta = { size: '1024x1024' };
-    await resolveApiKey('user-1', 'openai', 20, 'image_generation', meta, 'image');
-    // Accounting is keyed on the capability's provider, not the gateway — the
-    // circuit breaker and usage ledger behave identically to the direct route.
-    expect(mockDeductTokens).toHaveBeenCalledWith('user-1', 'image_generation', 20, 'openai', meta);
-  });
-
-  it('throws, and never falls back to PLATFORM_OPENAI_KEY, when AI_GATEWAY_API_KEY is absent', async () => {
-    vi.stubEnv('AI_GATEWAY_API_KEY', '');
-    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk-openai-direct');
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-leak' });
-    await expect(
-      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
-    ).rejects.toThrow('Platform key not configured: AI_GATEWAY_API_KEY');
-    // Key resolves before any deduction (#8597): a missing gateway key costs nothing.
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('lets a user BYOK key take precedence over gateway routing', async () => {
-    wireDb([{ userId: 'user-1', provider: 'openai', encryptedKey: 'enc-openai', iv: 'iv-o' }]);
-    const result = await resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image');
-    expect(result.type).toBe('byok');
-    expect(result.key).toBe('decrypted:enc-openai');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('leaves a non-gateway capability (sprite → replicate) requiring its PLATFORM_* var, unaffected by the gateway key', async () => {
-    // AI_GATEWAY_API_KEY is set by beforeEach, but sprite is direct-routed.
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-sprite' });
-    await expect(
-      resolveApiKey('user-1', 'replicate', 10, 'sprite_generation', undefined, 'sprite'),
-    ).rejects.toThrow('Platform key not configured: PLATFORM_REPLICATE_KEY');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('leaves the direct path unchanged when no capability is supplied', async () => {
-    // The existing 5-arg call shape (chat/decompose/status routes) never routes
-    // to the gateway: with no PLATFORM_OPENAI_KEY it throws the OpenAI-key error.
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    await expect(
-      resolveApiKey('user-1', 'openai', 20, 'image_generation'),
-    ).rejects.toThrow('Platform key not configured: PLATFORM_OPENAI_KEY');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveApiKey — chat is NOT forced onto the gateway, + OIDC (#10074)
-// ---------------------------------------------------------------------------
-
-describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
-  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
-
-  beforeEach(() => {
-    resetMocks();
-    vi.stubEnv('AI_GATEWAY_API_KEY', '');
-    vi.stubEnv('ANTHROPIC_API_KEY', '');
-    vi.stubEnv('VERCEL', '');
-    vi.stubEnv('VERCEL_ENV', '');
-  });
-
-  afterEach(() => vi.unstubAllEnvs());
-
-  it('resolves ANTHROPIC_API_KEY for the chat capability when AI_GATEWAY_API_KEY is unset', async () => {
-    // The critical regression (#10074): forwarding capability 'chat' to the
-    // resolver must NOT re-key localize/pacing onto the gateway. A
-    // direct-Anthropic deployment (`.env.example`) has ANTHROPIC_API_KEY set and
-    // no gateway key, and both routes must keep working.
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat' });
-    const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
-    expect(result.type).toBe('platform');
-    expect(result.key).toBe('sk-ant-platform');
-  });
-
-  it('does not consult AI_GATEWAY_API_KEY for the chat capability even when it is set', async () => {
-    // chat is gateway-SERVED (via /api/chat) but not gateway-ONLY: the resolver
-    // path for localize/pacing resolves the provider's own Anthropic key.
-    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat2' });
-    const result = await resolveApiKey('user-1', 'anthropic', 10, 'pacing_suggestions', undefined, 'chat');
-    expect(result.key).toBe('sk-ant-platform');
-  });
-
-  it.each(['image', 'embedding'] as const)(
-    'accepts Vercel OIDC for %s: returns the empty key instead of throwing when AI_GATEWAY_API_KEY is unset on Vercel',
-    async (capability) => {
-      // vercelGatewayBackend.isConfigured() is true on OIDC alone; the resolver
-      // must mirror it or the PR's one-credential goal is unreachable on an
-      // OIDC-only deployment (#10074).
-      vi.stubEnv('VERCEL_ENV', 'production');
-      wireDb([], [makeUser({ tier: 'pro' })]);
-      mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-oidc' });
-      const result = await resolveApiKey('user-1', 'openai', 20, `${capability}_generation`, undefined, capability);
-      expect(result.type).toBe('platform');
-      expect(result.key).toBe('');
-      expect(result.metered).toBe(true);
-    },
-  );
-
-  it('still throws off-Vercel for a resolver-gateway capability with no gateway key', async () => {
-    // No VERCEL/VERCEL_ENV: OIDC is unavailable, so the missing gateway key is a
-    // real misconfiguration and must fail before any token deduction.
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-x' });
-    await expect(
-      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
-    ).rejects.toThrow('Platform key not configured: AI_GATEWAY_API_KEY');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveApiKey — Anthropic Workload Identity Federation (#8858)
-// ---------------------------------------------------------------------------
-
-describe('resolveApiKey - Anthropic WIF (#8858)', () => {
-  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
-  const MINTED = 'sk-ant-oat01-federated-for-resolver';
-
-  function stubWifEnv(): void {
-    vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV.federationRuleId, 'fdrl_01RESOLVER');
-    vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV.organizationId, '00000000-0000-4000-8000-000000000002');
-    vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV.serviceAccountId, 'svac_01RESOLVER');
-    vi.stubEnv('VERCEL_OIDC_TOKEN', 'vercel-oidc-jwt');
-  }
-
-  function stubExchange(): ReturnType<typeof vi.fn> {
-    // Shape per https://platform.claude.com/docs/en/manage-claude/wif-reference#token-exchange-response
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify({ access_token: MINTED, token_type: 'Bearer', expires_in: 600, scope: 'workspace:inference' }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    ));
-    vi.stubGlobal('fetch', fetchMock);
-    return fetchMock;
-  }
-
-  beforeEach(() => {
-    resetMocks();
-    vi.stubEnv('AI_GATEWAY_API_KEY', '');
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-api03-static');
-    vi.stubEnv('PLATFORM_MESHY_KEY', '');
-    for (const name of Object.values(ANTHROPIC_WIF_REQUIRED_ENV)) vi.stubEnv(name, '');
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
-  });
-
-  it('BYOK wins: returns the user key and never reaches WIF, the exchange, or deduction', async () => {
-    stubWifEnv();
-    const fetchMock = stubExchange();
-    wireDb([{ userId: 'user-1', provider: 'anthropic', encryptedKey: 'enc-anthropic', iv: 'iv-a' }]);
-
-    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
-
-    expect(result).toEqual({ type: 'byok', key: 'decrypted:enc-anthropic', metered: false });
-    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(0);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('provider guard: a non-Anthropic provider with WIF configured still throws for its OWN missing key', async () => {
-    stubWifEnv();
-    const fetchMock = stubExchange();
-    wireDb([], [makeUser({ tier: 'pro' })]);
-
-    await expect(resolveApiKey('user-1', 'meshy', 10, 'texture_generation'))
-      .rejects.toThrow('Platform key not configured: PLATFORM_MESHY_KEY');
-    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(0);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('provider guard: a configured non-Anthropic provider gets its own key, never the Anthropic credential', async () => {
-    stubWifEnv();
-    stubExchange();
-    vi.stubEnv('PLATFORM_MESHY_KEY', 'platform-meshy-secret');
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-meshy' });
-
-    const result = await resolveApiKey('user-1', 'meshy', 10, 'texture_generation');
-    expect(result.key).toBe('platform-meshy-secret');
-    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(0);
-  });
-
-  it('anthropic with WIF configured resolves the federated token, BEFORE deducting', async () => {
-    stubWifEnv();
-    const fetchMock = stubExchange();
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-wif' });
-
-    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
-
-    expect(result).toEqual({ type: 'platform', key: MINTED, metered: true, usageId: 'u-wif' });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(1);
-    // #8597 ordering: the credential is resolved before any balance change.
-    expect(mockResolveAnthropicClientAuth.mock.invocationCallOrder[0])
-      .toBeLessThan(mockDeductTokens.mock.invocationCallOrder[0]);
-    // …and it maps back to a Bearer client for the routes that build one.
-    expect(wifCredential.anthropicClientAuthForKey(result.key)).toEqual({ authToken: MINTED });
-  });
-
-  it('anthropic without WIF resolves the static ANTHROPIC_API_KEY with no network call', async () => {
-    const fetchMock = stubExchange();
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-static' });
-
-    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
-    expect(result.key).toBe('sk-ant-api03-static');
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(wifCredential.anthropicClientAuthForKey(result.key)).toEqual({ apiKey: 'sk-ant-api03-static' });
-  });
-
-  it('anthropic with a FAILING exchange falls back to the static key', async () => {
-    stubWifEnv();
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-fallback' });
-
-    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
-    expect(result.key).toBe('sk-ant-api03-static');
-  });
-
-  it('anthropic with neither WIF nor a static key throws the same message as before, without deducting', async () => {
-    vi.stubEnv('ANTHROPIC_API_KEY', '');
-    stubExchange();
-    wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-none' });
-
-    await expect(resolveApiKey('user-1', 'anthropic', 10, 'chat_message'))
-      .rejects.toThrow('Platform key not configured: ANTHROPIC_API_KEY');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
 // storeProviderKey
 // ---------------------------------------------------------------------------
 
@@ -766,49 +381,5 @@ describe('listConfiguredProviders', () => {
     (mockDbChain.select as ReturnType<typeof vi.fn>).mockReturnValueOnce(selectChain);
     const result = await listConfiguredProviders('user-1');
     expect(result).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveByokOrPlatformKey (#9734) — non-charging secondary-provider resolution
-// ---------------------------------------------------------------------------
-
-describe('resolveByokOrPlatformKey', () => {
-  beforeEach(() => {
-    resetMocks();
-    vi.stubEnv('PLATFORM_REMOVEBG_KEY', undefined);
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('returns the decrypted BYOK key first and never deducts tokens', async () => {
-    wireDb([{ userId: 'user-1', provider: 'removebg', encryptedKey: 'enc-removebg', iv: 'iv-1' }]);
-    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
-
-    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
-
-    expect(key).toBe('decrypted:enc-removebg');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('falls back to PLATFORM_REMOVEBG_KEY when no BYOK key exists', async () => {
-    wireDb([]);
-    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
-
-    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
-
-    expect(key).toBe('platform-removebg-secret');
-    expect(mockDeductTokens).not.toHaveBeenCalled();
-  });
-
-  it('returns null when neither a BYOK key nor PLATFORM_REMOVEBG_KEY is set', async () => {
-    wireDb([]);
-
-    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
-
-    expect(key).toBeNull();
-    expect(mockDeductTokens).not.toHaveBeenCalled();
   });
 });

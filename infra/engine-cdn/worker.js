@@ -76,12 +76,8 @@ export function buildObjectHeaders(key, httpMetadata) {
   headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
 
-  // Only SHA-addressed engine artifacts are immutable. Mutable aliases such as
-  // /latest must never strand an editor on a stale engine release.
-  const first = String(key).split('/')[0] || '';
-  const knownFile = /^(forge_engine(?:_bg)?\.(?:js|wasm)|wasm-manifest\.json)$/;
-  const immutable = /^[0-9a-f]{7,40}$/i.test(first) && knownFile.test(String(key).split('/').at(-1));
-  headers.set('Cache-Control', immutable ? 'public, max-age=31536000, immutable' : 'no-store');
+  // Immutable, content-addressed assets (keyed by sha or pinned version).
+  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
 
   return headers;
 }
@@ -96,7 +92,6 @@ export function preflightResponse() {
   headers.set('Access-Control-Allow-Methods', CORS_METHODS);
   headers.set('Access-Control-Allow-Headers', '*');
   headers.set('Access-Control-Max-Age', '86400');
-  headers.set('Cache-Control', 'no-store');
   headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
   return new Response(null, { status: 204, headers });
 }
@@ -111,7 +106,6 @@ export function methodNotAllowedResponse() {
     status: 405,
     headers: {
       Allow: ALLOWED_METHODS,
-      'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': CORS_METHODS,
     },
@@ -126,7 +120,6 @@ export function notFoundResponse() {
   return new Response('Not Found', {
     status: 404,
     headers: {
-      'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': CORS_METHODS,
     },

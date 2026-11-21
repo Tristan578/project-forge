@@ -10,16 +10,13 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 pass() { echo "ok   - $1"; }
-readonly -f pass
 fail() { echo "FAIL - $1"; FAILURES=$((FAILURES + 1)); }
-readonly -f fail
 assert_eq() {
   local description="$1" expected="$2" actual="$3"
   if [ "$actual" = "$expected" ]; then pass "$description"; else
     fail "$description (expected '$expected', got '$actual')"
   fi
 }
-readonly -f assert_eq
 
 STUB="$TMP/bin"
 mkdir -p "$STUB"
@@ -63,7 +60,6 @@ run_case() {
     PLAYWRIGHT_INSTALL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-600}" \
     PATH="$STUB:$PATH" bash "$SCRIPT" "$mode" >"$TMP/out" 2>"$TMP/err"
 }
-readonly -f run_case
 
 run_case browsers 1
 assert_eq "a transient timeout is retried and then succeeds" "0" "$?"
@@ -256,15 +252,15 @@ fi
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
-assert_eq "all eight browser-install steps use the retry helper" "8" \
+assert_eq "all seven browser-install steps use the retry helper" "7" \
   "$(( $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CD_YML") ))"
 # Every workflow that installs Playwright is summed here, quality-gates.yml
 # included. Leaving it out of this sum is what let the editor-boot cache-hit
 # step keep calling `npx playwright install-deps` bare while the suite reported
 # full coverage (#9570 review).
-assert_eq "all seven cache-hit dependency steps use the retry helper" "7" \
+assert_eq "all six cache-hit dependency steps use the retry helper" "6" \
   "$(( $(grep -c 'scripts/install-playwright-ci.sh deps' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$CD_YML") ))"
-assert_eq "all fifteen install steps have an outer 12-minute timeout" "15" \
+assert_eq "all thirteen install steps have an outer 12-minute timeout" "13" \
   "$(( $(grep -c 'timeout-minutes: 12' "$CI_YML") + $(grep -c 'timeout-minutes: 12' "$QG_YML") + $(grep -c 'timeout-minutes: 12' "$CD_YML") ))"
 
 if [ "$FAILURES" -ne 0 ]; then echo "$FAILURES test(s) failed." >&2; exit 1; fi

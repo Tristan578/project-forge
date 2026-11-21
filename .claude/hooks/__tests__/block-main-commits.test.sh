@@ -45,7 +45,6 @@ run_hook() {
   HOOK_STDERR=$(cd "$cwd" && printf '%s' "$payload" | bash "$HOOK" 2>&1 1>/dev/null)
   HOOK_EXIT=$?
 }
-readonly -f run_hook
 
 check() {
   local desc="$1" expected="$2"
@@ -57,7 +56,6 @@ check() {
     echo "FAIL: $desc (expected exit $expected, got $HOOK_EXIT)"
   fi
 }
-readonly -f check
 
 GC="git commit"   # avoid tripping the live hook on this test file's own runs
 

@@ -1,10 +1,8 @@
 'use client';
 
-import { Button, InlineAlert } from '@spawnforge/ui';
 import { useEngineStatus, PHASE_LABELS, type PhaseStatus } from '@/hooks/useEngineStatus';
 import { copyInitLogToClipboard } from '@/lib/initLog';
 import { setPreferredBackend } from '@/hooks/useEngine';
-import type { InitPhase } from '@/lib/initLog';
 import { useState } from 'react';
 
 const GITHUB_ISSUES_URL = 'https://github.com/Tristan578/project-forge/issues/new';
@@ -44,35 +42,34 @@ function TimeoutWarning({
   phase,
   retryCount,
 }: {
-  phase: InitPhase | null;
+  phase: string | null;
   retryCount: number;
 }) {
   if (phase === 'wasm_loading') {
     return (
-      <InlineAlert variant="warning" className="mt-4 text-sm">
+      <div role="alert" className="mt-4 rounded bg-yellow-900/50 px-3 py-2 text-sm text-yellow-200">
         Slow network? The WASM module is taking longer than expected to download.
-      </InlineAlert>
+      </div>
     );
   }
 
   if (phase === 'renderer_init') {
     return (
-      <InlineAlert variant="warning" className="mt-4 text-sm">
+      <div role="alert" className="mt-4 rounded bg-yellow-900/50 px-3 py-2 text-sm text-yellow-200">
         GPU initialization is taking a while. This may be a compatibility issue.
         {retryCount >= 1 && (
-          <div className="mt-1 text-xs opacity-80">
+          <div className="mt-1 text-xs text-yellow-300">
             Tip: Try WebGL2 mode on the next retry.
           </div>
         )}
-      </InlineAlert>
+      </div>
     );
   }
 
   return (
-    <InlineAlert variant="error" className="mt-4 text-sm">
-      {phase ? PHASE_LABELS[phase] : 'Engine initialization'} timed out. Select Retry to
-      try again, or copy the debug log and report the issue if it keeps failing.
-    </InlineAlert>
+    <div role="alert" className="mt-4 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200">
+      Something went wrong during initialization.
+    </div>
   );
 }
 
@@ -165,14 +162,6 @@ export function InitOverlay() {
   };
 
   const showFailedState = retryCount >= 3 || (!canRetry && (isTimedOut || error));
-  // The error InlineAlert below renders its own inline Retry button for the
-  // non-timeout error case. The bottom bar must not render a second one for
-  // that same case (#9726 review) — it still owns Retry for the timeout case,
-  // where TimeoutWarning has no button of its own.
-  const showInlineRetry = Boolean(error) && !isTimedOut && canRetry;
-  const showFooterRetry = canRetry && (isTimedOut || Boolean(error)) && !showInlineRetry;
-  const showFooterWebGL2Retry =
-    canRetry && (isTimedOut || Boolean(error)) && retryCount >= 1;
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950">
@@ -196,14 +185,17 @@ export function InitOverlay() {
             )}
 
             {error && !isTimedOut && (
-              <InlineAlert variant="error" className="mt-4 text-sm">
+              <div role="alert" className="mt-4 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200">
                 <p>Error: {error}</p>
                 {canRetry && (
-                  <Button onClick={retry} size="sm" className="mt-2">
+                  <button
+                    onClick={retry}
+                    className="mt-2 rounded bg-red-800 px-3 py-1.5 text-sm text-red-100 hover:bg-red-700"
+                  >
                     Retry
-                  </Button>
+                  </button>
                 )}
-              </InlineAlert>
+              </div>
             )}
 
             <div className="mt-4 flex items-center justify-between border-t border-zinc-800 pt-4">
@@ -212,17 +204,15 @@ export function InitOverlay() {
                 {retryCount > 0 && ` | Attempt ${retryCount + 1}/3`}
               </div>
 
-              {(showFooterRetry || showFooterWebGL2Retry) && (
+              {canRetry && (isTimedOut || error) && (
                 <div className="flex gap-2">
-                  {showFooterRetry && (
-                    <button
-                      onClick={retry}
-                      className="rounded bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600"
-                    >
-                      Retry
-                    </button>
-                  )}
-                  {showFooterWebGL2Retry && (
+                  <button
+                    onClick={retry}
+                    className="rounded bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600"
+                  >
+                    Retry
+                  </button>
+                  {retryCount >= 1 && (
                     <button
                       onClick={() => {
                         setPreferredBackend('webgl2');

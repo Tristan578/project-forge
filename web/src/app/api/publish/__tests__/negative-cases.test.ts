@@ -32,11 +32,9 @@ vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }),
 }));
 
-const atomicQuery = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/db/client', () => ({
   queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn(),
-  getNeonSql: () => atomicQuery,
 }));
 
 vi.mock('@/lib/moderation/contentFilter', () => ({
@@ -99,14 +97,28 @@ function makeNewPublicationDb() {
     updatedAt: new Date(),
   };
 
-  // Keep the real atomic commit helper; mock only its database transport.
-  atomicQuery.mockResolvedValue([{ publication: pub }]);
+  // Route uses: db.insert().values().onConflictDoUpdate().returning()
+  const mockInsertPublication = {
+    values: vi.fn().mockReturnValue({
+      onConflictDoUpdate: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([pub]),
+      }),
+    }),
+  };
+  // Tags insert: db.insert().values()
+  const mockInsertTags = {
+    values: vi.fn().mockResolvedValue([]),
+  };
 
   return {
     select: vi.fn()
       .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // tier check
       .mockReturnValueOnce({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }) // slug check
-      .mockReturnValueOnce({ from: () => ({ where: () => ({ limit: () => Promise.resolve([{ id: 'proj-1', userId: 'user-pub', sceneData: { entities: [] } }]) }) }) }), // project
+      .mockReturnValueOnce({ from: () => ({ where: () => ({ limit: () => Promise.resolve([{ id: 'proj-1', userId: 'user-pub' }]) }) }) }), // project
+    insert: vi.fn()
+      .mockReturnValueOnce(mockInsertPublication)
+      .mockReturnValueOnce(mockInsertTags),
+    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
 }
 
@@ -119,7 +131,6 @@ describe('POST /api/publish — negative cases', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    atomicQuery.mockReset();
     vi.resetModules();
 
     vi.mocked(authenticateRequest).mockResolvedValue({

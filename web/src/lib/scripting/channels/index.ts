@@ -14,6 +14,3 @@ export type { AudioChannelDeps } from './audioChannel';
 
 export { createAnimationHandler } from './animationChannel';
 export type { AnimationChannelDeps } from './animationChannel';
-
-export { createLeaderboardHandler } from './leaderboardChannel';
-export type { LeaderboardChannelDeps } from './leaderboardChannel';

@@ -1,4 +1,3 @@
-import { notifyCaptureWorkloadChange, observeCaptureGraph } from '@/lib/perf/captureStability';
 /**
  * Event handlers for transform/scene graph/selection/history/snap/mode.
  */
@@ -9,16 +8,11 @@ import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/entityAudioGraph';
 import { takeStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
-import { foldCompletionModeIntoSceneJson } from '@/lib/scenes/sceneCompletionMode';
-import { completionModeAtSceneBoundary } from '@/stores/slices/sceneGraphSlice';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
 import { applyWhenPrimary } from './primaryGate';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
-import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
-import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
-import { CHECKPOINT_EXPORT_PREFIX, SCENE_LOADED_EVENT } from '@/lib/scenes/checkpointRecovery';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
 
@@ -40,15 +34,6 @@ export function handleTransformEvent(
   _set: SetFn,
   _get: GetFn
 ): boolean {
-  // Native gizmos and keyboard undo bypass the authoring command dispatcher.
-  // Observe occurrences, not history labels: repeated edits can share labels.
-  // Runtime transforms are part of the measured game, not authoring changes.
-  if (useEditorStore.getState().engineMode === 'edit' && [
-        'HISTORY_CHANGED', 'SELECTION_CHANGED', 'TRANSFORM_CHANGED',
-        'SCENE_NODE_ADDED', 'SCENE_NODE_REMOVED', 'SCENE_NODE_UPDATED',
-      ].includes(type)) {
-    notifyCaptureWorkloadChange();
-  }
   switch (type) {
     case 'SELECTION_CHANGED': {
       const payload = castPayload<{ selectedIds: string[]; primaryId: string | null; primaryName: string | null }>(data);
@@ -70,9 +55,6 @@ export function handleTransformEvent(
 
     case 'SCENE_GRAPH_UPDATE': {
       const payload = castPayload<SceneGraph>(data);
-      if (useEditorStore.getState().engineMode === 'edit') {
-        observeCaptureGraph(useEditorStore.getState().sceneGraph, payload);
-      }
       useEditorStore.getState().setFullGraph(payload);
       useEditorStore.getState().recomputeLightState(payload);
       // Mark scene as modified and trigger debounced auto-save
@@ -136,21 +118,6 @@ export function handleTransformEvent(
       return true;
     }
 
-    /**
-     * The answer to a `get_entity_details` query (#9899). Recorded into the
-     * confirmed-effect cache so the orchestrator's `observeEntity` can read the
-     * engine's observed state for a spawn/transform. The engine emits this
-     * only when the entity exists (engine/src/bridge/query.rs). No cached
-     * reply can mean either an absent entity or a response still in flight.
-     *
-     * `return true` consumes the event: no store handler downstream reads it,
-     * and it must not fall through to be logged as unhandled.
-     */
-    case 'QUERY_ENTITY_DETAILS': {
-      recordEntityObservation(data);
-      return true;
-    }
-
     case 'HISTORY_CHANGED': {
       const payload = castPayload<{ canUndo: boolean; canRedo: boolean; undoDescription: string | null; redoDescription: string | null }>(data);
       useEditorStore.getState().setHistoryState(
@@ -204,38 +171,8 @@ export function handleTransformEvent(
       // when the running engine binary predates the change — every side effect
       // below is "the scene was exported", not "my request was answered", so
       // none of them may depend on it.
-      const { json: rawJson, name, requestId } = payload;
-      // A checkpoint's own export request (#10050) re-dispatches the raw
-      // payload and returns immediately — it is not a user-facing save, so it
-      // must NOT run through autosave/panic-recovery/prefab-fold below, or a
-      // checkpoint capture would double as an (unwanted) autosave tick and
-      // would consume this requestId's staged prefab snapshot before the
-      // save it actually belongs to ever sees it.
-      if (requestId?.startsWith(CHECKPOINT_EXPORT_PREFIX)) {
-        window.dispatchEvent(new CustomEvent<SceneExportedDetail>(SCENE_EXPORTED_EVENT, { detail: payload }));
-        return true;
-      }
+      const { json, name, requestId } = payload;
       const state = useEditorStore.getState();
-
-      // Fold prefab instances/definitions in HERE, before any consumer below
-      // sees the JSON (scene.FR-1 N1). The engine export knows nothing about
-      // linked instances — they live in the prefab store, not the ECS — so
-      // recovering any of these consumers (autosave, panic recovery) used to
-      // silently drop every instance and override. This is the single choke
-      // point every one of them passes through; `foldExportedSceneJson` owns
-      // which registry snapshot it folds, and why.
-      //
-      // The completion mode (#9998) is folded at the same choke point and for
-      // the same reason: it is frontend-only, so the engine's export never
-      // carries it, and every consumer below — plus the `.forge` download and
-      // the cloud PUT listening for the DOM event — must see it. Read LIVE: an
-      // export answers within a frame, and the scene-switch capture that could
-      // race a load always finishes before that load is dispatched. A scene
-      // whose mode was never chosen passes through byte-identical.
-      const json = foldCompletionModeIntoSceneJson(
-        foldExportedSceneJson(rawJson, requestId),
-        state.sceneGraph?.completionMode,
-      );
 
       // Cache for periodic IndexedDB auto-save
       setLastExportedScene(json, name);
@@ -283,34 +220,9 @@ export function handleTransformEvent(
         // user clicks each entity in turn. Empty for `new_scene`, which is
         // correct — an empty scene has no audio.
         entityAudio: takeStagedSceneAudio(),
-        // completionMode (#9901) is frontend-only — the engine's
-        // SceneGraphData never carries it, so setFullGraph's fallback to the
-        // PREVIOUS mode (sceneGraphSlice.ts) exists precisely to survive an
-        // in-place incremental rebuild of the SAME scene. SCENE_LOADED is the
-        // one unambiguous "a different scene is replacing this one" boundary
-        // — new_scene and a real load both emit it — so it is the one place
-        // that replaces the mode explicitly rather than let it leak from
-        // whatever scene was open before.
-        //
-        // The INCOMING scene's mode arrives here too (#9998): `dispatchSceneLoad`
-        // stages it from the scene JSON (and `newScene` from its caller), the
-        // same take-once handoff as the audio above. Nothing staged means a
-        // legacy scene, i.e. `undefined`, which the validator treats as `win`.
-        // The SCENE_GRAPH_UPDATE that follows carries no mode and so keeps
-        // this one. The outgoing scene's mode edits are not steps anyone can
-        // undo back to in this one, so the history resets with it.
-        ...completionModeAtSceneBoundary(useEditorStore.getState().sceneGraph),
-        // `gameComponentAdjustments` (PF-1148) is deliberately NOT reset here.
-        // This event lands a frame after the command, and by then a caller may
-        // already have marked the INCOMING scene's components
-        // (`create_scene_from_description` adds them in the same task as its
-        // `newScene()`). The outgoing scene's markers were dropped when the
-        // engine accepted the command — `forgetOutgoingSceneAdjustments` in
-        // editorStore.ts.
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context
-      window.dispatchEvent(new CustomEvent(SCENE_LOADED_EVENT));
       return true;
     }
 

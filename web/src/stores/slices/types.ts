@@ -3,14 +3,6 @@
  * All interfaces and types originally defined in editorStore.ts.
  */
 
-// The completion-mode vocabulary lives in `lib/playMode/completionMode.ts` so
-// the server-side decomposer can validate a brief against the same list the
-// store and the picker use (`stores/` is client-only). Re-exported here so
-// every existing `@/stores/slices/types` import keeps working.
-import type { CompletionMode } from '@/lib/playMode/completionMode';
-export { COMPLETION_MODES, DEFAULT_COMPLETION_MODE } from '@/lib/playMode/completionMode';
-export type { CompletionMode } from '@/lib/playMode/completionMode';
-
 // Scene node data matching Rust's SceneNodeData struct
 export interface SceneNode {
   entityId: string;
@@ -25,18 +17,6 @@ export interface SceneNode {
 export interface SceneGraph {
   nodes: Record<string, SceneNode>;
   rootIds: string[];
-  /**
-   * Intentional completion semantics for this scene (#9901). Frontend-only:
-   * the engine's SceneGraphData never carries it. Absent on legacy scenes,
-   * where it is treated as `DEFAULT_COMPLETION_MODE` ('win').
-   *
-   * Set only through `setCompletionMode` (manual picker and the
-   * `set_completion_mode` chat tool) or, for a generated game, by
-   * `scene_create` staging the brief's mode on `newScene`. Persisted as the
-   * top-level `completionMode` key of the scene file — see
-   * `lib/scenes/sceneCompletionMode.ts` and `docs/features/save-load.md`.
-   */
-  completionMode?: CompletionMode;
 }
 
 // Transform data for an entity
@@ -221,17 +201,6 @@ export interface SkinData2d {
   attachments: Record<string, AttachmentData2d>;
 }
 
-/**
- * Per-vertex bone influences for a mesh attachment: `bones[i]` is skinned by
- * `weights[i]`, read index-for-index by the engine's `skin_vertices_lbs`. The
- * shape mirrors `VertexWeights` on the engine and `WireVertexWeights2d` on the
- * wire.
- */
-export interface VertexWeights2d {
-  bones: string[];
-  weights: number[];
-}
-
 export interface AttachmentData2d {
   type: 'sprite' | 'mesh';
   textureId: string;
@@ -241,15 +210,6 @@ export interface AttachmentData2d {
   vertices?: [number, number][];
   uvs?: [number, number][];
   triangles?: number[];
-  /**
-   * One entry per vertex for a `mesh` attachment. The store used to have no home
-   * for weights, so a mesh attachment authored anywhere but the raw
-   * `add_skeleton2d_mesh_attachment` command reached the engine unweighted and
-   * every vertex stayed at its bind position (#9732). The inspector's mesh
-   * editor and `parseSkeletonWire2d` now carry it so a round-trip preserves the
-   * skinning instead of silently flattening it.
-   */
-  weights?: VertexWeights2d[];
 }
 
 export interface IkConstraint2d {
@@ -303,42 +263,12 @@ export interface TilesetData {
   tiles: TileMetadata[];
 }
 
-/**
- * Every collision shape, in picker order. This tuple is the single source of
- * truth for the shape vocabulary: `CollisionShape` is derived from it, and the
- * `set_tile_collision_shape` chat handler builds its Zod enum from it, so the
- * command validation and the type cannot drift.
- */
-export const TILE_COLLISION_SHAPES = [
-  'none',
-  'full',
-  'halfTop',
-  'halfBottom',
-  'slopeLeft',
-  'slopeRight',
-] as const;
-
-/**
- * The collision silhouette of a single tile. Mirrors the engine's
- * `CollisionShape` enum (`engine/src/core/tilemap.rs`); the wire strings are the
- * single vocabulary shared by the `set_tile_collision_shape` engine command,
- * its chat handler and the `forge.tilemap` script API.
- */
-export type CollisionShape = (typeof TILE_COLLISION_SHAPES)[number];
-
 export interface TilemapLayer {
   name: string;
   tiles: (number | null)[];
   visible: boolean;
   opacity: number;
   isCollision: boolean;
-  /**
-   * Per-cell collision shape, parallel to `tiles`. Legacy scenes may omit this
-   * field; Rust serialization can emit an empty array. Both mean no shapes
-   * have been authored, and missing cell entries read as `none`. This metadata
-   * does not generate runtime colliders yet (#9814).
-   */
-  collisionShapes?: CollisionShape[];
 }
 
 export interface TilemapData {
@@ -349,14 +279,7 @@ export interface TilemapData {
   origin: 'TopLeft' | 'Center';
 }
 
-// The EDITOR STORE's flattened binding shape. It does NOT match Rust's
-// `ActionDef` — this comment said it did, and that is the confusion that lets a
-// template be authored in this spelling and then silently dropped by
-// `load_scene`. `ActionDef` is `{ name, actionType: { type: 'Digital' },
-// sources: [{ type: 'Key', value }] }`, modelled as `EngineActionDef` in
-// `data/templates/index.ts`. `hooks/events/audioEvents.ts` converts engine ->
-// store when the engine reports bindings back; nothing converts the other way,
-// so anything written FOR the engine must be authored in the engine shape.
+// Input binding data matching Rust's ActionDef
 export interface InputBinding {
   actionName: string;
   actionType: 'digital' | 'axis';
@@ -364,10 +287,6 @@ export interface InputBinding {
   positiveKeys?: string[];     // For axis: positive direction keys
   negativeKeys?: string[];     // For axis: negative direction keys
   deadZone?: number;
-  // Local-player slot this binding belongs to (0 = the primary player). Absent
-  // means player 0, so a single-player scene's bindings and every caller that
-  // predates two-player support behave exactly as before (physics.FR-1.OP-04).
-  player?: number;
 }
 
 // Input preset names

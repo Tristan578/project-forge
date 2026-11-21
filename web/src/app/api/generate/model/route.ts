@@ -10,9 +10,8 @@ export const maxDuration = 180; // API_MAX_DURATION_HEAVY_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
-const POST_impl = createGenerationHandler<
+export const POST = createGenerationHandler<
   {
     prompt: string;
     mode: 'text-to-3d' | 'image-to-3d';
@@ -30,7 +29,6 @@ const POST_impl = createGenerationHandler<
   }
 >({
   route: '/api/generate/model',
-  panel: 'generate-model',
   // Heavy route: matches `export const maxDuration` above so the generation
   // agent derives its step-timeout cap against the real 180s budget.
   maxDurationSeconds: 180,
@@ -135,7 +133,3 @@ const POST_impl = createGenerationHandler<
     estimatedSeconds: 60,
   },
 });
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

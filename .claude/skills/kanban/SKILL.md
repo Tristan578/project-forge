@@ -177,7 +177,7 @@ Use MCP tool: batch_create_subtasks
 ## REST API (primary access method)
 
 The taskboard is accessed via REST API. Use the Portless URL when available, direct port as fallback.
-**Base URL:** `http://taskboard.localhost:1355/api` (fallback: `http://localhost:3010/api`)
+**Base URL:** `http://taskboard.localhost:1355/api` (fallback: `http://taskboard.localhost:1355/api`)
 
 ### CRITICAL: Field name is `status`, NOT `column`
 
@@ -218,12 +218,9 @@ curl -s -X POST "http://taskboard.localhost:1355/api/subtasks/<SUBTASK_ID>/toggl
 
 | Endpoint | Method | Body Fields | Notes |
 |----------|--------|-------------|-------|
-| `/api/tickets?project=...&status=...` | GET | (query) | List tickets with filters |
-| `/api/tickets/:id` | GET | (none) | Ticket details including subtasks |
 | `/api/tickets` | POST | `title`, `description`, `priority`, `projectId`, `teamId`, `labels` | `projectId` not `project` |
 | `/api/tickets/:id/move` | POST | `status` ("todo", "in_progress", "done") | **NOT `column`** |
 | `/api/tickets/:id` | PUT | `title`, `description`, `priority`, `labels`, `dueDate` | Partial update |
-| `/api/tickets/:id` | DELETE | (none) | Remove a ticket |
 | `/api/tickets/:id/subtasks` | POST | `title` | Single subtask |
 | `/api/subtasks/:id/toggle` | POST | (none) | Toggles complete/incomplete |
 | `/api/board` | GET | (none) | Returns `{ columns: [{ name, tickets }] }` |
@@ -252,13 +249,13 @@ Every PR must link to a GitHub issue (`Closes #NNNN`). Tickets only become GitHu
 
 ```bash
 # Incremental push (syncs todo + in_progress + recently-done)
-cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py push
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push
 
 # Full push (all tickets including historical done)
-cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py push-all
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push-all
 
 # Check sync status
-cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py status
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py status
 ```
 
 Then find the GitHub issue number for your ticket:
@@ -273,7 +270,7 @@ Include `Closes #NNNN` (GitHub issue number, NOT `PF-XXX`) in every PR body. CI 
 
 ```bash
 # Pull changes from GitHub
-cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py pull
+cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py pull
 ```
 
 This runs automatically via SessionStart hook. Pull manually when:

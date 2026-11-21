@@ -47,7 +47,7 @@ const localStorageMock = (() => {
   };
 })();
 
-vi.stubGlobal('localStorage', localStorageMock as Storage);
+global.localStorage = localStorageMock as Storage;
 
 // ---------------------------------------------------------------------------
 // Helper: reset store before each test

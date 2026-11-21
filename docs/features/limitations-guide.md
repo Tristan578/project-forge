@@ -1,22 +1,22 @@
 ---
 title: Known Limitations & Workarounds
 description: What SpawnForge can and can't do today, with workarounds for common gaps
-lastUpdated: 2026-09-15
+lastUpdated: 2026-09-05
 relatedFiles:
   - docs/known-limitations.md
 ---
 
 # Known Limitations & Workarounds
 
-SpawnForge has implemented feature areas with different levels of verification and completeness. This guide describes known gaps and available workarounds.
+SpawnForge is feature-complete for most game creation workflows. This guide covers the few areas with genuine constraints and how to work around them.
 
-## Implemented feature areas
+## What's Fully Working
 
-These areas have implementations; the capability matrix records their current workflow status.
+These features are complete, tested, and production-ready:
 
 - **2D Engine**: Sprites, tilemaps, 2D physics (Rapier2D), joints, sprite animation, camera
 - **3D Engine**: PBR materials, skeletal animation, physics (Rapier3D), particles, terrain, CSG, LOD
-- **AI Creation**: 380 registered MCP commands, natural language chat, compound actions, asset generation (3D models, textures, sound effects, voice; music generation is not available yet, see limitation 6)
+- **AI Creation**: MCP commands, natural language chat, compound actions, asset generation (3D models, textures, sound effects, voice; music generation is not available yet, see limitation 6)
 - **Audio**: Spatial audio, bus mixer, reverb zones, adaptive music, snapshots
 - **Scripting**: TypeScript + visual scripting with 73 node types
 - **Export**: HTML5 bundles, cloud publishing, mobile touch controls
@@ -73,7 +73,3 @@ These areas have implementations; the capability matrix records their current wo
 - **Native mobile app export**: Focus is browser-first. PWA + touch controls cover mobile play. Native stores add review delays and 30% revenue cut.
 - **VR/AR support**: WebXR is promising but the ecosystem isn't mature enough for a game creation tool. Revisiting in 2027.
 - **MMO networking**: Real-time multiplayer is deferred. The architecture supports it (async channels, entity IDs), but the infrastructure investment is significant.
-
-## Linked prefab editing
-
-Flat prefab copies remain available. The saved-link inspector shows metadata only. Linked scene placement, nested entity creation and propagation are unavailable, with disabled UI controls and explicit command errors. Engine integration remains on [#9811](https://github.com/Tristan578/project-forge/issues/9811).

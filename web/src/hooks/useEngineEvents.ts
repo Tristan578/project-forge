@@ -18,12 +18,11 @@ import {
   handleParticleEvent,
   handlePerformanceEvent,
   handleEditModeEvent,
-  handleRenderErrorEvent,
 } from './events';
 import { THROTTLED_EVENTS } from './events/throttledEvents';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
 import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
-import type { BatchResult, CommandResponse } from './useEngine';
+import type { CommandResponse } from './useEngine';
 
 /**
  * Coerce whatever `handle_command` returned into a `CommandResponse`.
@@ -70,17 +69,14 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
         return normalizeCommandResponse(wasmModule.handle_command(command, payload));
       } catch (error) {
         console.error(`Error dispatching command '${command}':`, error);
-        // A throw is not a refusal: `handle_command` dispatches before it
-        // serializes its answer, so the command may already have taken effect.
-        // `threw` is what lets the store tell the two apart.
-        return { success: false, error: error instanceof Error ? error.message : String(error), threw: true };
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
     [wasmModule]
   );
 
   const dispatchCommandBatch = useCallback(
-    (commands: Array<{ command: string; payload?: unknown }>): BatchResult => {
+    (commands: Array<{ command: string; payload?: unknown }>) => {
       if (commands.length > 256) {
         console.error(`Batch size ${commands.length} exceeds limit of 256`);
         return { success: false, results: [] };
@@ -94,9 +90,7 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           };
         } catch (error) {
           console.error('Error dispatching command batch:', error);
-          // Unlike the two refusals around it, the batch WAS sent, and the
-          // engine runs all of it before serializing the answers.
-          return { success: false, results: [], threw: true };
+          return { success: false, results: [] };
         }
       }
       return { success: false, results: [] };
@@ -177,7 +171,6 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       if (handleParticleEvent(type, payload, set, get)) return;
       if (handlePerformanceEvent(type, payload, set, get)) return;
       if (handleEditModeEvent(type, payload, set, get)) return;
-      if (handleRenderErrorEvent(type, payload, set, get)) return;
 
       console.warn('Unknown engine event:', type);
     };

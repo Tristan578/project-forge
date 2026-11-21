@@ -257,12 +257,9 @@ describe('MCP loopback relay (#9293)', () => {
 // against a running relay. These drive the decision directly instead of
 // asserting an adjacent property.
 describe('handshake gate (pure)', () => {
-  // `remoteAddress: undefined` / `host: undefined` are deliberate inputs (the
-  // `in` checks below turn them into a missing peer address / Host header), so
-  // the type has to admit an explicit undefined, not just an omitted key.
   const req = (over: {
-    remoteAddress?: string | undefined;
-    host?: string | undefined;
+    remoteAddress?: string;
+    host?: string;
     origin?: string;
     role?: string;
   }) => ({

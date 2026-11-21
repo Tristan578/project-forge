@@ -1,9 +1,6 @@
 'use client';
 
-/** Collect an explicit analytics consent choice with accessible shared controls. */
-
-import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Button } from '@spawnforge/ui';
+import { useCallback, useSyncExternalStore } from 'react';
 import { initPostHog } from '@/lib/analytics/posthog';
 
 const STORAGE_KEY = 'forge-cookie-consent';
@@ -61,19 +58,13 @@ function getServerSnapshot(): boolean {
  * hydration-safe: getServerSnapshot returns true (banner hidden), matching
  * the SSR output. After hydration the client snapshot takes over — if the
  * user hasn't interacted yet (no key in localStorage), the banner appears.
- * @returns An accessible consent banner, or null after a stored or session choice. Accept
- * writes storage/cookie consent and requests analytics initialization; Decline
- * writes a denial without initializing analytics.
  */
 export function CookieConsent() {
-  const hasStoredChoice = useSyncExternalStore(subscribeToStorage, getConsentSnapshot, getServerSnapshot);
-  // Keep an explicit choice for this mount even when browser storage is blocked.
-  const [hasSessionChoice, setHasSessionChoice] = useState(false);
+  const hasInteracted = useSyncExternalStore(subscribeToStorage, getConsentSnapshot, getServerSnapshot);
 
   const handleAccept = useCallback(() => {
     safeLocalStorage.setItem(STORAGE_KEY, 'true');
     setConsentCookie(true);
-    setHasSessionChoice(true);
     initPostHog();
     // Force re-render via storage event won't fire in same tab — trigger
     // by dispatching a synthetic event so useSyncExternalStore picks it up.
@@ -83,12 +74,11 @@ export function CookieConsent() {
   const handleDecline = useCallback(() => {
     safeLocalStorage.setItem(STORAGE_KEY, 'false');
     setConsentCookie(false);
-    setHasSessionChoice(true);
     window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 
   // Already interacted → hide banner
-  if (hasStoredChoice || hasSessionChoice) return null;
+  if (hasInteracted) return null;
 
   return (
     <div
@@ -97,24 +87,21 @@ export function CookieConsent() {
       aria-label="Cookie consent"
     >
       <p className="mb-3 text-sm text-zinc-300">
-        Optional analytics cookies help us improve SpawnForge. You can accept or decline them.
+        We use cookies to improve your experience. By continuing to use SpawnForge, you agree to our use of cookies.
       </p>
       <div className="flex gap-2">
-        <Button
+        <button
           onClick={handleAccept}
-          size="sm"
-          className="min-h-[44px] min-w-[44px]"
+          className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           Accept
-        </Button>
-        <Button
+        </button>
+        <button
           onClick={handleDecline}
-          variant="outline"
-          size="sm"
-          className="min-h-[44px] min-w-[44px]"
+          className="rounded bg-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           Decline
-        </Button>
+        </button>
       </div>
     </div>
   );

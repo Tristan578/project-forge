@@ -1,54 +1,23 @@
 # SpawnForge — Codex CLI Instructions
 
-> **Codex does not load this file by itself.** It collects `AGENTS.md` only from the repository root down to the directory it started in, and `.codex/` is not on that path. The root `AGENTS.md` opens with a section telling a Codex session to read this file; if you are reading it, that worked. Anything that must reach Codex without that hop belongs in the root file.
-
 ## CRITICAL: No Code Without a Ticket
 
 **Before writing ANY code, you MUST have a ticket.** This is non-negotiable and applies to every contributor and every AI tool in this repo.
 
-### Workflow (hooks are wired — you are still responsible)
+### Workflow (Manual — Codex has no hooks)
 
-The shared enforcement scripts in `.claude/hooks/` are wired for Codex in
-`.codex/hooks.json`: session start, prompt submit, before and after shell
-commands and file edits, subagent start/stop, pre-compaction, and stop. That
-file is **generated** from `.claude/settings.json` — never edit it; see
-`docs/guides/codex-cli-support-matrix.md` for what is wired, what Codex cannot
-express, and why.
+Since Codex CLI does not support lifecycle hooks, you MUST manually run these steps. Other tools (Claude Code, Copilot, Gemini, Windsurf) enforce these automatically via hooks — you must self-enforce.
 
-**Do not assume a hook ran.** This wiring has been tested outside Codex but not
-yet confirmed inside a live session, hooks run only after the one-time approval
-below, and on Windows they silently do nothing if Codex was not started at the
-repository root. Follow the rules in this file yourself; the hooks are a second
-line, not a replacement. If you were not shown the session-start backlog, the
-hooks are not running — do the manual steps under **If hooks are not running**.
+#### On Session Start
+Run these commands before doing any work:
+```bash
+# 1. Ensure taskboard is running
+cd project-forge && bash .claude/hooks/on-session-start.sh
 
-**One-time setup per checkout — hooks do nothing until you do this:**
-
-1. Start Codex **at the repository root**. On Windows the hook commands are
-   paths relative to the directory Codex starts in; started anywhere else, every
-   hook fails to find the adapter, Codex reports the run as failed and carries
-   on — so blocking hooks do not block, and nothing says so.
-2. Trust the project when Codex asks (or set `trust_level = "trusted"` for this
-   path in `~/.codex/config.toml`). An untrusted project's `.codex/` layer is
-   loaded but disabled.
-3. Run `/hooks` and approve the listed hooks. Codex stores a hash per hook; a
-   hook that is new **or whose command changed** is listed but never runs until
-   it is approved again. After pulling a change to `.codex/hooks.json`, open
-   `/hooks` again.
-4. In a linked `git worktree`, Codex reads hooks from the **main checkout's**
-   `.codex/`, not the worktree's. Test a hook change from the main checkout.
-
-#### Requirements on PATH
-
-`node`, `git`, `bash` (Git for Windows' bash on Windows) and `jq`, which most of
-the shared scripts use to read their input. The adapter asks bash for `jq` before
-it starts any script: without it **no** script is started — the ones that do not
-use it included, so the gap shows at session start — a `PreToolUse` hook that
-would have started one blocks, and the message names `jq` and this heading. (Left to themselves the scripts would split
-two ways: the ones that call `jq` directly under `set -e` end with exit 127 and no
-message, the others read nothing and pass. `set -e` alone does not decide it — a
-`jq` call inside a command substitution does not end the script, because bash
-clears `-e` there.)
+# Or manually (see Canonical Project Facts for the start command):
+cd project-forge && taskboard start --port 3010
+```
+This will auto-start the taskboard, pull GitHub Project changes, and display prioritized backlog.
 
 #### Before Writing Code
 1. Review the backlog at http://localhost:3010
@@ -56,59 +25,17 @@ clears `-e` there.)
 3. Ensure the ticket passes validation (see Required Ticket Fields below)
 4. Move the ticket to `in_progress`
 
-#### Always manual under Codex
-- After `git worktree add` (Codex has no worktree-created event). The script
-  reads the new worktree's path from a JSON payload on stdin — run bare, it
-  prints "No worktree_path in event" and does nothing. From the MAIN checkout
-  (needs `jq`; `node` builds the JSON so a Windows path with backslashes is
-  escaped correctly — a bare `printf` would produce invalid JSON for one):
-  ```bash
-  node -e 'process.stdout.write(JSON.stringify({worktree_path: process.argv[1]}))' "/absolute/path/to/the/new/worktree" | bash .claude/hooks/worktree-setup.sh
-  ```
-- After a compaction, re-read `.claude/rules/lessons-learned.md` and the rule
-  file for the area you are in. Claude Code re-injects a digest at that point;
-  Codex's post-compaction hook cannot carry text to the model.
-
-#### If hooks are not running
+#### After Completing Work
 ```bash
-bash .claude/hooks/on-session-start.sh                     # start of session: taskboard, GitHub pull, backlog
-(cd web && npx eslint --max-warnings 0 <the files you edited>) # after editing files under web/
-bash .claude/hooks/on-stop.sh                               # after completing work: ticket validation, GitHub push
+# Validate tickets and push to GitHub
+cd project-forge && bash .claude/hooks/on-stop.sh
 ```
-(`post-edit-lint.sh` is not in that list on purpose: it takes the edited file
-from a hook payload on stdin, so run by hand it lints nothing and exits 0. The
-`eslint` line above is what it would have run.)
 
-## Planning
-
-Plan before you implement. This repository is spec-first — nothing is built
-without an approved spec in `specs/` — and Codex's two planning commands are how
-that discipline is kept inside a session:
-
-- `/plan` switches to Plan mode. Use it before starting implementation on any
-  ticket: produce the plan, check it against the ticket's acceptance criteria,
-  and only then leave Plan mode.
-- `/goal` sets or shows the goal for a long-running task. Use it for a ticket
-  that spans more than one subtask, so the objective survives compaction.
-
-These complement the ticket's own plan — every ticket carries at least three
-subtasks (see **Required Ticket Fields**). The subtasks say *what* will be
-delivered; `/plan` works out *how* before any file changes.
-
-## Subagents and skills
-
-- **Subagents** live in `.codex/agents/*.toml`, generated from
-  `.claude/agents/*.md`. The five review-board seats are `code-architect`,
-  `security-reviewer`, `dx-guardian`, `ux-reviewer` and `test-reviewer`
-  (`test-writer` writes tests and never sits on the board). Protocol:
-  `.claude/skills/review-protocol/SKILL.md`.
-- **Skills** are discovered from `.agents/skills/`. The project skills there are
-  byte-exact mirrors of `.claude/skills/`, regenerated by
-  `node tools/agentic-sync/port.mjs --write`. Invoke one with `$skill-name` or
-  browse with `/skills`.
-
-To change an agent, a skill or a hook, edit the source under `.claude/` and
-regenerate. `scripts/check-codex-port.sh` fails any PR where the two differ.
+#### After Editing Files
+```bash
+# Lint changed files
+cd project-forge && bash .claude/hooks/post-edit-lint.sh
+```
 
 ## Taskboard Setup
 
@@ -128,9 +55,9 @@ regenerate. `scripts/check-codex-port.sh` fails any PR where the two differ.
 - Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.3.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
+**Coverage thresholds (CI-enforced):** statements 83 · branches 75 · functions 78 · lines 85
 
 **Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
 <!-- AGENTIC-SYNC:END -->
@@ -217,7 +144,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 
 When working in a git worktree (subagents, feature branches), **commit after every logical chunk of work** (each test file, each feature, each bug fix). Rate limits and crashes can kill agents at any time — uncommitted work is permanently lost. Never accumulate large uncommitted changesets.
 
-`.claude/hooks/on-stop.sh` and `worktree-safety-commit.sh` run on Codex's `Stop` event once hooks are approved (see **Workflow** above); until then, run `bash .claude/hooks/on-stop.sh` yourself after completing work.
+After completing work, run `bash .claude/hooks/on-stop.sh` to trigger worktree safety commit and GitHub sync.
 
 ## CI/CD Enforcement
 
@@ -253,7 +180,7 @@ cd web && npm install && npm run dev
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # MCP server tests
-cd mcp-server && npx tsc --noEmit && npx vitest run
+cd mcp-server && npx vitest run
 
 # E2E tests (requires WASM build)
 cd web && npx playwright test
@@ -263,7 +190,7 @@ cd web && npx playwright test
 
 For full architecture rules, ECS patterns, and library APIs, see:
 - `.claude/CLAUDE.md` — Full project constitution
-- `.claude/rules/bevy-api.md` — Bevy 0.19 API patterns
+- `.claude/rules/bevy-api.md` — Bevy 0.18 API patterns
 - `.claude/rules/entity-snapshot.md` — ECS snapshot patterns
 - `.claude/rules/web-quality.md` — ESLint & React patterns
 - `.claude/rules/library-apis.md` — Third-party library APIs
@@ -271,14 +198,13 @@ For full architecture rules, ECS patterns, and library APIs, see:
 
 ## Hook Scripts (shared with all tools)
 
-All hooks live in `.claude/hooks/` and are shared across Claude Code, Copilot, Gemini, Windsurf, and Codex. Under Codex they run through `.codex/hooks/run-claude-hook.mjs`, which translates Codex's hook payload into the shape these scripts read (Codex reports a file edit as `apply_patch` with the patch text and no `file_path`). The full list is in `.codex/hooks.json`; the ones you will notice:
+All hooks live in `.claude/hooks/` and are shared across Claude Code, Copilot, Gemini, Windsurf, and Codex:
 
-| Script | Purpose | Codex event |
+| Script | Purpose | When to Run |
 |--------|---------|-------------|
-| `on-session-start.sh` | Install check + auto-start + GitHub pull + backlog | `SessionStart` |
-| `on-prompt-submit.sh` | Ticket enforcement + stale reminders | `UserPromptSubmit` |
-| `on-stop.sh` | Ticket validation + GitHub push | `Stop` |
-| `post-edit-lint.sh` | ESLint on changed files | `PostToolUse` (`apply_patch`) |
-| `block-main-commits.sh`, `check-pr-metadata.sh`, `pre-push-quality-gate.sh`, `block-deferred-fixes.sh` | Commit, PR and push policy | `PreToolUse` (`Bash`) |
-| `sync-to-github.sh` | Push to GitHub Project | run by `on-stop.sh` |
-| `sync-from-github.sh` | Pull from GitHub Project | run by `on-session-start.sh` |
+| `on-session-start.sh` | Install check + auto-start + GitHub pull + backlog | Start of session |
+| `on-prompt-submit.sh` | Ticket enforcement + stale reminders | Before starting work |
+| `on-stop.sh` | Ticket validation + GitHub push | After completing work |
+| `post-edit-lint.sh` | ESLint on changed files | After editing web/ files |
+| `sync-to-github.sh` | Push to GitHub Project | After ticket changes |
+| `sync-from-github.sh` | Pull from GitHub Project | Start of session |

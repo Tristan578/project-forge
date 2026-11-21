@@ -41,9 +41,7 @@ command -v git    >/dev/null 2>&1 || { echo "FATAL: git not found on host";    e
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
-readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
-readonly -f bad
 
 # --- fixture profiles --------------------------------------------------------
 # Safe profile — mirrors the committed HEAD: approval-gated, network/shell off.
@@ -159,7 +157,6 @@ run_fixture() { # <content> → writes a fixture file, runs the guard against it
   rm -f "$tmp"
   return "$rc"
 }
-readonly -f run_fixture
 run_fixture_out() { # <content> → echoes the guard's combined output
   local content="$1" tmp
   tmp="$(mktemp)"
@@ -167,7 +164,6 @@ run_fixture_out() { # <content> → echoes the guard's combined output
   CODEX_CONFIG_PATH="$tmp" bash "$GUARD" 2>&1
   rm -f "$tmp"
 }
-readonly -f run_fixture_out
 
 # =============================================================================
 echo "== tripwire: script exists and is executable =="

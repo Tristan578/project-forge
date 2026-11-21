@@ -12,5 +12,4 @@ export { handleSpriteEvent } from './spriteEvents';
 export { handleParticleEvent } from './particleEvents';
 export { handlePerformanceEvent } from './performanceEvents';
 export { handleEditModeEvent } from './editModeEvents';
-export { handleRenderErrorEvent } from './renderErrorEvents';
 export type { SetFn, GetFn } from './types';

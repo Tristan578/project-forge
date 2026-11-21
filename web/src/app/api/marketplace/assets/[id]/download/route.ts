@@ -5,10 +5,8 @@ import { marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/
 import { eq, and, sql } from 'drizzle-orm';
 import { getSignedDownloadUrl, resolveOwnedAssetKey } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
-async function GET_impl(
+export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
@@ -105,7 +103,6 @@ async function GET_impl(
     }
 
     // Fallback: validate URL against allowed domains to prevent open redirect
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an ASSET_CDN_HOSTS env var explicitly set to blank is operationally the same as unset
     const allowedHosts = (process.env.ASSET_CDN_HOSTS || 'localhost').split(',').map(h => h.trim());
     try {
       const fileUrl = new URL(asset.assetFileUrl);
@@ -126,17 +123,13 @@ async function GET_impl(
         return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
       }
     } catch {
-      return redactedJson({ error: 'Invalid file URL' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
     }
 
     return NextResponse.redirect(asset.assetFileUrl);
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets/[id]/download', assetId });
     console.error('Error downloading asset:', error);
-    return redactedJson({ error: 'Failed to download asset' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to download asset' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

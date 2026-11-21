@@ -14,6 +14,7 @@ const DIRECT_ENV_KEYS = [
   'PLATFORM_MESHY_KEY',
   'PLATFORM_HYPER3D_KEY',
   'PLATFORM_ELEVENLABS_KEY',
+  'PLATFORM_SUNO_KEY',
   'PLATFORM_REPLICATE_KEY',
   'PLATFORM_REMOVEBG_KEY',
 ] as const;
@@ -176,9 +177,10 @@ describe('getDirectProviderKey', () => {
     expect(getDirectProviderKey('elevenlabs')).toBe('el-test');
   });
 
-  it('returns null for suno — it has no platform key env anymore (#9522)', async () => {
+  it('returns key for suno when PLATFORM_SUNO_KEY is set', async () => {
+    vi.stubEnv('PLATFORM_SUNO_KEY', 'suno-test');
     const { getDirectProviderKey } = await import('@/lib/providers/backends/direct');
-    expect(getDirectProviderKey('suno')).toBeNull();
+    expect(getDirectProviderKey('suno')).toBe('suno-test');
   });
 
   it('returns key for replicate when PLATFORM_REPLICATE_KEY is set', async () => {
@@ -304,10 +306,10 @@ describe('resolveDirectKey', () => {
     expect(resolveDirectKey('voice')).toBe('el-voice');
   });
 
-  it('resolves music capability to PLATFORM_ELEVENLABS_KEY (#9522)', async () => {
-    vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el-music');
+  it('resolves music capability to PLATFORM_SUNO_KEY', async () => {
+    vi.stubEnv('PLATFORM_SUNO_KEY', 'suno-music');
     const { resolveDirectKey } = await import('@/lib/providers/backends/direct');
-    expect(resolveDirectKey('music')).toBe('el-music');
+    expect(resolveDirectKey('music')).toBe('suno-music');
   });
 
   it('resolves sprite capability to PLATFORM_REPLICATE_KEY', async () => {

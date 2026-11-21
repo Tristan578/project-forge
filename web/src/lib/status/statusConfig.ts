@@ -49,16 +49,9 @@ export const MONITORED_SERVICES: MonitoredServiceConfig[] = [
   },
   {
     id: 'ai',
-    // Named for what the check now grades (#9727 review). Since #9719 this
-    // entry degrades when an ASSET-generation capability has no platform key
-    // while chat is fully operational, so "AI Assistant" told a visitor the
-    // assistant was degraded when it was not — and its summary named features
-    // ("3D Model Generation", "Voice Generation") the old name and description
-    // did not cover. The id stays `ai`: it is the machine-readable handle
-    // consumers key on.
-    displayName: 'AI Providers',
+    displayName: 'AI Assistant',
     healthCheckName: 'AI Providers',
-    description: 'AI chat, code generation, scene building, and asset generation',
+    description: 'AI chat, code generation, and scene building',
     critical: false,
   },
   {

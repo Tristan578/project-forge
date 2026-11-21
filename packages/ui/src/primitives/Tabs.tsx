@@ -18,23 +18,17 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
   const activeIndex = tabs.findIndex((t) => t.id === activeTab);
 
   function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (tabs.length === 0) return;
-    let nextIndex: number;
     if (e.key === "ArrowRight") {
-      nextIndex = (activeIndex + 1) % tabs.length;
+      const next = (activeIndex + 1) % tabs.length;
+      onChange(tabs[next].id);
     } else if (e.key === "ArrowLeft") {
-      nextIndex = (activeIndex - 1 + tabs.length) % tabs.length;
+      const prev = (activeIndex - 1 + tabs.length) % tabs.length;
+      onChange(tabs[prev].id);
     } else if (e.key === "Home") {
-      nextIndex = 0;
+      onChange(tabs[0].id);
     } else if (e.key === "End") {
-      nextIndex = tabs.length - 1;
-    } else {
-      return;
+      onChange(tabs[tabs.length - 1].id);
     }
-
-    e.preventDefault();
-    onChange(tabs[nextIndex].id);
-    e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
   }
 
   return (

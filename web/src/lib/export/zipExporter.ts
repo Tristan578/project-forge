@@ -15,8 +15,6 @@ import { compressTexture, COMPRESSION_PRESETS, type CompressionConfig } from './
 import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
 import { generateGameLoopFragment } from './gameLoopFragment';
 import { generateEventCallbackFragment } from './eventCallbackFragment';
-import { generateSceneLoadFragment } from './sceneLoadFragment';
-import { generatePerfHarnessBootstrap } from './perfHarnessFragment';
 
 export interface ZipExportOptions {
   format: ExportFormat;
@@ -29,8 +27,6 @@ export interface ZipExportOptions {
   bgColor: string;
   includeDebug: boolean;
   orientationLock?: 'landscape' | 'portrait' | 'none';
-  /** Project dimension; see `GameTemplateOptions.projectType`. */
-  projectType?: '2d' | '3d';
   signal?: AbortSignal;
 }
 
@@ -174,7 +170,6 @@ export async function exportAsZip(
     embedBridge: isEmbed ? generatePostMessageBridge() : undefined,
     orientationLock: options.orientationLock,
     isPwa,
-    projectType: options.projectType,
   });
 
   entries.push({
@@ -257,9 +252,8 @@ export function generateZipIndexHtml(options: {
   embedBridge?: string;
   orientationLock?: 'landscape' | 'portrait' | 'none';
   isPwa?: boolean;
-  projectType?: '2d' | '3d';
 }): string {
-  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock, isPwa, projectType } = options;
+  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock, isPwa } = options;
   const bgColor = validateCssColor(rawBgColor);
 
   const debugScript = includeDebug
@@ -323,16 +317,7 @@ export function generateZipIndexHtml(options: {
     ${embedBridge ? escapeScriptContent(embedBridge) : ''}
   </script>
 
-  <script>
-    // Performance-capture harness: dormant unless the page is opened with
-    // ?forgePerf=1 (see perfHarnessFragment.ts, #10013).
-    ${generatePerfHarnessBootstrap()}
-  </script>
-
   <script type="module">
-    // Scene load helper shared with the single-HTML exporter (sceneLoadFragment.ts).
-${generateSceneLoadFragment({ indent: '    ' })}
-
     // Load game data and scripts
     var sceneData;
     try {
@@ -360,10 +345,8 @@ ${generateSceneLoadFragment({ indent: '    ' })}
 
     // Initialize WASM engine
     async function initializeEngine() {
-      if (window.__forgePerfHooks) window.__forgePerfHooks.initStart();
       ${includeDebug ? "console.log('[Game] Detecting rendering backend...');" : ''}
       ${wasmAvailability}
-      if (window.__forgePerfHooks) window.__forgePerfHooks.backend(variant);
       ${includeDebug ? "console.log('[Game] Using ' + variant + ' renderer');" : ''}
 
       var basePath = './engine-pkg-' + variant;
@@ -372,8 +355,7 @@ ${generateSceneLoadFragment({ indent: '    ' })}
       ${includeDebug ? "console.log('[Game] Loading WASM from ' + jsUrl);" : ''}
 
       var wasm = await import(jsUrl);
-      var wasmExports = await wasm.default(basePath + '/forge_engine_bg.wasm');
-      if (window.__forgePerfHooks) window.__forgePerfHooks.wasm(wasmExports);
+      await wasm.default(basePath + '/forge_engine_bg.wasm');
 
       // Set up event callback for script integration (shared with the
       // single-HTML exporter — see eventCallbackFragment.ts).
@@ -390,13 +372,8 @@ ${generateSceneLoadFragment({ indent: '    ' })}
         : '// No orientation lock requested'
       }
 
-      // Load scene data. The engine reads payload.json and refuses commands
-      // until its first update, so this waits (bounded) and sends { json } —
-      // a bare JSON string was refused and the game started empty (#10013).
-      var sceneLoad = await __forgeLoadScene(wasm.handle_command, window.__forgeSceneData);
-      if (window.__forgePerfHooks) window.__forgePerfHooks.sceneLoad(sceneLoad);
-      // Project dimension: 2D games need the engine's 2D camera, the only one sprites render through.
-      ${projectType === '2d' ? "wasm.handle_command('set_project_type', { projectType: '2d' });" : ''}
+      // Load scene data
+      wasm.handle_command('load_scene', JSON.stringify(window.__forgeSceneData));
 
       // Auto-play after short delay to let the engine settle
       await new Promise(function(r) { setTimeout(r, 500); });
@@ -429,7 +406,6 @@ ${generateGameLoopFragment({ handleCommand: 'wasm.handle_command', indent: '    
       document.removeEventListener('click', startGame);
       if (loadingText) loadingText.textContent = 'Loading...';
       initializeEngine().catch(function(err) {
-        if (window.__forgePerfHooks) window.__forgePerfHooks.fail(err);
         console.error('[Game] Failed to initialize:', err);
         if (loadingText) loadingText.textContent = 'Failed to load game. ' + err.message;
       });

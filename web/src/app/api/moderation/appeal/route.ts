@@ -11,8 +11,6 @@ import {
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,7 +67,7 @@ async function resolveContentOwner(
  * Authenticated users can submit an appeal for blocked/flagged content.
  * Body: { contentId, contentType, reason }
  */
-async function POST_impl(req: NextRequest) {
+export async function POST(req: NextRequest) {
   // Rate limit: 5 appeals per 10 minutes per IP — prevents spam appeal submission
   const limited = await rateLimitPublicRoute(req, 'moderation-appeal', 5, 600_000);
   if (limited) return limited;
@@ -105,13 +103,9 @@ async function POST_impl(req: NextRequest) {
     return NextResponse.json({ id: appeal.id, status: appeal.status }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/moderation/appeal' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to submit appeal' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

@@ -95,15 +95,7 @@ const POSITIONED_ENTITY_SCENE = JSON.stringify({
 // Group 1: Store-level round-trip tests (@ui — no WASM needed)
 // ---------------------------------------------------------------------------
 
-// Substitutions, declared per #10158 (e2e/lib/substitution.ts): the scene is
-// serialized and restored with JSON.stringify and store setters inside one page
-// (no WASM engine export/load), and nothing is persisted (no save server).
-test.describe('Save/Load round-trip — store level [substituted: WASM engine] [substituted: save server] @ui @dev', {
-  annotation: [
-    { type: 'substitution', description: 'WASM engine' },
-    { type: 'substitution', description: 'save server' },
-  ],
-}, () => {
+test.describe('Save/Load round-trip — store level @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
     await editor.waitForEditorStore();

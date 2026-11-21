@@ -2,7 +2,6 @@
 
 import { useState, useCallback } from 'react';
 import { X, Bug, Lightbulb, MessageSquare, Send, CheckCircle } from 'lucide-react';
-import { InlineAlert } from '@spawnforge/ui';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 type FeedbackType = 'bug' | 'feature' | 'general';
@@ -72,7 +71,6 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
           typeof data?.details === 'object' && data.details !== null && typeof (data.details as { message?: unknown }).message === 'string'
             ? (data.details as { message: string }).message
             : null;
-        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank detail/error message falls through to the next candidate, same as an absent one
         throw new Error(detailMessage || data.error || `HTTP ${res.status}`);
       }
 
@@ -171,7 +169,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
                 {description.length}/5000
               </span>
               {description.trim().length > 0 && description.trim().length < 10 && (
-                <span className="text-[10px] text-[var(--sf-warning)]">
+                <span className="text-[10px] text-amber-500">
                   Minimum 10 characters
                 </span>
               )}
@@ -179,9 +177,9 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
 
             {/* Error message */}
             {error && (
-              <InlineAlert variant="error" className="mb-3">
+              <div role="alert" className="mb-3 rounded border border-red-800/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
                 {error}
-              </InlineAlert>
+              </div>
             )}
 
             {/* Submit button */}

@@ -25,9 +25,7 @@ vi.mock('ai', async () => {
 });
 
 vi.mock('@ai-sdk/anthropic', () => ({
-  createAnthropic: vi.fn(() => ({
-    languageModel: vi.fn((id: string) => ({ _provider: 'anthropic', id })),
-  })),
+  anthropic: vi.fn((id: string) => ({ _provider: 'anthropic', id })),
 }));
 
 vi.mock('@ai-sdk/gateway', () => ({

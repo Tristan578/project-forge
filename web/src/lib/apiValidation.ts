@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { redactedJson } from '@/lib/api/errors';
 
 /**
  * Validates and parses a JSON request body. Returns the parsed body or a 400 error response.
@@ -14,10 +13,7 @@ export async function parseJsonBody(req: Request): Promise<
     }
     return { ok: true, body: body as Record<string, unknown> };
   } catch {
-    // `redactedJson`, not `NextResponse.json`: a raw constructor inside a catch
-    // is banned (#9736). The body is a fixed string; the redactor is what keeps
-    // that true if a future change ever folds the parse error into it.
-    return { ok: false, response: redactedJson({ error: 'Invalid JSON body' }, { status: 400 }) };
+    return { ok: false, response: NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }) };
   }
 }
 
@@ -162,9 +158,7 @@ export function parsePaginationParams(
   searchParams: URLSearchParams,
   { defaultLimit = 20, maxLimit = 100 }: { defaultLimit?: number; maxLimit?: number } = {}
 ): { limit: number; offset: number } {
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `limit` query param is the same as an omitted one, not a distinct value
   const rawLimit = parseInt(searchParams.get('limit') || String(defaultLimit), 10);
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `offset` query param is the same as an omitted one, not a distinct value
   const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
 
   const limit = Math.max(1, Math.min(Number.isFinite(rawLimit) ? rawLimit : defaultLimit, maxLimit));

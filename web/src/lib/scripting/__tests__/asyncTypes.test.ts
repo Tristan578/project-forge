@@ -9,15 +9,14 @@ import {
 } from '../asyncTypes';
 
 describe('asyncTypes', () => {
-  it('defines all 7 channels', () => {
-    expect(ASYNC_CHANNELS).toHaveLength(7);
+  it('defines all 6 channels', () => {
+    expect(ASYNC_CHANNELS).toHaveLength(6);
     expect(ASYNC_CHANNELS).toContain('physics');
     expect(ASYNC_CHANNELS).toContain('audio');
     expect(ASYNC_CHANNELS).toContain('ai');
     expect(ASYNC_CHANNELS).toContain('asset');
     expect(ASYNC_CHANNELS).toContain('animation');
     expect(ASYNC_CHANNELS).toContain('multiplayer');
-    expect(ASYNC_CHANNELS).toContain('leaderboard');
   });
 
   it('has config for every channel', () => {
@@ -56,14 +55,6 @@ describe('asyncTypes', () => {
     expect(CHANNEL_ALLOWED_METHODS.multiplayer.size).toBeGreaterThan(0);
     expect(CHANNEL_ALLOWED_METHODS.multiplayer.has('connect')).toBe(true);
     expect(CHANNEL_ALLOWED_METHODS.multiplayer.has('send')).toBe(true);
-  });
-
-  it('leaderboard allows submit and getTop and is play-mode-gated', () => {
-    expect(CHANNEL_ALLOWED_METHODS.leaderboard.has('submit')).toBe(true);
-    expect(CHANNEL_ALLOWED_METHODS.leaderboard.has('getTop')).toBe(true);
-    expect(CHANNEL_ALLOWED_METHODS.leaderboard.size).toBe(2);
-    expect(CHANNEL_CONFIGS.leaderboard.playModeOnly).toBe(true);
-    expect(CHANNEL_CONFIGS.leaderboard.supportsProgress).toBe(false);
   });
 
   it('physics allowed methods include raycast', () => {

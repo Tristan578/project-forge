@@ -8,7 +8,6 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ProviderCapability } from '@/lib/providers/types';
-import { CAPABILITY_LABELS } from '@/lib/config/providers';
 import type { CapabilitiesResponse, CapabilityStatus } from '@/app/api/capabilities/route';
 import { ERROR_TTL_MS, CAPABILITIES_TTL_MS } from '@/lib/config/timeouts';
 
@@ -39,18 +38,19 @@ export const FEATURE_CAPABILITY_MAP: Record<FeatureId, ProviderCapability[]> = {
   'semantic-search': ['embedding'],
 };
 
-/**
- * Human-readable feature labels for tooltips, DERIVED from the one shared
- * table (`CAPABILITY_LABELS`) rather than restated here. A second copy is the
- * drift `CAPABILITY_LABELS` exists to prevent: it read identically until
- * someone renamed a capability on one side (#9727 review). Exported so a test
- * can pin the derivation.
- */
-export const FEATURE_LABELS: Record<FeatureId, string> = Object.fromEntries(
-  (Object.entries(FEATURE_CAPABILITY_MAP) as [FeatureId, ProviderCapability[]][]).map(
-    ([featureId, caps]) => [featureId, caps.map((cap) => CAPABILITY_LABELS[cap]).join(' + ')],
-  ),
-) as Record<FeatureId, string>;
+/** Human-readable feature labels for tooltips */
+const FEATURE_LABELS: Record<FeatureId, string> = {
+  'ai-chat': 'AI Chat',
+  'image-generation': 'Image Generation',
+  'model-generation': '3D Model Generation',
+  'texture-generation': 'Texture Generation',
+  'sfx-generation': 'Sound Effect Generation',
+  'voice-generation': 'Voice Generation',
+  'music-generation': 'Music Generation',
+  'sprite-generation': 'Sprite Generation',
+  'bg-removal': 'Background Removal',
+  'semantic-search': 'Semantic Search',
+};
 
 export interface FeatureGateResult {
   /** Whether the feature is available (all required capabilities configured) */
@@ -110,22 +110,10 @@ function notifySubscribers(): void {
  * sign-out/sign-in by more than the route's own max-age — #9725).
  */
 function isCacheStale(): boolean {
-  if (!cachedState) return false;
+  if (!cachedState || cachedState.loading) return false;
   // `fetchPromise` is nulled when a request settles, so a non-null one means a
   // revalidation is already in flight: never start a second.
   if (fetchPromise) return false;
-  // A loading placeholder with nothing in flight is an ABANDONED request, and
-  // it must be restarted or the module never leaves `loading: true`. The way
-  // in: a consumer mounts and starts the first fetch, unmounts before it
-  // settles, then invalidateCapabilitiesCache() nulls `fetchPromise` and
-  // starts no replacement because `subscribers` is empty. The old code
-  // returned false here — for the rest of the SPA session — so every later
-  // mount was a no-op and `useGenerationGate` reported blocked:false and
-  // unprovisionable:false for EVERY capability, music included: the whole
-  // #9117 gate off with no notice (#9725 p8). This check must precede the
-  // `revalidationPending` and TTL branches below, both of which read fields
-  // that a loading placeholder has never had set.
-  if (cachedState.loading) return true;
   if (revalidationPending) return true;
   if (cachedState.error) {
     return errorCachedAt !== null && Date.now() - errorCachedAt >= ERROR_TTL_MS;

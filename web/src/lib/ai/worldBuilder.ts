@@ -852,7 +852,9 @@ export function healWorldConsistency(world: GameWorld): GameWorld {
   for (const faction of healed.factions) {
     for (const other of healed.factions) {
       if (other.name === faction.name) continue;
-      faction.relationships[other.name] ??= 'neutral';
+      if (faction.relationships[other.name] === undefined) {
+        faction.relationships[other.name] = 'neutral';
+      }
     }
   }
 

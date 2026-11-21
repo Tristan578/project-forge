@@ -1,11 +1,7 @@
 # SpawnForge Engine API Reference
 
-> Hand-written against `web/src/data/commands.json` — no generator emits this
-> file, so the "Generated from" claim it used to carry was itself a rotted
-> number's cover story. The manifest holds 380 commands across 41 categories,
-> measured 2026-09-22 and pinned by
-> `web/src/lib/config/__tests__/capabilityMatrix.test.ts`.
-> Last updated: 2026-09-22
+> Generated from `web/src/data/commands.json`. 350 commands across 41 categories.
+> Last updated: 2026-03-30
 
 ## System Boundaries
 
@@ -97,7 +93,7 @@ Commands that are **not** undoable: scene export/load, play/stop/pause/resume, q
 
 ## Physics Commands (3D)
 
-**Rust-side:** `PhysicsData` + `PhysicsEnabled` ECS components, Rapier3D integration. `RapierConfiguration` is a Component (not Resource) in bevy_rapier3d 0.35.
+**Rust-side:** `PhysicsData` + `PhysicsEnabled` ECS components, Rapier3D integration. `RapierConfiguration` is a Component (not Resource) in bevy_rapier3d 0.33.
 
 | Command | Description | Undo |
 |---------|-------------|------|

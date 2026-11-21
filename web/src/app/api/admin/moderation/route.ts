@@ -8,8 +8,6 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +40,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * — so the join surfaces the game's CREATOR, not a reporter. `reportCount` is
  * how many distinct users have reported it.
  */
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -110,7 +108,6 @@ async function GET_impl(req: NextRequest) {
           title: g.title,
           slug: g.slug,
           authorId: g.authorId,
-          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
           authorName: g.authorName || 'Unknown',
           authorEmail: g.authorEmail,
           reportCount: g.reportCount,
@@ -160,10 +157,8 @@ async function GET_impl(req: NextRequest) {
         type: 'comment' as const,
         content: c.content,
         gameId: c.gameId,
-        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored gameTitle is unset, same as absent; falls back to a display placeholder
         gameTitle: c.gameTitle || 'Unknown',
         authorId: c.authorId,
-        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
         authorName: c.authorName || 'Unknown',
         authorEmail: c.authorEmail,
         createdAt: c.createdAt.toISOString(),
@@ -174,7 +169,7 @@ async function GET_impl(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation', method: 'GET' });
     console.error('Failed to fetch moderation queue:', error);
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to fetch moderation queue' },
       { status: 500 }
     );
@@ -222,7 +217,7 @@ async function GET_impl(req: NextRequest) {
  *             takedown, and approve's CASE leaves a row that was never
  *             'flagged' 'unpublished' rather than silently republishing it.
  */
-async function POST_impl(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -322,14 +317,9 @@ async function POST_impl(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation', method: 'POST' });
     console.error('Failed to perform moderation action:', error);
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to perform moderation action' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);
-export const POST = withEgressGuard(POST_impl);

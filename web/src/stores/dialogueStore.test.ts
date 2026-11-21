@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { useDialogueStore } from './dialogueStore';
 import type { TextNode, ChoiceNode, ConditionNode, ActionNode, EndNode } from './dialogueStore';
 
@@ -20,7 +20,7 @@ const localStorageMock = (() => {
   };
 })();
 
-vi.stubGlobal('localStorage', localStorageMock as Storage);
+global.localStorage = localStorageMock as Storage;
 
 describe('dialogueStore', () => {
   beforeEach(() => {

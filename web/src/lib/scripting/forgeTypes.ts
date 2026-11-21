@@ -13,8 +13,6 @@ declare namespace forge {
   function setPosition(entityId: string, x: number, y: number, z: number): void;
   /** Set absolute rotation (euler degrees) */
   function setRotation(entityId: string, x: number, y: number, z: number): void;
-  /** Set absolute scale */
-  function setScale(entityId: string, x: number, y: number, z: number): void;
   /** Translate relative to current position */
   function translate(entityId: string, dx: number, dy: number, dz: number): void;
   /** Rotate relative to current rotation (euler degrees) */
@@ -45,8 +43,6 @@ declare namespace forge {
     function findByName(name: string): string[];
     /** Find entities whose name exactly matches the string (case-sensitive) */
     function findByNameExact(name: string): string[];
-    /** Find entities whose type contains the search string (case-insensitive) */
-    function findByType(type: string): string[];
     /** Get entity display name */
     function getEntityName(entityId: string): string | null;
     /** Get entity type (e.g. "cube", "sphere", "point_light") */
@@ -72,21 +68,14 @@ declare namespace forge {
   }
 
   namespace input {
-    /**
-     * Check if an action is currently pressed.
-     *
-     * player selects a local-player slot for two-player games (0 = the primary
-     * player, the default). Passing 1 reads the second player's map; omitting
-     * it, or passing 0, is the single-player behaviour every existing script
-     * already has (physics.FR-1.OP-04).
-     */
-    function isPressed(action: string, player?: number): boolean;
-    /** Check if an action was just pressed this frame (optional local-player slot). */
-    function justPressed(action: string, player?: number): boolean;
-    /** Check if an action was just released this frame (optional local-player slot). */
-    function justReleased(action: string, player?: number): boolean;
-    /** Get axis value (-1 to 1) for an optional local-player slot (0 = primary). */
-    function getAxis(action: string, player?: number): number;
+    /** Check if an action is currently pressed */
+    function isPressed(action: string): boolean;
+    /** Check if an action was just pressed this frame */
+    function justPressed(action: string): boolean;
+    /** Check if an action was just released this frame */
+    function justReleased(action: string): boolean;
+    /** Get axis value (-1 to 1) */
+    function getAxis(action: string): number;
     /** Check if the current device supports touch input */
     function isTouchDevice(): boolean;
     /** Trigger haptic feedback (vibration pattern in ms) */
@@ -98,6 +87,8 @@ declare namespace forge {
     function applyForce(entityId: string, fx: number, fy: number, fz: number): void;
     /** Apply an instant impulse */
     function applyImpulse(entityId: string, fx: number, fy: number, fz: number): void;
+    /** Set linear velocity directly */
+    function setVelocity(entityId: string, vx: number, vy: number, vz: number): void;
     /**
      * Whether the kinematic character controller last reported this entity
      * standing on something. False for an entity with no character controller.
@@ -128,27 +119,18 @@ declare namespace forge {
     function applyForce(entityId: string, forceX: number, forceY: number): void;
     /** Apply an instant impulse (2D) */
     function applyImpulse(entityId: string, impulseX: number, impulseY: number): void;
+    /** Set linear velocity directly (2D) */
+    function setVelocity(entityId: string, vx: number, vy: number): void;
     /** Get current velocity (2D) */
     function getVelocity(entityId: string): { x: number; y: number } | null;
-    /** Get current angular velocity (radians per second) */
-    function getAngularVelocity(entityId: string): number | null;
-    /** Set both components of the linear velocity */
-    function setVelocity(entityId: string, vx: number, vy: number): void;
-    /**
-     * Set horizontal velocity, leaving the vertical component alone.
-     * This is the platformer primitive: writing both every frame would cancel
-     * gravity and erase the jump impulse applied on the frame before.
-     */
-    function setVelocityX(entityId: string, vx: number): void;
-    /** Set vertical velocity, leaving the horizontal component alone */
-    function setVelocityY(entityId: string, vy: number): void;
     /** Set angular velocity (radians per second) */
     function setAngularVelocity(entityId: string, omega: number): void;
-    /** Turn this entity's 2D physics simulation on or off */
-    function setEnabled(entityId: string, enabled: boolean): void;
+    /** Get current angular velocity (radians per second) */
+    function getAngularVelocity(entityId: string): number | null;
     /** Perform a raycast and return the first hit */
     function raycast(originX: number, originY: number, dirX: number, dirY: number, maxDistance?: number): Promise<{
       entityId: string;
+      entityName: string;
       point: { x: number; y: number };
       normal: { x: number; y: number };
       distance: number;
@@ -235,46 +217,6 @@ declare namespace forge {
      * values and anything above the shared upper bound throw.
      */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
-    /**
-     * Editor test-play only; unavailable in standalone HTML/ZIP scripts.
-     * Read the last engine-confirmed authored shape. Returns 'none' for absent
-     * shape metadata, or null for an unknown cell or invalid integer coordinate.
-     * Pure read; these shapes do not affect play physics yet (#9814).
-     * @param tilemapId Scene entity ID carrying the tilemap.
-     * @param x Zero-based integer column; fractional values are not floored.
-     * @param y Zero-based integer row; fractional values are not floored.
-     * @param layer Zero-based integer layer index, default 0.
-     * @returns Confirmed shape, none for unauthored metadata, or null for an invalid cell.
-     */
-    function getCollisionShape(
-      tilemapId: string,
-      x: number,
-      y: number,
-      layer?: number,
-    ): 'none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight' | null;
-    /**
-     * Editor test-play only; unavailable in standalone HTML/ZIP scripts.
-     * Queue an authoring request for a known tilemap cell. Coordinates and
-     * layer are floored and checked against the shared unsigned 32-bit bound.
-     * Unknown shapes, missing targets, and invalid coordinates throw.
-     * Reads change after the next engine snapshot; a queued request is not an
-     * acknowledgement that it was saved. Repeated effective shapes add no undo
-     * entry. These shapes do not affect play physics yet (#9814).
-     * @param tilemapId Scene entity ID carrying the existing tilemap.
-     * @param x Zero-based column, floored before bounds checks.
-     * @param y Zero-based row, floored before bounds checks.
-     * @param shape One of none, full, halfTop, halfBottom, slopeLeft, or slopeRight.
-     * @param layer Zero-based layer index, default 0, floored before bounds checks.
-     * @returns Nothing; queues an edit for asynchronous engine application.
-     * @throws If the shape is unknown, coordinates are invalid, or the cell is unavailable.
-     */
-    function setCollisionShape(
-      tilemapId: string,
-      x: number,
-      y: number,
-      shape: 'none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight',
-      layer?: number,
-    ): void;
     /** Convert world coordinates to tile coordinates */
     function worldToTile(tilemapId: string, worldX: number, worldY: number): [number, number];
     /** Convert tile coordinates to world coordinates */
@@ -494,10 +436,14 @@ declare namespace forge {
     function getBones(entityId: string): Array<{ name: string; parentBone: string | null; position: [number, number]; rotation: number; scale: [number, number]; length: number }> | null;
     /** Play a skeletal animation */
     function playAnimation(entityId: string, animName: string, options?: { loop?: boolean; speed?: number; crossfade?: number }): void;
+    /** Stop the current skeletal animation */
+    function stopAnimation(entityId: string): void;
     /** Set the active skin */
     function setSkin(entityId: string, skinName: string): void;
     /** Get the current active skin name */
     function getSkin(entityId: string): string | null;
+    /** Set an IK constraint target position */
+    function setIkTarget(entityId: string, constraintName: string, targetX: number, targetY: number): void;
   }
 
   namespace skeleton2d {

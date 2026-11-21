@@ -6,12 +6,6 @@ import {
   createFakeEngineDispatcher,
 } from '@/stores/slices/__tests__/sceneSliceTestStore';
 import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
-import { create } from 'zustand';
-import { createSceneGraphSlice, type SceneGraphSlice } from '@/stores/slices/sceneGraphSlice';
-import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
-import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
-import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
-import type { SceneFileData } from '@/lib/scenes/sceneManager';
 
 // ---------------------------------------------------------------------------
 // Module mocks for dynamic imports inside the handlers
@@ -27,13 +21,8 @@ const mockRenameScene = vi.fn();
 const mockSetStartScene = vi.fn();
 const mockGetSceneByName = vi.fn();
 const mockSaveCurrentSceneData = vi.fn();
-const mockCreateCheckpoint = vi.fn();
-const mockListCheckpoints = vi.fn();
-const mockRestoreCheckpoint = vi.fn();
-const mockDeleteCheckpoint = vi.fn();
 
-vi.mock('@/lib/scenes/sceneManager', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/scenes/sceneManager')>()),
+vi.mock('@/lib/scenes/sceneManager', () => ({
   loadProjectScenes: (...args: unknown[]) => mockLoadProjectScenes(...args),
   saveProjectScenes: (...args: unknown[]) => mockSaveProjectScenes(...args),
   createScene: (...args: unknown[]) => mockCreateScene(...args),
@@ -44,10 +33,6 @@ vi.mock('@/lib/scenes/sceneManager', async (importOriginal) => ({
   setStartScene: (...args: unknown[]) => mockSetStartScene(...args),
   getSceneByName: (...args: unknown[]) => mockGetSceneByName(...args),
   saveCurrentSceneData: (...args: unknown[]) => mockSaveCurrentSceneData(...args),
-  createCheckpoint: (...args: unknown[]) => mockCreateCheckpoint(...args),
-  listCheckpoints: (...args: unknown[]) => mockListCheckpoints(...args),
-  restoreCheckpoint: (...args: unknown[]) => mockRestoreCheckpoint(...args),
-  deleteCheckpoint: (...args: unknown[]) => mockDeleteCheckpoint(...args),
 }));
 
 // PF-1100: switching and duplicating first read the live scene back out of the
@@ -57,47 +42,6 @@ const mockCaptureActiveScene = vi.fn();
 vi.mock('@/lib/scenes/captureScene', () => ({
   captureActiveScene: (...args: unknown[]) => mockCaptureActiveScene(...args),
 }));
-
-// scene.FR-1 N1: the handler reads the live instance registry to STAGE it for
-// the export it is about to request. Mocked so the folding tests can seed a
-// non-empty registry; default empty keeps every other scene test unchanged (a
-// staged empty registry leaves the JSON untouched, exactly as in production).
-// `stagePrefabInstancesForExport` is spied but kept REAL: the fold the tests
-// assert against consumes what it actually wrote, and the request id it was
-// written under is what `capturedFrom` below correlates on.
-const mockLoadPrefabInstances = vi.fn();
-const mockStagePrefabInstancesForExport = vi.fn();
-vi.mock('@/lib/prefabs/prefabStore', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/prefabs/prefabStore')>();
-  return {
-    ...actual,
-    loadPrefabInstances: (...args: unknown[]) => mockLoadPrefabInstances(...args),
-    stagePrefabInstancesForExport: (requestId: string, instances: PrefabInstance[]) => {
-      mockStagePrefabInstancesForExport(requestId, instances);
-      return actual.stagePrefabInstancesForExport(requestId, instances);
-    },
-  };
-});
-
-/**
- * Stand in for the engine bridge AND its `SCENE_EXPORTED` handler together.
- *
- * The handler no longer folds the prefab registry itself on the way out of the
- * capture: the single upstream fold does it, against the snapshot staged for
- * the export this capture answers. So the double runs the REAL
- * `foldExportedSceneJson` against the id the handler staged under, rather than
- * restating a fold production no longer performs here — a double that restates
- * it would keep passing after the real pipeline stopped folding at all.
- */
-function capturedFrom(live: SceneFileData) {
-  return async () => {
-    const requestId = mockStagePrefabInstancesForExport.mock.calls.at(-1)?.[0] as string | undefined;
-    return {
-      status: 'captured',
-      data: JSON.parse(foldExportedSceneJson(JSON.stringify(live), requestId)) as SceneFileData,
-    };
-  };
-}
 
 const mockTemplateRegistry = [
   {
@@ -153,17 +97,6 @@ beforeEach(() => {
   mockGetSceneByName.mockReturnValue(undefined);
   // Default: no engine attached, so there is no live scene that could be lost
   mockCaptureActiveScene.mockResolvedValue({ status: 'unavailable' });
-  // Default: empty prefab-instance registry, so folding no-ops and the non-N1
-  // scene tests stay byte-identical.
-  mockLoadPrefabInstances.mockReturnValue([]);
-  // Checkpoint defaults
-  mockCreateCheckpoint.mockReturnValue({
-    checkpoint: { id: 'ckpt_1', label: 'auto', createdAt: 't', snapshot: baseProject },
-    checkpoints: [{ id: 'ckpt_1', label: 'auto', createdAt: 't', snapshot: baseProject }],
-  });
-  mockListCheckpoints.mockReturnValue([]);
-  mockRestoreCheckpoint.mockReturnValue({ project: baseProject });
-  mockDeleteCheckpoint.mockReturnValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -177,18 +110,6 @@ describe('export_scene', () => {
     expect((result.result as Record<string, unknown>).message).toBe('Scene export triggered');
     expect(store.saveScene).toHaveBeenCalled();
   });
-
-  it('reports a rejected scene load instead of claiming the export happened (#10056)', async () => {
-    // The store's `saveScene` refuses outright in this state, so returning
-    // success would have the assistant tell the user their work is saved when
-    // nothing was even asked of the engine.
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'export_scene', {}, {
-      sceneLoadError: { reason: 'This scene could not be opened: bad prefab data.', at: 1 },
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('could not be opened');
-    expect(store.saveScene).not.toHaveBeenCalled();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -196,19 +117,12 @@ describe('export_scene', () => {
 // ---------------------------------------------------------------------------
 
 describe('load_scene', () => {
-  it('reports rejected prefab validation or engine loading instead of success', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json: '{}' }, { loadScene: vi.fn(() => false) });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('not loaded');
-  });
-
   it('calls loadScene with provided json and returns success message', async () => {
     const json = JSON.stringify({ entities: [] });
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json });
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('Scene load triggered');
-    // Loading over an intact current scene must not strand the editor (#10056).
-    expect(store.loadScene).toHaveBeenCalledWith(json, { rejectionStrandsEditor: false });
+    expect(store.loadScene).toHaveBeenCalledWith(json);
   });
 
   it('returns failure when json parameter is missing', async () => {
@@ -223,12 +137,6 @@ describe('load_scene', () => {
 // ---------------------------------------------------------------------------
 
 describe('new_scene', () => {
-  it('reports a rejected engine transition instead of success', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'new_scene', {}, { newScene: vi.fn(() => false) });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('unchanged');
-  });
-
   it('calls newScene on the store and returns success message', async () => {
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'new_scene');
     expect(result.success).toBe(true);
@@ -303,20 +211,6 @@ describe('set_input_binding', () => {
       expect.objectContaining({ actionName: 'dash', sources: [] })
     );
   });
-
-  it('forwards the player slot for a second local player (physics.FR-1.OP-04)', async () => {
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'set_input_binding', {
-      actionName: 'attack',
-      actionType: 'digital',
-      sources: ['Numpad0'],
-      player: 1,
-    });
-    expect(result.success).toBe(true);
-    expect((result.result as Record<string, unknown>).message).toBe('Set binding: attack (player 2)');
-    expect(store.setInputBinding).toHaveBeenCalledWith(
-      expect.objectContaining({ actionName: 'attack', player: 1 })
-    );
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -332,18 +226,7 @@ describe('remove_input_binding', () => {
     );
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('Removed binding: jump');
-    // player omitted → forwarded as undefined, which the store reads as slot 0.
-    expect(store.removeInputBinding).toHaveBeenCalledWith('jump', undefined);
-  });
-
-  it('forwards the player slot when the AI supplies one (physics.FR-1.OP-04)', async () => {
-    const { result, store } = await invokeHandler(
-      sceneManagementHandlers,
-      'remove_input_binding',
-      { actionName: 'jump', player: 1 }
-    );
-    expect(result.success).toBe(true);
-    expect(store.removeInputBinding).toHaveBeenCalledWith('jump', 1);
+    expect(store.removeInputBinding).toHaveBeenCalledWith('jump');
   });
 });
 
@@ -360,18 +243,7 @@ describe('set_input_preset', () => {
     );
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('Applied input preset: platformer');
-    // player omitted → forwarded as undefined, which the store reads as slot 0.
-    expect(store.setInputPreset).toHaveBeenCalledWith('platformer', undefined);
-  });
-
-  it('forwards the player slot to setInputPreset when supplied (physics.FR-1.OP-04)', async () => {
-    const { result, store } = await invokeHandler(
-      sceneManagementHandlers,
-      'set_input_preset',
-      { preset: 'platformer', player: 1 }
-    );
-    expect(result.success).toBe(true);
-    expect(store.setInputPreset).toHaveBeenCalledWith('platformer', 1);
+    expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
   });
 });
 
@@ -505,7 +377,7 @@ describe('create_scene', () => {
 
     expect(mockLoadProjectScenes).toHaveBeenCalled();
     expect(mockCreateScene).toHaveBeenCalledWith(baseProject, 'Boss Fight');
-    expect(mockSaveProjectScenes).toHaveBeenCalledWith(updatedProject, undefined);
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(updatedProject);
     expect(store.setScenes).toHaveBeenCalledWith(
       updatedProject.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updatedProject.activeSceneId
@@ -532,10 +404,7 @@ describe('switch_scene', () => {
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toContain('Switched');
     expect(mockSwitchScene).toHaveBeenCalledWith(baseProject, 'scene_2');
-    // A rejected switch target must not strand the outgoing scene (#10056),
-    // but a THROWN dispatch must (`strandOnThrow: true`) so saving locks over
-    // a viewport the throw may have wrecked (#10079).
-    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData), { rejectionStrandsEditor: false, strandOnThrow: true });
+    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData));
     expect(store.setScenes).toHaveBeenCalled();
   });
 
@@ -575,59 +444,6 @@ describe('switch_scene', () => {
     expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, live);
     // The switch must operate on the folded project, not the one off disk.
     expect(mockSwitchScene).toHaveBeenCalledWith(withLive, 'scene_2');
-  });
-
-  it('folds the live prefab-instance registry into the persisted scene before switching (scene.FR-1 N1)', async () => {
-    // The AI switch path must carry linked instances the same way the manual
-    // Scene Browser path does. If the handler stops staging the registry for
-    // the export it requests, the persisted scene loses every instance and
-    // override on reopen — and nothing else in this suite would fail. Seed a
-    // non-empty registry and assert it reaches the persisted data.
-    const live: SceneFileData = { formatVersion: 1, sceneName: 'Level 1', entities: [] };
-    const seeded: PrefabInstance[] = [{ instanceId: 'i1', prefabId: 'p1', overrides: { name: 'kept' } }];
-    mockLoadPrefabInstances.mockReturnValue(seeded);
-    mockCaptureActiveScene.mockImplementation(capturedFrom(live));
-    mockSaveCurrentSceneData.mockReturnValue({ ...baseProject, folded: true });
-    mockSwitchScene.mockReturnValue({ project: baseProject, sceneToLoad: null });
-
-    const { result } = await invokeHandler(
-      sceneManagementHandlers,
-      'switch_scene',
-      { sceneId: 'scene_2' }
-    );
-
-    expect(result.success).toBe(true);
-    // Staged BEFORE the request goes out, which is what pairs the instances
-    // with the definitions the same fold writes (#10056).
-    expect(mockStagePrefabInstancesForExport).toHaveBeenCalledWith(expect.any(String), seeded);
-    // saveCurrentSceneData receives the capture WITH the instances folded in.
-    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, {
-      ...live,
-      prefabInstances: seeded,
-    });
-  });
-
-  it('refuses to switch after a rejected scene load, without capturing or persisting (#10056)', async () => {
-    // A rejected load leaves the engine holding a non-project scene. Capturing
-    // and folding it would `saveCurrentSceneData` that scene over the OUTGOING
-    // scene's stored data — the exact overwrite the store's own `switchScene`
-    // refuses. The AI path must refuse at parity, and must not even ask the
-    // engine to export. Nothing else in this suite would catch a missing guard.
-    const { result, store } = await invokeHandler(
-      sceneManagementHandlers,
-      'switch_scene',
-      { sceneId: 'scene_2' },
-      { sceneLoadError: { reason: 'This scene could not be opened: the engine refused to load it.', at: 1 } }
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('could not be opened');
-    expect(result.error).toContain('left untouched');
-    expect(mockCaptureActiveScene).not.toHaveBeenCalled();
-    expect(mockSaveCurrentSceneData).not.toHaveBeenCalled();
-    expect(mockSwitchScene).not.toHaveBeenCalled();
-    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
-    expect(store.loadScene).not.toHaveBeenCalled();
   });
 
   it('refuses to switch when the live scene could not be read', async () => {
@@ -676,63 +492,6 @@ describe('switch_scene', () => {
     expect(store.newScene).toHaveBeenCalled();
     expect(store.loadScene).not.toHaveBeenCalled();
   });
-
-  // Sentry: `store.loadScene` rolls back its OWN state (audio, prefab
-  // registry) before rethrowing a dispatch error, but this handler previously
-  // let that exception propagate straight past its `saveProjectScenes` call —
-  // silently losing the outgoing scene's just-captured data, parity with the
-  // same bug fixed in the store's own `switchScene`.
-  it('persists the outgoing scene when the engine dispatch throws instead of losing it (Sentry)', async () => {
-    const sceneData = { formatVersion: 1, sceneName: 'Level 2', entities: [] };
-    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: sceneData });
-
-    const { result, store } = await invokeHandler(
-      sceneManagementHandlers,
-      'switch_scene',
-      { sceneId: 'scene_2' },
-      { loadScene: vi.fn(() => { throw new Error('engine unreachable'); }) }
-    );
-
-    expect(result.success).toBe(false);
-    // The message must tell the user to reload rather than claim the scene is
-    // unchanged: a thrown dispatch can have wrecked the viewport, and the real
-    // store's `loadScene` sets `sceneLoadError(ENGINE_LOAD_THREW)` before
-    // rethrowing so saving is already locked (#10079).
-    expect(result.error).toContain('Reload the editor');
-    expect(result.error).not.toContain('unchanged');
-    expect(store.loadScene).toHaveBeenCalledWith(
-      JSON.stringify(sceneData),
-      { rejectionStrandsEditor: false, strandOnThrow: true },
-    );
-    // The pre-switch (outgoing) project is persisted rather than discarded.
-    expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
-  });
-
-  // Sentry (#10079 follow-up): when `sceneToLoad` is null this handler falls
-  // back to `store.newScene()` instead of `store.loadScene()`. The message
-  // below claims saving is locked no matter which one threw, but the real
-  // `newScene()` never actually set `sceneLoadError` on its throw path before
-  // the store-level fix — this test pins the handler's OWN catch behavior
-  // (persist-then-report) at parity with the `loadScene`-throws case above,
-  // so a regression in either branch is caught here.
-  it('persists the outgoing scene when the newScene() fallback throws (#10079 follow-up, Sentry)', async () => {
-    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: null });
-
-    const { result, store } = await invokeHandler(
-      sceneManagementHandlers,
-      'switch_scene',
-      { sceneId: 'scene_2' },
-      { newScene: vi.fn(() => { throw new Error('engine unreachable'); }) }
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Reload the editor');
-    expect(result.error).not.toContain('unchanged');
-    expect(store.newScene).toHaveBeenCalled();
-    expect(store.loadScene).not.toHaveBeenCalled();
-    // The pre-switch (outgoing) project is persisted rather than discarded.
-    expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -761,51 +520,6 @@ describe('duplicate_scene', () => {
     expect((result.result as Record<string, unknown>).sceneId).toBe(newSceneId);
     expect(mockDuplicateScene).toHaveBeenCalledWith(baseProject, 'scene_1', undefined);
     expect(store.setScenes).toHaveBeenCalled();
-  });
-
-  it('folds the live prefab-instance registry into the persisted scene before duplicating (scene.FR-1 N1)', async () => {
-    // Mirror of the switch_scene N1 test: the duplicated project must be built
-    // from a capture that carries the linked instances, or the copy (and the
-    // active scene it is saved from) loses them.
-    const live: SceneFileData = { formatVersion: 1, sceneName: 'Main', entities: [] };
-    const seeded: PrefabInstance[] = [{ instanceId: 'i1', prefabId: 'p1', overrides: {} }];
-    mockLoadPrefabInstances.mockReturnValue(seeded);
-    mockCaptureActiveScene.mockImplementation(capturedFrom(live));
-    mockSaveCurrentSceneData.mockReturnValue({ ...baseProject, folded: true });
-    mockDuplicateScene.mockReturnValue({ project: baseProject, newSceneId: 'scene_copy_1' });
-
-    const { result } = await invokeHandler(
-      sceneManagementHandlers,
-      'duplicate_scene',
-      { sceneId: 'scene_1' }
-    );
-
-    expect(result.success).toBe(true);
-    expect(mockStagePrefabInstancesForExport).toHaveBeenCalledWith(expect.any(String), seeded);
-    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, {
-      ...live,
-      prefabInstances: seeded,
-    });
-  });
-
-  it('refuses to duplicate after a rejected scene load, without capturing or persisting (#10056)', async () => {
-    // Parity with `switch_scene` and the store's own `duplicateScene`: a rejected
-    // load means the engine scene is not this project's, so capturing and folding
-    // it would overwrite the outgoing scene's stored data and copy from stale data.
-    const { result } = await invokeHandler(
-      sceneManagementHandlers,
-      'duplicate_scene',
-      { sceneId: 'scene_1' },
-      { sceneLoadError: { reason: 'This scene could not be opened: the engine refused to load it.', at: 1 } }
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('could not be opened');
-    expect(result.error).toContain('left untouched');
-    expect(mockCaptureActiveScene).not.toHaveBeenCalled();
-    expect(mockSaveCurrentSceneData).not.toHaveBeenCalled();
-    expect(mockDuplicateScene).not.toHaveBeenCalled();
-    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
   });
 
   it('refuses to duplicate when the live scene could not be read', async () => {
@@ -969,71 +683,6 @@ describe('list_scenes', () => {
     expect(scenes).toHaveLength(2);
     expect(scenes[0]).toMatchObject({ id: 'scene_1', name: 'Main', isStartScene: true, isActive: true });
     expect(scenes[1]).toMatchObject({ id: 'scene_2', name: 'Level 2', isStartScene: false, isActive: false });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Recovery checkpoints — scene.FR-3.OP-02
-// (unit wiring; end-to-end manual/AI parity lives in the sibling
-//  sceneCheckpointParity.test.ts against the REAL sceneManager)
-// ---------------------------------------------------------------------------
-
-describe('checkpoint shared-action wiring', () => {
-  it('passes a checkpoint label to the same action the Scene Browser uses', async () => {
-    const checkpoint = { id: 'cp', label: 'Before', createdAt: '2026-01-01T00:00:00Z', projectId: null, snapshot: baseProject };
-    const createCheckpoint = vi.fn().mockResolvedValue(checkpoint);
-    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', { label: 'Before' }, {
-      createCheckpoint, listCheckpoints: () => [checkpoint],
-    });
-    expect(result.success).toBe(true);
-    expect(createCheckpoint).toHaveBeenCalledWith('Before');
-    expect(result.result).toMatchObject({ checkpointId: 'cp', count: 1 });
-    expect(mockCreateCheckpoint).not.toHaveBeenCalled();
-  });
-
-  it('reports an unsuccessful capture or persistence operation', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {}, {
-      createCheckpoint: vi.fn().mockResolvedValue(null),
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('could not be captured or saved');
-  });
-
-  it('waits for the shared restore action before reporting success', async () => {
-    let finish!: (value: boolean) => void;
-    const restoreCheckpoint = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
-    const pending = invokeHandler(sceneManagementHandlers, 'restore_checkpoint', { checkpointId: 'cp' }, { restoreCheckpoint });
-    expect(restoreCheckpoint).toHaveBeenCalledWith('cp');
-    finish(true);
-    expect((await pending).result.success).toBe(true);
-    expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
-  });
-
-  it('does not report a failed engine restore as successful', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', { checkpointId: 'cp' }, {
-      restoreCheckpoint: vi.fn().mockResolvedValue(false),
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('previous save is intact');
-  });
-
-  it.each(['restore_checkpoint', 'delete_checkpoint'])('rejects missing IDs for %s', async (command) => {
-    expect((await invokeHandler(sceneManagementHandlers, command, {})).result.success).toBe(false);
-  });
-
-  it('lists lightweight checkpoint metadata from the shared action', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'list_checkpoints', {}, {
-      listCheckpoints: () => [{ id: 'cp', label: 'Before', createdAt: 'time', snapshot: baseProject }],
-    });
-    expect(result.result).toEqual({ checkpoints: [{ id: 'cp', label: 'Before', createdAt: 'time', sceneCount: 2 }], count: 1 });
-  });
-
-  it('reports failed deletes when the shared action retains the checkpoint', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', { checkpointId: 'cp' }, {
-      deleteCheckpoint: () => [{ id: 'cp' }],
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('could not be deleted');
   });
 });
 
@@ -1294,155 +943,5 @@ describe('list_doc_topics', () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'list_doc_topics');
     expect(result.success).toBe(true);
     expect(((result.result as Record<string, unknown>).message as string)).toContain('MCP server');
-  });
-});
-
-describe('validate_scene', () => {
-  afterEach(() => setSceneValidator(null));
-
-  it('validates the complete scene without loading or saving it', async () => {
-    const scene = emptySceneFile('Validation only');
-    const validate = vi.fn(() => true);
-    setSceneValidator(validate);
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(scene) });
-    expect(result).toEqual({ success: true, result: { valid: true } });
-    expect(validate).toHaveBeenCalledWith(JSON.stringify(scene));
-    expect(store.loadScene).not.toHaveBeenCalled();
-    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
-  });
-
-  it.each(['{broken', '{}', JSON.stringify({ formatVersion: 99 })])('rejects invalid scene JSON %s', async (json) => {
-    const validate = vi.fn(() => true);
-    setSceneValidator(validate);
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json });
-    expect(result.success).toBe(false);
-    expect(validate).not.toHaveBeenCalled();
-    expect(store.loadScene).not.toHaveBeenCalled();
-  });
-
-  it.each([null, () => false, () => { throw new Error('decoder unavailable'); }])('fails when the attached decoder cannot validate', async (validate) => {
-    setSceneValidator(validate);
-    const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(emptySceneFile('Refused')) });
-    expect(result.success).toBe(false);
-  });
-
-  it('requires the JSON argument', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', {});
-    expect(result.success).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// set_completion_mode (idea.FR-1.OP-04, #9998)
-// ---------------------------------------------------------------------------
-
-/**
- * The REAL completion-mode slice, not a mock: the handler deliberately hands the
- * raw `mode` to `setCompletionMode`, which owns validation, so a mocked action
- * would test nothing but the handler's formatting of a result it invented.
- */
-function createCompletionModeStore() {
-  type State = SceneGraphSlice & {
-    selectedIds: Set<string>;
-    primaryId: string | null;
-    primaryName: string | null;
-    primaryTransform: unknown | null;
-    spawnTerrain: () => string | undefined;
-    sceneModified: boolean;
-  };
-  return create<State>()((set, get, api) => ({
-    ...createSceneGraphSlice(set, get, api),
-    selectedIds: new Set<string>(),
-    primaryId: null,
-    primaryName: null,
-    primaryTransform: null,
-    spawnTerrain: () => undefined,
-    sceneModified: false,
-  }));
-}
-
-describe('set_completion_mode', () => {
-  it('sets the mode through the store action and reports what the picker shows', async () => {
-    const real = createCompletionModeStore();
-    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
-
-    const { result } = await invokeHandler(
-      sceneManagementHandlers, 'set_completion_mode', { mode: 'endless' }, { setCompletionMode },
-    );
-
-    expect(setCompletionMode).toHaveBeenCalledTimes(1);
-    expect(setCompletionMode).toHaveBeenCalledWith('endless');
-    expect(result).toEqual({
-      success: true,
-      result: {
-        mode: 'endless',
-        changed: true,
-        message: 'Completion mode set to Endless. Score-chasing or survival with no final win. Play does not require a win condition.',
-      },
-    });
-    expect(real.getState().sceneGraph.completionMode).toBe('endless');
-    // Recorded in the picker's undo history, so the AI's choice is one Undo away.
-    expect(real.getState().completionModeHistory).toEqual({ past: [undefined], future: [] });
-    expect(real.getState().sceneModified).toBe(true);
-  });
-
-  it('reports a no-op, not a change, when the scene already has that mode', async () => {
-    const real = createCompletionModeStore();
-    real.getState().setCompletionMode('sandbox');
-    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
-
-    const { result } = await invokeHandler(
-      sceneManagementHandlers, 'set_completion_mode', { mode: 'sandbox' }, { setCompletionMode },
-    );
-
-    expect(setCompletionMode).toHaveBeenCalledWith('sandbox');
-    expect(result).toEqual({
-      success: true,
-      result: { mode: 'sandbox', changed: false, message: 'Completion mode is already Sandbox.' },
-    });
-    // No second undo step for a value that did not move.
-    expect(real.getState().completionModeHistory).toEqual({ past: [undefined], future: [] });
-  });
-
-  it('refuses an unknown mode with the shared validator text and changes nothing', async () => {
-    const real = createCompletionModeStore();
-    real.getState().setCompletionMode('win');
-    real.setState({ sceneModified: false });
-    const historyBefore = real.getState().completionModeHistory;
-    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
-
-    const { result } = await invokeHandler(
-      sceneManagementHandlers, 'set_completion_mode', { mode: 'puzzle' }, { setCompletionMode },
-    );
-
-    // The raw value reaches the store action un-coerced: that action IS the
-    // validator the manual picker uses, which is the parity this tool relies on.
-    expect(setCompletionMode).toHaveBeenCalledWith('puzzle');
-    expect(result).toEqual({
-      success: false,
-      error: 'Unknown completion mode "puzzle". Choose one of: win, endless, sandbox, narrative.',
-    });
-    expect(real.getState().sceneGraph.completionMode).toBe('win');
-    expect(real.getState().completionModeHistory).toBe(historyBefore);
-    expect(real.getState().sceneModified).toBe(false);
-  });
-
-  it.each([
-    ['a missing mode', {}, 'no value'],
-    ['a numeric mode', { mode: 3 }, 'a number'],
-  ])('refuses %s without echoing it', async (_label, args, received) => {
-    const real = createCompletionModeStore();
-    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
-
-    const { result } = await invokeHandler(
-      sceneManagementHandlers, 'set_completion_mode', args, { setCompletionMode },
-    );
-
-    expect(result).toEqual({
-      success: false,
-      error: `Completion mode must be one of: win, endless, sandbox, narrative. Received ${received}.`,
-    });
-    expect(real.getState().sceneGraph.completionMode).toBeUndefined();
-    expect(real.getState().completionModeHistory).toEqual({ past: [], future: [] });
   });
 });

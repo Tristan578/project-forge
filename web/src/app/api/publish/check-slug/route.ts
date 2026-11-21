@@ -5,9 +5,8 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
-async function GET_impl(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const session = await authenticateClerkSession();
   if (!session.ok) return session.response;
 
@@ -27,7 +26,3 @@ async function GET_impl(request: NextRequest) {
 
   return NextResponse.json({ available: existing.length === 0 });
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

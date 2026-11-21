@@ -76,15 +76,16 @@ describe('GET /api/capabilities availability', () => {
     vi.unstubAllEnvs();
   });
 
-  it('reports music available when PLATFORM_ELEVENLABS_KEY is set (#9522: moved off Suno)', async () => {
-    vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el_fake');
+  it('reports music unavailable even when PLATFORM_SUNO_KEY is set, with the reason as hint and the issue separate', async () => {
+    vi.stubEnv('PLATFORM_SUNO_KEY', 'suno_fake');
     const { body } = await call();
     const music = status(body, 'music');
-    expect(music.available).toBe(true);
-    // No longer unprovisionable — it shares ElevenLabs with sfx/voice.
-    expect(music.unprovisionable).toBeFalsy();
-    expect(music.issue).toBeUndefined();
-    expect(body.unavailable ?? []).not.toContain('music');
+    expect(music.available).toBe(false);
+    expect(music.unprovisionable).toBe(true);
+    expect(music.issue).toBe(9522);
+    expect(music.hint).toMatch(/not available yet/i);
+    expect(music.hint).not.toMatch(/#\d+|PLATFORM_|Suno/);
+    expect(body.unavailable).toContain('music');
   });
 
   it('resolves the Clerk id to the internal user id before querying BYOK keys', async () => {
@@ -106,7 +107,7 @@ describe('GET /api/capabilities availability', () => {
     expect(status(body, 'model3d').available).toBe(false);
   });
 
-  it('a retired-provider (Suno) BYOK key does not enable music — it needs ElevenLabs now (#9522)', async () => {
+  it('does not let a BYOK key override an unprovisionable capability', async () => {
     signedInWithByok(['suno']);
     const { body } = await call();
     expect(status(body, 'music').available).toBe(false);
@@ -158,101 +159,62 @@ describe('GET /api/capabilities availability', () => {
     }
   });
 
-  // ONE KEY IS NOT ENOUGH, and the breakdown says which one is there. `sprite`
-  // resolves its provider per request — `provider: 'auto'` picks DALL-E 3 for
-  // every style but pixel-art — so a Replicate-only deployment still fails the
-  // default path, and offering the capability would be offering a 500. This
-  // case used to assert the opposite (available with either key alone), which
-  // was the any-provider rule this branch carried before main's landed.
-  it.each(['replicate', 'openai'])('reports sprite unavailable with only one platform key, naming which path is present (%s)', async (provider) => {
-    vi.stubEnv(provider === 'replicate' ? 'PLATFORM_REPLICATE_KEY' : 'PLATFORM_OPENAI_KEY', 'key');
-    const { body } = await call();
-    const sprite = status(body, 'sprite');
-    expect(sprite.available).toBe(false);
-    // #9719's contribution, and the reason it survives main's stricter rule:
-    // the aggregate says "do not offer this", the breakdown says what is
-    // missing, and a dialog needs both to explain itself.
-    expect(sprite.providerAvailability).toEqual({ replicate: provider === 'replicate', openai: provider === 'openai' });
+  it('treats a multi-key capability (sprite) as available only when every key is present', async () => {
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
+    const replicateOnly = await call();
+    expect(status(replicateOnly.body, 'sprite').available).toBe(false);
+    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk');
+    const both = await call();
+    expect(status(both.body, 'sprite').available).toBe(true);
   });
 
-  // Naming every env var the capability CAN spend told a Replicate-only
-  // deployment to "Configure Replicate" — the key it already had — and never
-  // named OpenAI (lesson 1 family). These two cases are the pair: one key
-  // present names only the other, no keys names both.
+  // `available` for sprite is decided from CAPABILITY_REQUIRED_PROVIDERS
+  // (Replicate AND OpenAI); the explanation beside it must come from the same
+  // list, naming only what is MISSING. Deriving it from the single-key map
+  // told a Replicate-only environment to "Configure Replicate" — the one key
+  // it already had — and never named OpenAI (lesson 1 family).
   it('names only the missing provider for sprite in a Replicate-only environment', async () => {
     vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
     const { body } = await call();
     const sprite = status(body, 'sprite');
     expect(sprite.available).toBe(false);
-    expect(sprite.providerAvailability).toEqual({ replicate: true, openai: false });
     expect(sprite.requiredProviders).toEqual(['OpenAI']);
     expect(sprite.hint).toContain('OpenAI');
     expect(sprite.hint).not.toContain('Replicate');
-    // NOT "in Settings": OpenAI is not a BYOK provider, so /api/keys/openai
-    // rejects it and ApiKeyManager renders no field for it. Saying "Settings"
-    // sent the user to a page where the named key cannot be added — a dead end
-    // dressed as an instruction (#9725 p8).
-    expect(sprite.hint).not.toContain('Settings');
-    expect(sprite.byokConfigurable).toBe(false);
+    expect(sprite.hint).toContain('Settings');
   });
 
   it('names every missing provider for sprite when neither key is present', async () => {
     const { body } = await call();
     const sprite = status(body, 'sprite');
     expect(sprite.available).toBe(false);
-    expect(sprite.providerAvailability).toEqual({ replicate: false, openai: false });
     expect(sprite.requiredProviders).toEqual(expect.arrayContaining(['Replicate', 'OpenAI']));
     expect(sprite.requiredProviders).toHaveLength(2);
     expect(sprite.hint).toContain('Replicate');
     expect(sprite.hint).toContain('OpenAI');
-    expect(sprite.hint).not.toContain('Settings');
-    expect(sprite.byokConfigurable).toBe(false);
   });
 
-  it.each(['replicate', 'openai'])('ignores unsupported sprite BYOK rows (%s)', async (provider) => {
-    signedInWithByok([provider]);
-    const { body } = await call();
-    const sprite = status(body, 'sprite');
-    expect(sprite.available).toBe(false);
-    expect(sprite.providerAvailability).toEqual({ replicate: false, openai: false });
-    expect(sprite.requiredProviders).toEqual(expect.arrayContaining(['Replicate', 'OpenAI']));
-    expect(sprite.requiredProviders).toHaveLength(2);
-    expect(sprite.hint).toContain('Replicate');
-    expect(sprite.hint).toContain('OpenAI');
-    expect(sprite.hint).not.toContain('Settings');
-    expect(sprite.byokConfigurable).toBe(false);
-  });
-
-  // The client renders its "Open Settings" affordance from this flag alone, so
-  // it must be true exactly when /api/keys/[provider] would accept the key the
-  // capability is missing (#9725 p8).
-  it.each([
-    ['sfx', true],
-    ['model3d', true],
-    // #9522: music now resolves to ElevenLabs (a BYOK provider) like sfx.
-    ['music', true],
-    ['sprite', false],
-    ['image', false],
-    ['bg_removal', false],
-  ] as const)('marks %s byokConfigurable=%s on a key-less deployment', async (cap, expected) => {
-    const { body } = await call();
-    const row = status(body, cap);
-    expect(row.available).toBe(false);
-    expect(row.byokConfigurable).toBe(expected);
-  });
-
-  it('offers Settings in the hint only for a capability Settings can actually fix', async () => {
-    const { body } = await call();
-    expect(status(body, 'sfx').hint).toContain('Settings');
-    expect(status(body, 'bg_removal').hint).toContain('only this deployment can configure');
-    expect(status(body, 'bg_removal').hint).not.toContain('Settings');
-  });
-
-  it('does not advertise unsupported BYOK options beside a platform key', async () => {
+  // `resolveApiKey` resolves each provider independently, BYOK first — so a
+  // user holding their own OpenAI key on a Replicate-only deployment can run
+  // both sprite paths. Availability must OR the sources per provider, not
+  // demand that every key come from the same side.
+  it('lets a BYOK key supply the half of sprite the platform lacks', async () => {
     vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
     signedInWithByok(['openai']);
     const { body } = await call();
-    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: true, openai: false });
+    expect(status(body, 'sprite').available).toBe(true);
+    expect(status(body, 'sprite').requiredProviders).toBeUndefined();
+  });
+
+  it('requires every sprite provider from BYOK when the platform has none', async () => {
+    signedInWithByok(['replicate']);
+    const replicateOnly = await call();
+    expect(status(replicateOnly.body, 'sprite').available).toBe(false);
+    expect(status(replicateOnly.body, 'sprite').requiredProviders).toEqual(['OpenAI']);
+
+    signedInWithByok(['replicate', 'openai']);
+    const both = await call();
+    expect(status(both.body, 'sprite').available).toBe(true);
   });
 
   // Fail-open on the SERVER became fail-closed on the CLIENT: the route

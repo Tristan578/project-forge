@@ -29,7 +29,6 @@ export { Select, type SelectProps, type SelectOption } from './primitives/Select
 export { Textarea, type TextareaProps } from './primitives/Textarea';
 export { Switch, type SwitchProps } from './primitives/Switch';
 export { Checkbox, type CheckboxProps } from './primitives/Checkbox';
-export { Radio, type RadioProps } from './primitives/Radio';
 export { Separator, type SeparatorProps } from './primitives/Separator';
 export { Tooltip, type TooltipProps } from './primitives/Tooltip';
 export { Dialog, type DialogProps } from './primitives/Dialog';
@@ -42,11 +41,6 @@ export { Avatar, type AvatarProps } from './primitives/Avatar';
 export { Progress, type ProgressProps } from './primitives/Progress';
 export { Skeleton, type SkeletonProps } from './primitives/Skeleton';
 export { Toast, type ToastProps, type ToastVariant } from './primitives/Toast';
-export {
-  InlineAlert,
-  type InlineAlertProps,
-  type InlineAlertVariant,
-} from './primitives/InlineAlert';
 
 // Ambient theme effects
 export { ThemeAmbient } from './effects/ThemeAmbient';
@@ -56,7 +50,6 @@ export { ThemeImportExport } from './composites/ThemeImportExport';
 export { SettingsPanel, type SettingsPanelProps } from './composites/SettingsPanel';
 export { Vec3Input, type Vec3InputProps } from './composites/Vec3Input';
 export { SliderInput, type SliderInputProps } from './composites/SliderInput';
-export { NumberField, type NumberFieldProps } from './composites/NumberField';
 export { ColorPicker, type ColorPickerProps } from './composites/ColorPicker';
 export { TreeView, type TreeViewProps, type TreeNode } from './composites/TreeView';
 export { PropertyGrid, type PropertyGridProps, type PropertyGridItem } from './composites/PropertyGrid';

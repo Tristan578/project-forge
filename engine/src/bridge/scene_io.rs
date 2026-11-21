@@ -1,13 +1,15 @@
 //! Scene import/export and asset loading systems.
-//!
-//! `apply_scene_load` is compiled in EVERY build: an exported game hands its
-//! scene to the runtime engine through `load_scene` and nothing else (#10195).
-//! The rest of the import/export surface is editor-only.
 
 // Payload ceilings for the editor-only import paths. Each is read from exactly
 // one `#[cfg(not(feature = "runtime"))]` system below, so the constants carry
-// the same gate — a `runtime` build never parses a glTF blob or a texture blob
-// handed in from the shell. (A scene it does parse; see `apply_scene_load`.)
+// the same gate — a `runtime` build never parses a scene, a glTF blob, or a
+// texture blob handed in from the shell.
+/// Maximum size of a scene JSON payload in bytes (50 MB).
+#[cfg(not(feature = "runtime"))]
+pub const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024;
+/// Maximum number of entities permitted in a loaded scene.
+#[cfg(not(feature = "runtime"))]
+pub const MAX_SCENE_ENTITIES: usize = 10_000;
 /// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
 #[cfg(not(feature = "runtime"))]
 pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
@@ -17,55 +19,50 @@ pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
 
 use bevy::prelude::*;
 
-// What the two always-compiled systems need: `apply_gltf_scene_spawn` takes
-// `EntityType`; `apply_scene_load` takes the resources a scene file writes
-// and the snapshot type it spawns from (#10195).
-use crate::core::{
-    asset_manager::AssetRegistry,
-    audio::AudioBusConfig,
-    custom_wgsl::CustomWgslSource,
-    entity_factory,
-    entity_id::EntityId,
-    environment::EnvironmentSettings,
-    history::{EntitySnapshot as HistEntitySnapshot, HistoryStack},
-    input::InputMap,
-    pending_commands::{EntityType, PendingCommands},
-    post_processing::PostProcessingSettings,
-    scene_file::{self, SceneName},
-    selection::{Selection, SelectionChangedEvent},
-    tileset::TilesetRegistry,
-};
-use super::events;
+// `apply_gltf_scene_spawn` is the only system in this file that survives a
+// `runtime` build, and `EntityType` is the only name it needs from `core`.
+use crate::core::pending_commands::EntityType;
 
 // Everything else here feeds the editor-only scene/asset I/O systems, all of
 // which already carry `#[cfg(not(feature = "runtime"))]`.
 #[cfg(not(feature = "runtime"))]
 use crate::core::{
     animation_clip::AnimationClipData,
-    asset_manager::AssetRef,
-    audio::{AudioData, AudioEnabled},
+    asset_manager::{AssetRef, AssetRegistry},
+    audio::{AudioBusConfig, AudioData, AudioEnabled},
     csg::CsgMeshData,
-    entity_id::{EntityName, EntityVisible},
+    custom_wgsl::CustomWgslSource,
+    entity_factory,
+    entity_id::{EntityId, EntityName, EntityVisible},
+    environment::EnvironmentSettings,
     game_camera::{GameCameraData, ActiveGameCamera},
     game_components::GameComponents,
-    history::TransformSnapshot,
+    history::{EntitySnapshot as HistEntitySnapshot, HistoryStack, TransformSnapshot},
+    input::InputMap,
     lighting::{LightData, LightType},
     lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
-    pending_commands,
+    pending_commands::{self, PendingCommands},
     physics::{JointData, PhysicsData, PhysicsEnabled},
     physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
+    post_processing::PostProcessingSettings,
     procedural_mesh::ProceduralMeshData,
     reverb_zone::{ReverbZoneData, ReverbZoneEnabled},
+    scene_file::{self, SceneName},
     scripting::ScriptData,
+    selection::{Selection, SelectionChangedEvent},
     shader_effects::ShaderEffectData,
     skeletal_animation2d::SkeletalAnimation2d,
     skeleton2d::{SkeletonData2d, SkeletonEnabled2d},
     sprite::SpriteData,
     terrain::{TerrainData, TerrainMeshData},
     tilemap::{TilemapData, TilemapEnabled},
+    tileset::TilesetRegistry,
 };
+
+#[cfg(not(feature = "runtime"))]
+use super::events;
 
 /// System that processes scene export requests.
 #[cfg(not(feature = "runtime"))]
@@ -324,11 +321,7 @@ pub(super) fn apply_scene_export(
 }
 
 /// System that processes scene load requests.
-///
-/// Compiled and registered in EVERY build, including `runtime`: the exporters
-/// hand an exported game's scene to the engine through `load_scene` and there
-/// is no other boot path, so a `runtime` build that waived this drain queued
-/// the scene, answered `Ok`, and rendered its default scene forever (#10195).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_scene_load(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -357,13 +350,36 @@ pub(super) fn apply_scene_load(
     };
 
     // Guard against pathologically large scene payloads that could cause OOM during deser.
-    let scene_file = match scene_file::parse_scene_file(&request.json) {
-        Ok(scene) => scene,
-        Err(error) => {
-            tracing::error!("Scene load rejected: {}", error);
+    if request.json.len() > MAX_SCENE_JSON_BYTES {
+        tracing::error!(
+            "Scene load rejected: JSON payload {} bytes exceeds 50MB limit",
+            request.json.len()
+        );
+        return;
+    }
+
+    let scene_file: scene_file::SceneFile = match serde_json::from_str(&request.json) {
+        Ok(sf) => sf,
+        Err(e) => {
+            tracing::error!("Failed to deserialize scene file: {}", e);
             return;
         }
     };
+
+    if scene_file.format_version > 3 {
+        tracing::error!("Unsupported scene format version: {}", scene_file.format_version);
+        return;
+    }
+
+    // Cap entity count to prevent runaway scene loading.
+    if scene_file.entities.len() > MAX_SCENE_ENTITIES {
+        tracing::error!(
+            "Scene load rejected: {} entities exceeds limit of {}",
+            scene_file.entities.len(),
+            MAX_SCENE_ENTITIES
+        );
+        return;
+    }
 
     // 1. Despawn all existing entities
     for entity in existing_entities.iter() {
@@ -392,28 +408,8 @@ pub(super) fn apply_scene_load(
     );
     ambient.brightness = scene_file.ambient_light.brightness;
 
-    // 6. Apply input bindings.
-    //
-    // AN EMPTY MAP IS TREATED AS "NONE STATED", NOT AS "NOTHING IS BOUND".
-    // `#[serde(default)]` on the field only helps a file that OMITS it, and
-    // that is not what exists in the wild: every scene the product has saved so
-    // far carries the literal `{ actions: {}, preset: null }` that
-    // `templateSceneFile` used to write to satisfy a parser which then required
-    // the field. Assigning that verbatim loads the project into a session where
-    // no key does anything and every script's `isPressed` is false forever —
-    // and it would follow a published game into every remix of it.
-    //
-    // So an empty `actions` falls through to the defaults. A creator who
-    // genuinely wants nothing bound removes the bindings, which writes a map
-    // that is empty for a reason — and that case is indistinguishable here from
-    // the corrupted one, which is why this normalisation is the right trade:
-    // the recoverable outcome is a working keyboard, and the unrecoverable one
-    // is a project that silently ignores input.
-    *input_map = if scene_file.input_bindings.actions.is_empty() {
-        InputMap::default()
-    } else {
-        scene_file.input_bindings
-    };
+    // 6. Apply input bindings
+    *input_map = scene_file.input_bindings;
 
     // 6b. Load asset registry
     *asset_registry = AssetRegistry { assets: scene_file.assets };
@@ -749,9 +745,7 @@ pub(super) fn apply_gltf_scene_spawn(
     memory_dir: Res<crate::core::asset_manager::GltfMemoryDir>,
 ) {
     use crate::core::asset_manager::{AssetKind, GltfSceneSpawned, GltfSourceHandle};
-    // Bevy 0.19 renamed the old scene crate to `bevy_world_serialization`
-    // (`SceneRoot` -> `WorldAssetRoot`); glTF scenes still spawn through it.
-    use bevy::world_serialization::WorldAssetRoot;
+    use bevy::scene::SceneRoot;
 
     // Phase 1: Spawn scenes for entities that already have GltfSourceHandle
     for (entity, gltf_handle, eid) in gltf_entities.iter() {
@@ -774,7 +768,7 @@ pub(super) fn apply_gltf_scene_spawn(
 
         // Spawn the glTF scene as a child of our root entity
         let scene_child = commands.spawn((
-            WorldAssetRoot(scene_handle),
+            SceneRoot(scene_handle),
             Transform::default(),
         )).id();
         commands.entity(scene_child).insert(ChildOf(entity));

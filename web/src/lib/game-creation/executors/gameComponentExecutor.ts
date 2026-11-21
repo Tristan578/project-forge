@@ -6,8 +6,6 @@ import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../typ
 // prettier-ignore
 import type { GameComponentData, HealthData, CollectibleData, DamageZoneData, WinConditionData, CheckpointData, FollowerData, MovingPlatformData, SpawnerData } from '@/stores/slices/types';
 import { makeStepError, successResult, failResult } from './shared';
-import { normalizeGameComponentWithReport } from '@/lib/engine/gameComponentWire';
-import { describeCorrection } from '@/lib/engine/gameComponentCorrections';
 
 /**
  * Attaches a gameplay component to an entity the plan already spawned.
@@ -350,21 +348,8 @@ export const gameComponentExecutor: ExecutorDefinition = {
       );
     }
 
-    const component = buildComponent(data);
-    // The schema proves each number is finite, not that the engine will hold
-    // it: a planned platform speed of 99999 runs at 1000. The store clamps and
-    // marks the field for the inspector itself; the step output is where the
-    // run tells the author (PF-1148). `warnings` is the key the pipeline's
-    // `collectStepWarnings` renders, so no new consumer is needed.
-    const { corrections } = normalizeGameComponentWithReport(component);
-    ctx.getStore().addGameComponent(data.entityId, component);
+    ctx.getStore().addGameComponent(data.entityId, buildComponent(data));
 
-    return successResult({
-      entityId: data.entityId,
-      componentType: data.type,
-      ...(corrections.length > 0
-        ? { corrections, warnings: corrections.map((c) => describeCorrection(c)) }
-        : {}),
-    });
+    return successResult({ entityId: data.entityId, componentType: data.type });
   },
 };

@@ -26,13 +26,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { FORGE_TYPE_DEFINITIONS } from '../forgeTypes';
 import { SCRIPT_TEMPLATES, buildBehaviorScript } from '../scriptTemplates';
 import { SCRIPT_SYSTEM_PROMPT } from '@/lib/game-creation/executors/customScriptExecutor';
 import { BEHAVIOR_VOCAB } from '@/lib/game-creation/behaviorVocabulary';
-import { TEMPLATE_REGISTRY } from '@/data/templates';
 
 // ---------------------------------------------------------------------------
 // The declared surface
@@ -83,25 +80,6 @@ function parseDeclaredMembers(dts: string): Map<string, MemberKind> {
 }
 
 const DECLARED = parseDeclaredMembers(FORGE_TYPE_DEFINITIONS);
-
-/**
- * The namespace paths, derived from the members inside them.
- *
- * Prose names a namespace on its own — "use forge.state for cross-script
- * communication" — and that is a correct sentence about a real namespace, not
- * an undeclared member. Deriving these from `DECLARED` rather than listing them
- * keeps the exemption honest: `forge.state` resolves only because
- * `forge.state.get` was actually found, so a namespace that loses all its
- * members stops being exempt.
- *
- * A namespace that is CALLED is still an error, which is why this is checked
- * against `reference.called` at the use site rather than folded into DECLARED.
- */
-const NAMESPACES = new Set(
-  [...DECLARED.keys()]
-    .map(path => path.slice(0, path.lastIndexOf('.')))
-    .filter(prefix => prefix.includes('.')),
-);
 
 // ---------------------------------------------------------------------------
 // The used surface
@@ -156,98 +134,7 @@ function collectSources(): { label: string; text: string }[] {
 
   sources.push({ label: 'customScriptExecutor SCRIPT_SYSTEM_PROMPT', text: SCRIPT_SYSTEM_PROMPT });
 
-  // THE SECOND PROMPT. `/api/chat`'s `SYSTEM_PROMPT` has its own "Scripting API
-  // (forge.*)" section — a separate list, maintained separately, telling a
-  // separate model what it may call. It was outside this gate and had gone
-  // stale in exactly the way the executor prompt had: it offered
-  // `forge.physics.setVelocity`, a method with no engine arm behind it.
-  //
-  // Read as TEXT rather than imported. The check is textual either way, and
-  // importing a Next.js route handler would pull its whole server dependency
-  // tree — Clerk, the DB client, the docs loader — into a unit test to look at
-  // one string.
-  const routePath = path.join(process.cwd(), 'src', 'app', 'api', 'chat', 'route.ts');
-  const routeText = readFileSync(routePath, 'utf8');
-  sources.push({ label: 'api/chat/route.ts SYSTEM_PROMPT', text: routeText });
-
-  // THE REFERENCE TABLE. `docs/reference/script-api.md` is not narrative prose
-  // about scripting — it is a row-per-method table, which is the same claim
-  // `forgeTypes.ts` makes, written twice. It had five rows for methods with no
-  // engine arm, including two on a namespace (`forge.skeleton`) that has never
-  // had them at all.
-  const docPath = path.join(process.cwd(), '..', 'docs', 'reference', 'script-api.md');
-  sources.push({ label: 'docs/reference/script-api.md', text: readFileSync(docPath, 'utf8') });
-
   return sources;
-}
-
-/**
- * The FOURTH source, and the one with the most code in it: the starter games in
- * the Template Gallery.
- *
- * These were outside the gate while it claimed to cover "every `forge.*` call
- * the product SHOWS or SHIPS" — and they are the most literally shipped of the
- * four. A template is instantiated as a whole project and its scripts run on
- * the first frame of Play, so a name that does not exist is not a degraded
- * feature: the controller throws and the game does not move.
- *
- * Read through `TEMPLATE_REGISTRY` rather than by importing each module, so a
- * template added later is covered without editing this file. The registry's
- * loaders are dynamic imports, which is why this half is async.
- */
-async function collectTemplateSources(): Promise<{ label: string; text: string }[]> {
-  const sources: { label: string; text: string }[] = [];
-
-  for (const entry of TEMPLATE_REGISTRY) {
-    const template = await entry.load();
-    for (const [entityId, script] of Object.entries(template.scripts ?? {})) {
-      sources.push({
-        label: `TEMPLATE_REGISTRY["${entry.id}"].scripts["${entityId}"]`,
-        text: script.source,
-      });
-    }
-  }
-
-  return sources;
-}
-
-const TEMPLATE_SOURCES = await collectTemplateSources();
-
-/**
- * THE 2D STARTERS ARE NOW REPAIRED, so this baseline is empty. It is kept — not
- * deleted — because it is the debt ledger for the defect class this file exists
- * to catch, and an empty ledger is the honest record that the debt is paid.
- *
- * Bringing the Template Gallery under the gate found all six 2D templates
- * written against an API that never existed. The decisive one was calling the
- * lifecycle hooks as members of `forge` (`forge.onUpdate(callback)`): the real
- * contract is a bare top-level `function onUpdate(dt)` which `scriptWorker`
- * picks up with `typeof onUpdate === 'function'`, so `forge.onUpdate` was
- * `undefined` and every such script threw a TypeError on its first statement.
- * The rest — a `transform` namespace, `input.isKeyDown`, `scene.getComponent`,
- * a `material` namespace, `camera.screenToWorld` — was the same mistake
- * repeated. Five of the six were repaired earlier; `2d-puzzle` was the last,
- * repaired in #9815 by rewriting it as a keyboard-driven match-3 that uses only
- * the declared surface and reaches a real `forge.game.win()`.
- *
- * IF A TEMPLATE REGRESSES, add its known-broken symbols back here rather than
- * leaving the gate red — but that is a debt entry, not a permission: the count
- * test below pins the total, and `has no stale baseline entry` fails the moment
- * an entry stops matching, so a baseline can neither grow quietly nor outlive
- * the repair it was covering.
- */
-const TEMPLATE_BASELINE: Record<string, readonly string[]> = {};
-
-/** The template id a `TEMPLATE_REGISTRY[...]` label refers to. */
-function templateIdOf(label: string): string | null {
-  if (!label.startsWith('TEMPLATE_REGISTRY["')) return null;
-  return label.slice('TEMPLATE_REGISTRY["'.length).split('"')[0];
-}
-
-/** Is this unresolved reference one of the known-broken ones for its template? */
-function isBaselined(label: string, path: string): boolean {
-  const id = templateIdOf(label);
-  return id !== null && (TEMPLATE_BASELINE[id]?.includes(path) ?? false);
 }
 
 // ---------------------------------------------------------------------------
@@ -269,15 +156,6 @@ describe('forge API conformance', () => {
       expect(DECLARED.get('forge.time.delta')).toBe('value');
     });
 
-    it('derives namespaces from the members inside them, and only those', () => {
-      // If this set were empty the prose exemption above would be inert; if it
-      // held a name with no members it would exempt something imaginary.
-      expect(NAMESPACES.has('forge.state')).toBe(true);
-      expect(NAMESPACES.has('forge.input')).toBe(true);
-      expect(NAMESPACES.has('forge.transform')).toBe(false);
-      expect(NAMESPACES.has('forge')).toBe(false);
-    });
-
     it('does not invent the namespace the prompt used to advertise', () => {
       // The whole reason this file exists. If `forge.entity` ever appears in
       // forgeTypes.ts the executor prompt may name it — until then it must not.
@@ -287,32 +165,12 @@ describe('forge API conformance', () => {
   });
 
   describe('every shipped and advertised call exists', () => {
-    const sources = [...collectSources(), ...TEMPLATE_SOURCES];
+    const sources = collectSources();
 
     it('has something to check in each source category', () => {
       expect(sources.filter(s => s.label.startsWith('SCRIPT_TEMPLATES')).length).toBeGreaterThan(0);
       expect(sources.filter(s => s.label.startsWith('buildBehaviorScript')).length).toBeGreaterThan(0);
       expect(sources.filter(s => s.label.includes('SCRIPT_SYSTEM_PROMPT')).length).toBe(1);
-      expect(sources.filter(s => s.label.startsWith('TEMPLATE_REGISTRY')).length).toBeGreaterThan(0);
-
-      // The route is read off disk, so a moved file would silently contribute
-      // nothing — a source that resolves zero references reads as zero problems.
-      const route = sources.find(s => s.label.startsWith('api/chat/route.ts'));
-      expect(route).toBeDefined();
-      expect(referencesIn(route!.text).length).toBeGreaterThan(20);
-
-      const doc = sources.find(s => s.label === 'docs/reference/script-api.md');
-      expect(doc).toBeDefined();
-      expect(referencesIn(doc!.text).length).toBeGreaterThan(100);
-    });
-
-    // A registry entry whose loader resolved to a template with no scripts
-    // would contribute nothing and be indistinguishable from one that passed.
-    it('reads a script out of every registered template', () => {
-      const covered = new Set(
-        TEMPLATE_SOURCES.map(s => s.label.slice('TEMPLATE_REGISTRY["'.length).split('"')[0]),
-      );
-      expect([...covered].sort()).toEqual(TEMPLATE_REGISTRY.map(e => e.id).sort());
     });
 
     it('resolves every forge.* reference against forgeTypes.ts', () => {
@@ -322,65 +180,15 @@ describe('forge API conformance', () => {
       for (const source of sources) {
         for (const reference of referencesIn(source.text)) {
           checked += 1;
-          if (DECLARED.has(reference.path)) continue;
-          // A namespace named on its own in prose. Calling one is still wrong.
-          if (!reference.called && NAMESPACES.has(reference.path)) continue;
-          if (isBaselined(source.label, reference.path)) continue;
-          unknown.push(`${source.label}: ${reference.path} is not declared in forgeTypes.ts`);
+          if (!DECLARED.has(reference.path)) {
+            unknown.push(`${source.label}: ${reference.path} is not declared in forgeTypes.ts`);
+          }
         }
       }
 
       // A source set that produced no references would report "no problems".
       expect(checked).toBeGreaterThan(50);
       expect(unknown).toEqual([]);
-    });
-
-    /**
-     * Anti-rot, and the half that makes the baseline a debt rather than a
-     * permission. An entry that no longer matches anything means the template
-     * was repaired — and a baseline nobody prunes is how a list of six broken
-     * templates outlives the repair of all six while still reading as
-     * "known broken".
-     */
-    it('has no stale baseline entry', () => {
-      const stale: string[] = [];
-
-      for (const [templateId, symbols] of Object.entries(TEMPLATE_BASELINE)) {
-        const templateText = TEMPLATE_SOURCES
-          .filter(s => templateIdOf(s.label) === templateId)
-          .map(s => s.text)
-          .join('\n');
-
-        if (templateText === '') {
-          stale.push(`${templateId}: baselined but no such template is registered`);
-          continue;
-        }
-
-        const referenced = new Set(referencesIn(templateText).map(r => r.path));
-        for (const symbol of symbols) {
-          if (!referenced.has(symbol)) {
-            stale.push(`${templateId}: ${symbol} is no longer referenced — delete the entry`);
-          } else if (DECLARED.has(symbol)) {
-            stale.push(`${templateId}: ${symbol} is declared now — delete the entry`);
-          }
-        }
-      }
-
-      expect(stale).toEqual([]);
-    });
-
-    /**
-     * The count is pinned so the debt cannot grow quietly. A new broken symbol
-     * in a template would otherwise only need a one-line addition above, which
-     * is the path of least resistance and exactly what this is here to make
-     * visible. The baseline is empty now that every 2D starter is repaired
-     * (#9815 closed out the last, `2d-puzzle`); a non-empty baseline is a
-     * regression that must be justified by editing this assertion deliberately.
-     */
-    it('baselines nothing — every shipped template resolves', () => {
-      expect(Object.keys(TEMPLATE_BASELINE)).toEqual([]);
-      const total = Object.values(TEMPLATE_BASELINE).reduce((n, list) => n + list.length, 0);
-      expect(total).toBe(0);
     });
 
     it('calls functions and reads values, never the other way round', () => {

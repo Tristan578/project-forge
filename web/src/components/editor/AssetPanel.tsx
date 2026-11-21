@@ -1,16 +1,14 @@
 'use client';
 
 import { useCallback, useRef, memo, useState, useEffect } from 'react';
-import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Sparkles, ChevronDown, Loader2, Lock } from 'lucide-react';
-import { Tabs } from '@spawnforge/ui';
+import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown, Loader2, Lock } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
-import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
+import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
-import { PrefabLibraryPanel } from './PrefabLibraryPanel';
 import { GenerateModelDialog } from './GenerateModelDialog';
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { GenerateSoundDialog } from './GenerateSoundDialog';
@@ -73,7 +71,7 @@ function AssetCard({ asset }: { asset: AssetMetadata }) {
   );
 }
 
-type AssetPanelTab = 'assets' | 'materials' | 'prefabs';
+type AssetPanelTab = 'assets' | 'materials';
 
 export const AssetPanel = memo(function AssetPanel() {
   const [activeTab, setActiveTab] = useState<AssetPanelTab>('assets');
@@ -87,25 +85,14 @@ export const AssetPanel = memo(function AssetPanel() {
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const dragCounterRef = useRef(0);
 
-  const rawTier = useUserStore((s) => s.tier);
-  const spendableTokens = useUserStore((s) => s.spendableTokens);
-  const profileLoaded = useUserStore((s) => s.profileLoaded);
-  // A starter account with trial tokens reads as hobbyist here (#7715).
-  const tier = effectiveTier(rawTier, spendableTokens);
+  const tier = useUserStore((s) => s.tier);
   // #9117: every AI-menu item is gated by its own capability (a fixed set, so
   // one hook call each), never just music — the next UNAVAILABLE_CAPABILITIES
   // entry must disable its item here, not drop the user into a dead dialog.
   const gates = {
     'generate-model': useGenerationGate('model-generation'),
     'generate-texture': useGenerationGate('texture-generation'),
-    // The Sound dialog runs sfx OR voice and keeps its type radios enabled so
-    // the user can switch: gating this item on sfx alone would make voice
-    // generation unreachable from the UI the moment sfx were declared
-    // unavailable, and the dialog's own escape hatch unexercisable (#9725 p8).
-    'generate-sound': combineGenerationGates([
-      useGenerationGate('sfx-generation'),
-      useGenerationGate('voice-generation'),
-    ]),
+    'generate-sound': useGenerationGate('sfx-generation'),
     'generate-music': useGenerationGate('music-generation'),
     'generate-skybox': useGenerationGate('texture-generation'),
   } as const;
@@ -226,7 +213,7 @@ export const AssetPanel = memo(function AssetPanel() {
 
   return (
     <div
-      className="relative flex min-h-[140px] w-full flex-col border-t border-[var(--sf-border)] bg-[var(--sf-bg-app)]"
+      className="relative flex min-h-[140px] w-full flex-col border-t border-zinc-800 bg-zinc-900"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
@@ -257,177 +244,134 @@ export const AssetPanel = memo(function AssetPanel() {
           </div>
         </div>
       )}
-      <Tabs
-        activeTab={activeTab}
-        onChange={(tabId) => {
-          if (tabId === 'assets' || tabId === 'materials' || tabId === 'prefabs') {
-            setActiveTab(tabId);
-          }
-        }}
-        className="[&>[role=tablist]]:rounded-none [&>[role=tabpanel]]:py-0 [&_[role=tab]]:min-h-[44px] sm:[&_[role=tab]]:min-h-0 [&_[role=tab][aria-selected=false]]:text-[var(--sf-text-secondary)]"
-        tabs={[
-          {
-            id: 'assets',
-            label: 'Assets',
-            content: activeTab === 'assets' ? (
-              <>
-                <div className="flex items-center justify-end gap-1 border-b border-[var(--sf-border)] p-2">
-                  {/* AI Generate dropdown */}
-                  <div className="relative" ref={aiDropdownRef}>
-                    <button
-                      className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-xs text-purple-400 hover:bg-purple-900/50"
-                      onClick={() => setShowAiDropdown(!showAiDropdown)}
-                      aria-label="AI Generate"
-                      aria-expanded={showAiDropdown}
-                      aria-haspopup="true"
-                      title="AI Generate"
-                    >
-                      <Sparkles size={14} />
-                      <ChevronDown size={10} />
-                    </button>
-                    {showAiDropdown && (
-                      <div role="menu" aria-label="AI generation options" className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 shadow-xl">
-                        {([
-                          { id: 'generate-model', label: 'Generate 3D Model', open: setGenerateModelOpen },
-                          { id: 'generate-texture', label: 'Generate Texture', open: setGenerateTextureOpen },
-                          { id: 'generate-sound', label: 'Generate Sound', open: setGenerateSoundOpen },
-                          { id: 'generate-music', label: 'Generate Music', open: setGenerateMusicOpen },
-                          { id: 'generate-skybox', label: 'Generate Skybox', open: setGenerateSkyboxOpen },
-                        ] as const).map(({ id, label, open }) => {
-                          // #9117: a capability NO key can enable (`unprovisionable`,
-                          // e.g. music pending #9522) is disabled here at the entry
-                          // point, like the tier lock below. A capability that is
-                          // merely unconfigured stays clickable on purpose: its
-                          // reason is actionable, and the dialog's notice — which
-                          // names the provider and links to Settings — is the only
-                          // place that reason is readable by a touch user at all
-                          // (#9725 p7). Disabling both made "not offered" and "add
-                          // your own key" read identically.
-                          const gate = gates[id];
-                          const gated = gate.unprovisionable;
-                          // Until the first /api/capabilities body lands nothing is
-                          // known, so the item must not paint as ready and then flip
-                          // to a disabled amber badge when the answer arrives
-                          // (#9725 p8).
-                          // Before /api/user/profile resolves, `tier`/
-                          // `spendableTokens` are still defaults. An item the
-                          // trial could open reads as access-unknown rather
-                          // than flash a lock badge at a trial-eligible
-                          // starter; a creator-gated item (3D model, skybox)
-                          // stays locked until the profile loads, since no $0
-                          // account can open it (#7715 review round 3).
-                          const tierOk = profileLoaded
-                            ? canAccessPanel(id, tier)
-                            : canAccessPanelBeforeProfileLoad(id);
-                          const allowed = tierOk && !gated && !gate.loading;
-                          const required = getRequiredTier(id);
-                          return (
-                            <button
-                              key={id}
-                              role="menuitem"
-                              onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
-                              aria-disabled={!allowed || undefined}
-                              aria-busy={gate.loading || undefined}
-                              aria-label={
-                                gated
-                                  ? `${label} — ${gate.reason ?? 'not available yet'}`
-                                  : gate.loading
-                                    ? `${label} — checking availability`
-                                    : undefined
-                              }
-                              className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
-                                allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
-                              }`}
-                              title={
-                                allowed
-                                  ? label
-                                  : gated
-                                    ? (gate.reason ?? 'Not available yet')
-                                    : gate.loading
-                                      ? 'Checking availability'
-                                      : `Requires ${required ? TIER_LABELS[required] : ''} tier`
-                              }
-                            >
-                              <span>{label}</span>
-                              {gated ? (
-                                // Not a tier lock: a distinct badge so "not available
-                                // yet" and "upgrade your plan" never read the same.
-                                <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">
-                                  Unavailable
-                                </span>
-                              ) : !allowed && (
-                                <span className="flex items-center gap-1 text-[10px] text-zinc-500">
-                                  <Lock size={10} />
-                                  {required ? TIER_LABELS[required] : ''}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                    onClick={() => gltfInputRef.current?.click()}
-                    aria-label="Import 3D model"
-                    title="Import 3D model (.glb/.gltf)"
-                  >
-                    <Upload size={14} />
-                  </button>
-                  <button
-                    className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                    onClick={() => textureInputRef.current?.click()}
-                    aria-label="Import texture"
-                    title="Import texture (.png/.jpg)"
-                  >
-                    <ImageIcon size={14} />
-                  </button>
-                  <button
-                    className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                    onClick={() => audioInputRef.current?.click()}
-                    aria-label="Import audio"
-                    title="Import audio (.mp3/.ogg/.wav)"
-                  >
-                    <Music size={14} />
-                  </button>
+      {/* Tab bar + import buttons */}
+      <div className="flex items-center border-b border-zinc-800">
+        <div className="flex flex-1">
+          <button
+            onClick={() => setActiveTab('assets')}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              activeTab === 'assets'
+                ? 'border-b-2 border-blue-400 text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-400'
+            }`}
+          >
+            <FolderOpen size={12} />
+            Assets
+          </button>
+          <button
+            onClick={() => setActiveTab('materials')}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              activeTab === 'materials'
+                ? 'border-b-2 border-purple-400 text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-400'
+            }`}
+          >
+            <Palette size={12} />
+            Materials
+          </button>
+        </div>
+        {activeTab === 'assets' && (
+          <div className="flex gap-1 pr-2">
+            {/* AI Generate dropdown */}
+            <div className="relative" ref={aiDropdownRef}>
+              <button
+                className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-xs text-purple-400 hover:bg-purple-900/50"
+                onClick={() => setShowAiDropdown(!showAiDropdown)}
+                aria-label="AI Generate"
+                aria-expanded={showAiDropdown}
+                aria-haspopup="true"
+                title="AI Generate"
+              >
+                <Sparkles size={14} />
+                <ChevronDown size={10} />
+              </button>
+              {showAiDropdown && (
+                <div role="menu" aria-label="AI generation options" className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 shadow-xl">
+                  {([
+                    { id: 'generate-model', label: 'Generate 3D Model', open: setGenerateModelOpen },
+                    { id: 'generate-texture', label: 'Generate Texture', open: setGenerateTextureOpen },
+                    { id: 'generate-sound', label: 'Generate Sound', open: setGenerateSoundOpen },
+                    { id: 'generate-music', label: 'Generate Music', open: setGenerateMusicOpen },
+                    { id: 'generate-skybox', label: 'Generate Skybox', open: setGenerateSkyboxOpen },
+                  ] as const).map(({ id, label, open }) => {
+                    // #9117: a capability NO key can enable (`unprovisionable`,
+                    // e.g. music pending #9522) is disabled here at the entry
+                    // point, like the tier lock below. A capability that is
+                    // merely unconfigured stays clickable on purpose: its
+                    // reason is actionable, and the dialog's notice — which
+                    // names the provider and links to Settings — is the only
+                    // place that reason is readable by a touch user at all
+                    // (#9725 p7). Disabling both made "not offered" and "add
+                    // your own key" read identically.
+                    const gate = gates[id];
+                    const gated = gate.unprovisionable;
+                    const allowed = canAccessPanel(id, tier) && !gated;
+                    const required = getRequiredTier(id);
+                    return (
+                      <button
+                        key={id}
+                        role="menuitem"
+                        onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
+                        aria-disabled={!allowed || undefined}
+                        aria-label={gated ? `${label} — ${gate.reason ?? 'not available yet'}` : undefined}
+                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
+                          allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
+                        }`}
+                        title={
+                          allowed
+                            ? label
+                            : gated
+                              ? (gate.reason ?? 'Not available yet')
+                              : `Requires ${required ? TIER_LABELS[required] : ''} tier`
+                        }
+                      >
+                        <span>{label}</span>
+                        {gated ? (
+                          // Not a tier lock: a distinct badge so "not available
+                          // yet" and "upgrade your plan" never read the same.
+                          <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">
+                            Unavailable
+                          </span>
+                        ) : !allowed && (
+                          <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                            <Lock size={10} />
+                            {required ? TIER_LABELS[required] : ''}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-                {assets.length === 0 ? (
-                  <div className="flex flex-1 items-center justify-center p-4">
-                    <EmptyState
-                      icon={FolderOpen}
-                      title="No assets imported"
-                      description="Drag files here or use AI to generate assets"
-                      action={{ label: 'Import File', onClick: () => gltfInputRef.current?.click() }}
-                    />
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-4 gap-1.5 overflow-y-auto p-2">
-                    {assets.map((asset) => (
-                      <AssetCard key={asset.id} asset={asset} />
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : null,
-          },
-          {
-            id: 'materials',
-            label: 'Materials',
-            content: activeTab === 'materials' ? (
-              <div className="flex-1 overflow-y-auto"><MaterialLibraryPanel /></div>
-            ) : null,
-          },
-          {
-            id: 'prefabs',
-            label: 'Prefabs',
-            content: activeTab === 'prefabs' ? (
-              <div className="flex flex-1 flex-col overflow-y-auto"><PrefabLibraryPanel /></div>
-            ) : null,
-          },
-        ]}
-      />
+              )}
+            </div>
+
+            <button
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => gltfInputRef.current?.click()}
+              aria-label="Import 3D model"
+              title="Import 3D model (.glb/.gltf)"
+            >
+              <Upload size={14} />
+            </button>
+            <button
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => textureInputRef.current?.click()}
+              aria-label="Import texture"
+              title="Import texture (.png/.jpg)"
+            >
+              <ImageIcon size={14} />
+            </button>
+            <button
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => audioInputRef.current?.click()}
+              aria-label="Import audio"
+              title="Import audio (.mp3/.ogg/.wav)"
+            >
+              <Music size={14} />
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Hidden file inputs */}
       <input
@@ -454,6 +398,32 @@ export const AssetPanel = memo(function AssetPanel() {
         className="hidden"
         onChange={(e) => handleAudioImport(e.target.files)}
       />
+
+      {/* Tab content */}
+      {activeTab === 'materials' ? (
+        <div className="flex-1 overflow-y-auto">
+          <MaterialLibraryPanel />
+        </div>
+      ) : (
+        <>
+          {assets.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center p-4">
+              <EmptyState
+                icon={FolderOpen}
+                title="No assets imported"
+                description="Drag files here or use AI to generate assets"
+                action={{ label: 'Import File', onClick: () => gltfInputRef.current?.click() }}
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-1.5 overflow-y-auto p-2">
+              {assets.map((asset) => (
+                <AssetCard key={asset.id} asset={asset} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Generation dialogs */}
       <GenerateModelDialog isOpen={generateModelOpen} onClose={() => setGenerateModelOpen(false)} />

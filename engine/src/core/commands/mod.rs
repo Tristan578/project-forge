@@ -155,7 +155,7 @@ fn route_domain(command: &str) -> u8 {
         | "instantiate_prefab" | "set_quality_preset" | "get_quality_settings" => 7,
 
         // --- scene domain ---
-        "export_scene" | "load_scene" | "validate_scene" | "new_scene" | "import_gltf"
+        "export_scene" | "load_scene" | "new_scene" | "import_gltf"
         | "load_texture" | "remove_texture" | "place_asset" | "delete_asset"
         | "import_audio" | "list_assets" | "set_script" | "remove_script"
         | "get_script" | "list_script_templates" | "apply_script_template"
@@ -202,8 +202,7 @@ fn route_domain(command: &str) -> u8 {
         | "create_ik_chain2d" | "get_skeleton2d" | "auto_weight_skeleton2d"
         | "add_skeleton2d_mesh_attachment" | "get_sprite_sheet_state"
         | "get_sprite_animator_state" | "set_tilemap_data" | "remove_tilemap_data"
-        | "paint_tile" | "erase_tile" | "set_tile_collision_shape"
-        | "set_grid_2d" | "set_tileset" | "remove_tileset"
+        | "paint_tile" | "erase_tile" | "set_grid_2d" | "set_tileset" | "remove_tileset"
         // Implemented here, not in `animation.rs`. The router used to send these
         // two to domain 4, whose arms are inline `Not yet implemented` stubs, so
         // a real handler sat unreachable and every sprite state machine the
@@ -982,7 +981,7 @@ mod tests {
     #[test]
     fn dispatch_load_scene_reaches_scene_domain() {
         let result = dispatch("load_scene", json!({
-            "json": crate::core::scene_file::test_scene_json()
+            "json": "{\"entities\":[]}"
         }));
         assert!(result.is_err());
         let err = result.unwrap_err();

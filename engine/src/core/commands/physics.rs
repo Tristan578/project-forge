@@ -107,8 +107,8 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "list_joints_2d" => Some(super::handle_query(QueryRequest::ListJoints2d)),
         "apply_force_2d" => Some(handle_apply_force2d(payload.clone())),
         "apply_impulse_2d" => Some(handle_apply_impulse2d(payload.clone())),
-        "set_linear_velocity_2d" => Some(handle_set_linear_velocity_2d(payload.clone())),
-        "set_angular_velocity_2d" => Some(handle_set_angular_velocity_2d(payload.clone())),
+        "set_linear_velocity_2d" => Some(Err("Not yet implemented: set_linear_velocity_2d".to_string())),
+        "set_angular_velocity_2d" => Some(Err("Not yet implemented: set_angular_velocity_2d".to_string())),
         "get_velocity_2d" => Some(Err("Not yet implemented: get_velocity_2d".to_string())),
         "get_collisions" => Some(Err("Not yet implemented: get_collisions".to_string())),
         "get_collisions_2d" => Some(Err("Not yet implemented: get_collisions_2d".to_string())),
@@ -887,77 +887,6 @@ fn handle_apply_impulse2d(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
-/// Payload for set_linear_velocity_2d.
-///
-/// `x` AND `y` ARE BOTH OPTIONAL, and omitting one means "leave it alone"
-/// rather than "set it to zero". A platformer controller writes horizontal
-/// speed every frame; if that also zeroed the vertical component it would
-/// cancel gravity and erase the jump impulse applied a frame earlier, so the
-/// entity would hover and never fall. Zeroing is still expressible — send 0.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SetLinearVelocity2dPayload {
-    entity_id: String,
-    #[serde(default)]
-    x: Option<f32>,
-    #[serde(default)]
-    y: Option<f32>,
-}
-
-/// Handle set_linear_velocity_2d.
-fn handle_set_linear_velocity_2d(payload: serde_json::Value) -> super::CommandResult {
-    let data: SetLinearVelocity2dPayload = serde_json::from_value(payload)
-        .map_err(|e| format!("Invalid set_linear_velocity_2d payload: {}", e))?;
-
-    // A request naming neither axis would queue work that changes nothing and
-    // report success, which is the shape of every defect this command family
-    // was written to remove. Refused with a message that says what to send.
-    if data.x.is_none() && data.y.is_none() {
-        return Err(
-            "set_linear_velocity_2d requires at least one of x or y".to_string()
-        );
-    }
-
-    let request = LinearVelocity2dSet {
-        entity_id: data.entity_id.clone(),
-        x: data.x,
-        y: data.y,
-    };
-
-    if queue_linear_velocity2d_set_from_bridge(request) {
-        tracing::info!("Queued 2D linear velocity for entity: {}", data.entity_id);
-        Ok(())
-    } else {
-        Err("PendingCommands resource not initialized".to_string())
-    }
-}
-
-/// Payload for set_angular_velocity_2d.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SetAngularVelocity2dPayload {
-    entity_id: String,
-    omega: f32,
-}
-
-/// Handle set_angular_velocity_2d.
-fn handle_set_angular_velocity_2d(payload: serde_json::Value) -> super::CommandResult {
-    let data: SetAngularVelocity2dPayload = serde_json::from_value(payload)
-        .map_err(|e| format!("Invalid set_angular_velocity_2d payload: {}", e))?;
-
-    let request = AngularVelocity2dSet {
-        entity_id: data.entity_id.clone(),
-        omega: data.omega,
-    };
-
-    if queue_angular_velocity2d_set_from_bridge(request) {
-        tracing::info!("Queued 2D angular velocity for entity: {}", data.entity_id);
-        Ok(())
-    } else {
-        Err("PendingCommands resource not initialized".to_string())
-    }
-}
-
 /// Payload for raycast2d command.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -967,9 +896,6 @@ struct Raycast2dPayload {
     dir_x: f32,
     dir_y: f32,
     max_distance: f32,
-    /// Optional: an entity the ray must ignore. See `Raycast2dRequest`.
-    #[serde(default)]
-    exclude_entity_id: Option<String>,
 }
 
 /// Handle raycast2d command.
@@ -983,7 +909,6 @@ fn handle_raycast2d(payload: serde_json::Value) -> super::CommandResult {
         dir_x: data.dir_x,
         dir_y: data.dir_y,
         max_distance: data.max_distance,
-        exclude_entity_id: data.exclude_entity_id,
     };
 
     if queue_raycast2d_from_bridge(request) {
@@ -1561,172 +1486,6 @@ mod tests {
             !err.contains("Unknown"),
             "a malformed payload must not read as an unknown command name, got: {err}"
         );
-    }
-
-    // === set_linear_velocity_2d / set_angular_velocity_2d ===
-    //
-    // BOTH WERE `Not yet implemented` STUBS. A stub is worse than a missing
-    // command: `route_domain` names it, so it reaches this module and answers
-    // an Err the caller discards, and every inventory that counts routed names
-    // counts it as present. These tests assert the arms are real AND that they
-    // stay real — an accidental revert to the stub fails on the error text.
-
-    /// The partial write is the point: a platformer sets horizontal speed every
-    /// frame and must not touch the vertical component.
-    #[test]
-    fn set_linear_velocity_2d_accepts_x_alone() {
-        assert_routed_and_reaches_handler(
-            "set_linear_velocity_2d",
-            json!({ "entityId": "player", "x": 4.5 }),
-        );
-    }
-
-    #[test]
-    fn set_linear_velocity_2d_accepts_y_alone() {
-        assert_routed_and_reaches_handler(
-            "set_linear_velocity_2d",
-            json!({ "entityId": "player", "y": -9.0 }),
-        );
-    }
-
-    #[test]
-    fn set_linear_velocity_2d_accepts_both_axes() {
-        assert_routed_and_reaches_handler(
-            "set_linear_velocity_2d",
-            json!({ "entityId": "player", "x": 1.0, "y": 2.0 }),
-        );
-    }
-
-    /// Zero is a VALUE, not an absence. "Stop moving horizontally" is the most
-    /// common thing a controller asks for, and a payload that treated 0 as
-    /// missing would make it unexpressible.
-    #[test]
-    fn set_linear_velocity_2d_accepts_zero_as_a_real_value() {
-        assert_routed_and_reaches_handler(
-            "set_linear_velocity_2d",
-            json!({ "entityId": "player", "x": 0.0 }),
-        );
-    }
-
-    /// A request naming neither axis changes nothing. Accepting it would report
-    /// success for work that cannot happen — the exact shape this command
-    /// family exists to remove.
-    #[test]
-    fn set_linear_velocity_2d_rejects_a_request_with_no_axis() {
-        let err = run("set_linear_velocity_2d", json!({ "entityId": "player" }))
-            .expect_err("a payload naming no axis must be refused");
-        assert!(err.contains("x or y"), "the error must say what to send, got: {err}");
-    }
-
-    #[test]
-    fn set_linear_velocity_2d_rejects_a_missing_entity_id() {
-        let err = run("set_linear_velocity_2d", json!({ "x": 1.0 }))
-            .expect_err("a payload with no entityId must be refused");
-        assert!(err.contains("Invalid set_linear_velocity_2d payload"), "got: {err}");
-    }
-
-    /// The stub answered this exact string. If anything reverts these arms, the
-    /// tests above would still pass on a stub that returned Ok, so this pins
-    /// the text that would come back instead.
-    #[test]
-    fn neither_2d_velocity_command_is_a_stub_any_more() {
-        for command in ["set_linear_velocity_2d", "set_angular_velocity_2d"] {
-            let err = super::super::dispatch(command, json!({ "entityId": "e", "x": 1.0, "omega": 1.0 }))
-                .expect_err("no pending queue under native test");
-            assert!(
-                !err.contains("Not yet implemented"),
-                "{command} answered the stub: {err}"
-            );
-            // And it is still ROUTED — otherwise the assertion above would be
-            // satisfied by `Unknown command`, which is not the property wanted.
-            assert!(
-                !err.contains("Unknown command"),
-                "{command} is no longer routed: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn set_angular_velocity_2d_is_routed_and_deserializes() {
-        assert_routed_and_reaches_handler(
-            "set_angular_velocity_2d",
-            json!({ "entityId": "player", "omega": 2.5 }),
-        );
-    }
-
-    #[test]
-    fn set_angular_velocity_2d_requires_omega() {
-        let err = run("set_angular_velocity_2d", json!({ "entityId": "player" }))
-            .expect_err("omega is required");
-        assert!(err.contains("Invalid set_angular_velocity_2d payload"), "got: {err}");
-    }
-
-    /// The 3D counterpart is still a stub, and saying so here keeps the pair
-    /// honest: the next reader can see which half was done deliberately.
-    #[test]
-    fn the_3d_linear_velocity_command_is_still_a_stub() {
-        let err = super::super::dispatch("set_linear_velocity", json!({ "entityId": "e" }))
-            .expect_err("it is not implemented");
-        assert!(err.contains("Not yet implemented"), "got: {err}");
-    }
-
-    // === raycast2d: exclude_entity_id ===
-    //
-    // THE WIRE NAME IS PINNED HERE, NOT ONLY IN THE BROWSER SUITE. The only
-    // thing asserting `excludeEntityId` was a `toHaveBeenCalledWith` on a mocked
-    // `dispatchCommand` in `physicsChannel.test.ts` — and a mock cannot disagree
-    // with you (lessons-learned #14). That is precisely how `raycast2d_query`,
-    // a command this file has never implemented, stayed asserted for months.
-    // `#[serde(rename_all = "camelCase")]` is what maps `exclude_entity_id` to
-    // the name the browser sends, and renaming the field would silently move it.
-
-    /// The field arrives from the browser as `excludeEntityId`.
-    #[test]
-    fn raycast2d_reads_the_camel_case_exclude_entity_id() {
-        let payload: Raycast2dPayload = serde_json::from_value(json!({
-            "originX": 1.0,
-            "originY": 2.0,
-            "dirX": 0.0,
-            "dirY": -1.0,
-            "maxDistance": 0.1,
-            "excludeEntityId": "player-1",
-        }))
-        .expect("a payload using the browser's field names must deserialize");
-        assert_eq!(payload.exclude_entity_id.as_deref(), Some("player-1"));
-    }
-
-    /// And it is OPTIONAL. `#[serde(default)]` is the only thing keeping every
-    /// caller that predates the exclusion working; without it a plain script
-    /// raycast fails to parse and no 2D raycast works at all — a far wider
-    /// break than the ground check this field was added for.
-    #[test]
-    fn raycast2d_without_an_exclusion_parses_as_none() {
-        let payload: Raycast2dPayload = serde_json::from_value(json!({
-            "originX": 1.0,
-            "originY": 2.0,
-            "dirX": 1.0,
-            "dirY": 0.0,
-            "maxDistance": 100.0,
-        }))
-        .expect("a payload with no excludeEntityId must still deserialize");
-        assert!(payload.exclude_entity_id.is_none());
-    }
-
-    /// The rest of the payload still uses `dirX`/`dirY`, not `directionX`. The
-    /// manifest's `raycast2d` entry declares `directionX`/`directionY` for the
-    /// CHAT tool, which is a stub that never dispatches to the engine — so the
-    /// two contracts differ legitimately, and this states which one the engine
-    /// holds so a future "fix" does not align them the wrong way.
-    #[test]
-    fn raycast2d_direction_is_dir_x_not_direction_x() {
-        let wrong = serde_json::from_value::<Raycast2dPayload>(json!({
-            "originX": 0.0,
-            "originY": 0.0,
-            "directionX": 1.0,
-            "directionY": 0.0,
-            "maxDistance": 1.0,
-        }));
-        assert!(wrong.is_err(), "directionX must NOT satisfy the engine payload");
     }
 
     /// The router's fallthrough, so the assertion above is not vacuously true for

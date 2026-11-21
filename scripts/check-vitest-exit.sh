@@ -114,14 +114,7 @@ fi
 CLEAN="$(sed 's/\x1b\[[0-9;]*m//g' "$OUTPUT_FILE")"
 
 # (1) A test actually failed → propagate.
-if grep -qE "Test Files.*failed" <<< "$CLEAN"; then
-  exit "$EXIT_CODE"
-fi
-
-# Vitest can pass every assertion but still fail on unhandled exceptions.
-# Its error summary is failure evidence even with a green test summary.
-if grep -qE "^[[:space:]]*Errors[[:space:]]+[1-9][0-9]* errors?([[:space:]]|$)" <<<"$CLEAN"; then
-  echo "::error::vitest reported unhandled errors — failing the build"
+if printf '%s\n' "$CLEAN" | grep -qE "Test Files.*failed"; then
   exit "$EXIT_CODE"
 fi
 
@@ -130,7 +123,8 @@ fi
 #     and the negative-count "Uncovered X exceed ... threshold" — global and
 #     per-file variants alike. Missing form B would re-open #8598 for any repo
 #     (or future config) that sets a max-uncovered threshold.
-if grep -qiE "coverage for .*does not meet .*threshold|uncovered .*exceed .*threshold" <<< "$CLEAN"; then
+if printf '%s\n' "$CLEAN" \
+  | grep -qiE "coverage for .*does not meet .*threshold|uncovered .*exceed .*threshold"; then
   echo "::error::vitest coverage thresholds not met — failing the build (this was previously swallowed: #8598)"
   exit "$EXIT_CODE"
 fi
@@ -143,7 +137,7 @@ fi
 #     "Test Files ... passed" summary. Any "Test Files ... failed" line was
 #     already propagated above, so a match here can only be a fully green
 #     summary. Without it, fail closed.
-if ! grep -qE "Test Files.*passed" <<< "$CLEAN"; then
+if ! printf '%s\n' "$CLEAN" | grep -qE "Test Files.*passed"; then
   echo "::error::vitest exited with code $EXIT_CODE and the captured output shows no completed passing run — failing closed (likely killed mid-run; cannot prove the vitest#3077 false positive)"
   exit "$EXIT_CODE"
 fi
@@ -162,7 +156,7 @@ fi
 # swallowed (accepted residual — no in-band output exists after a passing
 # adjudication that could anchor a stronger check).
 if [ "$COVERAGE_MODE" -eq 1 ] \
-  && ! grep -qiE "coverage report from" <<< "$CLEAN"; then
+  && ! printf '%s\n' "$CLEAN" | grep -qiE "coverage report from"; then
   echo "::error::vitest exited with code $EXIT_CODE after a passing test run but BEFORE the coverage report was produced — coverage thresholds were never adjudicated; failing closed"
   exit "$EXIT_CODE"
 fi

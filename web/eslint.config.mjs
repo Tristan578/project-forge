@@ -2,12 +2,6 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
-// Rules with enough logic to deserve their own tests live in ./eslint-rules and
-// are exercised through ESLint's RuleTester from a vitest suite. The inline
-// rules below predate that split; new ones belong in a file.
-import noRawResponseInCatch from "./eslint-rules/no-raw-response-in-catch.mjs";
-import { RULE_OPTIONS } from "./eslint-rules/no-raw-response-in-catch.options.mjs";
-
 // Local plugin: detect hardcoded Tailwind color classes that should use design tokens.
 // Pattern: bg-zinc-800, text-gray-300, border-slate-500, etc.
 // These should be replaced with CSS custom property references (e.g., bg-[var(--sf-bg-surface)]).
@@ -236,15 +230,8 @@ const localPlugin = {
     'no-hardcoded-primitives': noHardcodedPrimitives,
     'no-empty-test-assertion': noEmptyTestAssertion,
     'no-bare-dialogue-tree-index': noBareDialogueTreeIndex,
-    'no-raw-response-in-catch': noRawResponseInCatch,
   },
 };
-
-// The rule's option lists live in `eslint-rules/no-raw-response-in-catch.options.mjs`
-// so the RuleTester suite (`src/app/api/__tests__/noRawResponseInCatch.test.ts`)
-// runs against the SHIPPED options rather than a retyped copy of them. The suite
-// used to declare three `responseHelpers` where this config passed thirteen, with a
-// comment claiming they matched.
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -279,40 +266,27 @@ const eslintConfig = defineConfig([
       // documented recurring bug here was a numeric default written `x || 60`,
       // where an explicit 0 silently becomes 60.
       //
-      // #8938 shipped this rule with two carve-outs -- ignorePrimitives.string
-      // (101 `someString || fallback` sites) and ignoreIfStatements (13
-      // `if (!x) x = y` sites) -- because auditing all of them individually
-      // would have meant either 101+13 disable comments or that many behaviour
-      // regressions in one PR. #9565 is that audit: every site was read and
-      // classified as either safe to convert (empty string is a value, or the
-      // operand can never legitimately be '') or requiring `||` (empty string
-      // is an absence, or the site is a boolean-truthiness OR that `??` cannot
-      // express), and both carve-outs were then dropped. Sites kept as `||`
-      // each carry an eslint-disable-next-line naming what an empty string
-      // means there. `if (!x) x = y` sites became `x ??= y`.
+      // Two carve-outs, both measured rather than assumed, both with a ticket:
       //
-      // The full vitest suite caught a real near-miss during that audit: two
-      // sites in useEngine.ts (`data.wasmHash || data.hash || ''` and
-      // `data.buildId || wasmHash`) looked like safe "hash string, never
-      // legitimately empty" conversions, but a WASM manifest CAN carry an
-      // empty-string hash/buildId (legacy or malformed build output), and the
-      // existing test suite already pinned that blank buildId must fall back
-      // to wasmHash. Those two stayed `||`, with the test name cited in the
-      // disable reason -- see useEngine.test.ts.
+      //   ignorePrimitives.string -- 101 of the 245 first-run findings were
+      //   `someString || fallback`, and for strings that is usually the INTENDED
+      //   semantic: `p.data.title || store.sceneName` should fall back on an
+      //   empty title, and `??` would export a game named "". Enforcing here
+      //   would mean 101 disable comments or 101 behaviour regressions. Auditing
+      //   them individually is #9565.
       //
-      // The review board found the same class twice more. A chat tool argument
-      // typed `z.string().optional()` (no `.min(1)`) is model output, and the
-      // model can send `''` for "not given": `graphId` in three shader handlers
-      // and `entityId` in save_material_to_library fell through to a "nothing
-      // selected" error under `??`, so they stay `||` (shaderHandlers.ts,
-      // gameplayHandlers.ts, with blank-argument tests). And a field of an
-      // untyped `JSON.parse` (an imported file) can be any type at all:
-      // `data.tags ?? []` stored a string that the next search called `.some`
-      // on, so importScript validates the type instead (scriptLibraryStore.ts).
-      // Before converting a `||` on a tool argument, a parsed file or any
-      // other external input, check what its schema actually allows.
+      //   ignoreIfStatements -- 13 findings were `if (!x) x = y` asking to become
+      //   `x ??= y`. Every one was type-checked: none can hold 0/''/false, and
+      //   the five written `x === null` are already nullish checks, so none is a
+      //   latent falsy bug. That is a statement restructure rather than an
+      //   operator swap, and seven wrap multi-line bodies. Also #9565.
+      //
+      // Both carve-outs are narrower than they look: the operator form on
+      // numbers and booleans -- the actual bug class -- is fully enforced.
       '@typescript-eslint/prefer-nullish-coalescing': ['error', {
         ignoreConditionalTests: true,
+        ignoreIfStatements: true,
+        ignorePrimitives: { string: true },
       }],
     },
   },
@@ -335,52 +309,6 @@ const eslintConfig = defineConfig([
     plugins: { 'spawnforge': localPlugin },
     rules: {
       'spawnforge/no-hardcoded-primitives': 'off',
-    },
-  },
-  {
-    /**
-     * Catch-path secret egress (#9736). Scoped to every file that BUILDS a
-     * response returned to a client — which is deliberately wider than
-     * `route.ts`.
-     *
-     * A glob restricted to route.ts files asserts "no route FILE leaks", not
-     * "no API response leaks" (lessons-learned #1). The files ADDED to the glob
-     * below each construct a NextResponse returned straight to a client:
-     * `lib/api` (createGenerationHandler is the single response constructor
-     * for all twelve /api/generate/* routes), `lib/auth/api-auth.ts`,
-     * `lib/rateLimit.ts`, `lib/apiValidation.ts`, `proxy.ts`, and every route
-     * handler under `src/app` that is not below `src/app/api` (the blog feed).
-     * None of them leaked when this was widened — the point is that nothing
-     * failed when the next one landed outside the glob.
-     *
-     * The `src/app/api` entry is a directory-wide glob rather than a filename
-     * one, so a non-`route.ts` module colocated under it — a co-located handler
-     * or body builder — is covered from the day it is created rather than
-     * silently unlinted. `noRawResponseInCatch.coverage.test.ts` fails if any
-     * response-building file stops being covered.
-     */
-    files: [
-      'src/app/**/route.ts',
-      'src/app/api/**/*.ts',
-      'src/lib/api/**/*.ts',
-      'src/lib/play/notFoundDocument.ts',
-      'src/lib/auth/api-auth.ts',
-      'src/lib/auth/step-up.ts',
-      'src/lib/rateLimit.ts',
-      'src/lib/apiValidation.ts',
-      'src/lib/security/botId.ts',
-      'src/lib/security/egressGuard.ts',
-      'src/proxy.ts',
-    ],
-    ignores: [
-      'src/lib/api/**/__tests__/**',
-      'src/lib/api/**/*.test.ts',
-      'src/app/api/**/__tests__/**',
-      'src/app/api/**/*.test.ts',
-    ],
-    plugins: { spawnforge: localPlugin },
-    rules: {
-      'spawnforge/no-raw-response-in-catch': ['error', RULE_OPTIONS],
     },
   },
   {

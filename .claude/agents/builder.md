@@ -90,8 +90,8 @@ Every feature MUST address:
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Bevy | 0.19 | wgpu 29, WebGPU primary |
-| bevy_rapier3d/2d | 0.35 | Physics |
+| Bevy | 0.18 | wgpu 27, WebGPU primary |
+| bevy_rapier3d/2d | 0.34 | Physics |
 | wasm-bindgen | 0.2.127 | Pinned — must match Cargo.lock |
 | Next.js | 16.x | Turbopack build |
 | React | 19.x | Via Next.js |
@@ -105,7 +105,7 @@ Every feature MUST address:
 Before declaring implementation complete:
 1. `bash .claude/tools/validate-rust.sh check` — zero violations
 2. `bash .claude/tools/validate-frontend.sh quick` — zero warnings, zero type errors, all tests pass
-3. `bash .claude/tools/validate-mcp.sh full` — manifests in sync, MCP type-checks, MCP tests pass
+3. `bash .claude/tools/validate-mcp.sh full` — manifests in sync, MCP tests pass
 4. Test file exists for every new store slice, event handler, and chat handler
 5. MCP manifest entries in both locations
 

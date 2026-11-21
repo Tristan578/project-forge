@@ -93,7 +93,7 @@ else
 fi
 
 # Count number of criteria
-AC_COUNT=$(echo "$AC_SECTION" | grep -cE "^-\s*(Given|When|Then)" 2>/dev/null || true)
+AC_COUNT=$(echo "$AC_SECTION" | grep -cE "^-\s*(Given|When|Then)" 2>/dev/null || echo "0")
 if [ "$AC_COUNT" -ge 2 ]; then
   pass "Has ${AC_COUNT} Given/When/Then criteria"
 elif [ "$AC_COUNT" -eq 1 ]; then
@@ -108,10 +108,7 @@ fi
 section "File Path References"
 
 # Check for code block with file paths or backtick references
-# The backticks are literal Markdown code-span delimiters in the regex, not
-# a command substitution, so single quotes are correct here.
-# shellcheck disable=SC2016
-FILE_REF_COUNT=$(echo "$CONTENT" | grep -cE '`[a-z_/]+\.[a-z]+`|engine/src/|web/src/' 2>/dev/null || true)
+FILE_REF_COUNT=$(echo "$CONTENT" | grep -cE '`[a-z_/]+\.[a-z]+`|engine/src/|web/src/' 2>/dev/null || echo "0")
 if [ "$FILE_REF_COUNT" -ge 2 ]; then
   pass "Contains ${FILE_REF_COUNT} file path reference(s)"
 else

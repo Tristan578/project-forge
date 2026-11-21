@@ -13,7 +13,6 @@ import {
   withStatusSidecars,
   MAX_R2_SWEEP_KEYS,
 } from '../storage/r2';
-import { resolveOwnedPublishedGameKey } from '../storage/publishedGameStorage';
 import { captureException, captureMessage } from '../monitoring/sentry-server';
 
 /** Find or create a user from Clerk webhook data */
@@ -138,7 +137,7 @@ export async function updateDisplayName(
  *   → financial / key data
  *   → users
  *
- * After the transaction commits, the user's marketplace objects and publication snapshots are
+ * After the transaction commits, the user's uploaded marketplace objects are
  * removed from R2 on a best-effort basis (PF-9457) — see the notes at that
  * call site for why storage runs last and why it can never fail the deletion.
  */
@@ -170,9 +169,8 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   const neonSql = getNeonSql();
 
   // Read IDs of dependent records before the transaction.
-  // The neon-http transaction is a non-interactive batch: application code
-  // cannot consume a SELECT result inside it to construct later statements.
-  // Read these IDs first so all dependent DELETE statements can be assembled.
+  // These reads are outside the transaction intentionally: the neon-http
+  // sql.transaction() API only accepts DML statements (no SELECT inside txn).
   const userGames = await queryWithResilience(() =>
     getDb()
       .select({ id: publishedGames.id })
@@ -296,14 +294,10 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM marketplace_assets WHERE seller_id = ${userId}`);
   statements.push(neonSql`DELETE FROM seller_profiles    WHERE user_id   = ${userId}`);
 
-  // 6. Return the objects actually removed by the transaction. A preceding
-  // read can be stale if a publication commits while account deletion starts.
-  const deletedGamesStatement = statements.length;
-  statements.push(neonSql`
-    DELETE FROM published_games WHERE user_id = ${userId}
-    RETURNING cdn_bundle_key, slug,
-      (SELECT clerk_id FROM users WHERE id = ${userId}) AS clerk_id
-  `);
+  // 6. Published games (after community data and featured_games; only if user had any)
+  if (gameIds.length > 0) {
+    statements.push(neonSql`DELETE FROM published_games WHERE user_id = ${userId}`);
+  }
 
   // 7. Generation jobs — must come BEFORE projects because generation_jobs.project_id
   //    is a FK that references projects.id. Deleting projects first causes a FK violation.
@@ -312,16 +306,6 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   );
   // Catch-all: jobs that reference the user directly but may not be linked to a project
   statements.push(neonSql`DELETE FROM generation_jobs WHERE user_id = ${userId}`);
-
-  // 7b. Provider job ownership bindings (#10262). provider_job_owners.user_id
-  //     is a FK to users.id with no ON DELETE CASCADE, and every async
-  //     generation the user ran wrote one row server-side. Without this delete
-  //     the final `DELETE FROM users` violates that FK, the whole transaction
-  //     rolls back, and account deletion (both /api/user/delete and the Clerk
-  //     `user.deleted` webhook) fails for anyone who ever generated an asset.
-  //     The schema-driven test in user-service.test.ts derives this list from
-  //     schema.ts, so the next such table cannot be forgotten here.
-  statements.push(neonSql`DELETE FROM provider_job_owners WHERE user_id = ${userId}`);
 
   // 8. Projects (after generation_jobs)
   if (projectIds.length > 0) {
@@ -346,12 +330,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM users WHERE id = ${userId}`);
 
   // Execute all statements atomically
-  const results = await queryWithResilience(() => neonSql.transaction(statements));
-  const gameKeys: string[] = [];
-  for (const row of results?.[deletedGamesStatement] ?? []) {
-    const key = resolveOwnedPublishedGameKey(row.cdn_bundle_key, row.clerk_id, row.slug);
-    if (key) gameKeys.push(key);
-  }
+  await queryWithResilience(() => neonSql.transaction(statements));
 
   // Object storage last, and best-effort (PF-9457).
   //
@@ -364,10 +343,9 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // half-fails because object storage hiccuped is strictly worse than an
   // orphan — the user's data is already gone from the DB and there is nothing
   // useful for the caller to retry. Failures are logged with their keys so an
-  // operator can reconcile them. Marketplace keys use assets/{internalUserUUID}/;
-  // publication keys use games/{ClerkID}/{slug}/{revision}/bundle.json.
-  // Both object families can have .status.json sidecars under the same prefixes.
-  await deleteUserStorageObjects(userId, [...withStatusSidecars(gameKeys), ...storageKeys], assetReadTruncated);
+  // operator can reconcile them (keys stay enumerable by the assets/{userId}/
+  // prefix).
+  await deleteUserStorageObjects(userId, storageKeys, assetReadTruncated);
 }
 
 /**
@@ -400,11 +378,13 @@ async function deleteUserStorageObjects(
       captureMessage(message, 'error');
     }
 
-    // The marketplace row cap bounds asset keys alone. Adding publication keys
-    // and their sidecars can exceed the combined sweep ceiling. Report any
-    // skipped tail for reconciliation under both owner-specific prefixes.
+    // Defensive second net. The row cap above is sized so this call site can
+    // never overflow the sweep's own key ceiling, so in production the read cap
+    // is what fires. This branch exists so that changing R2_KEYS_PER_ASSET (or
+    // the key shape) without re-deriving the row cap degrades to a loud report
+    // rather than a silent drop.
     if (sweep.truncated) {
-      const message = `Account deletion R2 sweep truncated at ${MAX_R2_SWEEP_KEYS} keys for user ${userId}; remaining marketplace and published-game objects need reconciliation`;
+      const message = `Account deletion R2 sweep truncated at ${MAX_R2_SWEEP_KEYS} keys for user ${userId}; remaining objects under assets/${userId}/ need reconciliation`;
       console.error(message);
       captureMessage(message, 'error');
     }

@@ -4,10 +4,8 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { assetPurchases } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -26,10 +24,6 @@ async function GET_impl(req: NextRequest) {
   } catch (error) {
     console.error('Error fetching purchases:', error);
     captureException(error, { route: '/api/marketplace/purchases' });
-    return redactedJson({ error: 'Failed to fetch purchases' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch purchases' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

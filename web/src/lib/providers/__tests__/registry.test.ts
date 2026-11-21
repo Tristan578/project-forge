@@ -444,9 +444,7 @@ describe('registry — capability helpers', () => {
   });
 
   it('getConfiguredBackends returns only configured backends', async () => {
-    // A platform key (Meshy) makes the direct backend configured; #9522 removed
-    // PLATFORM_SUNO_KEY from PLATFORM_KEY_ENV so it no longer counts as one.
-    setEnv({ OPENROUTER_API_KEY: 'or-key', PLATFORM_MESHY_KEY: 'meshy-key' });
+    setEnv({ OPENROUTER_API_KEY: 'or-key', PLATFORM_SUNO_KEY: 'suno-key' });
     const { getConfiguredBackends } = await import('@/lib/providers/registry');
     const configured = getConfiguredBackends();
     expect(configured).toHaveLength(2);

@@ -13,14 +13,13 @@
  *   9. setup_game_from_description
  */
 
-import type { ToolHandler, ExecutionResult, ToolCallContext } from './types';
-import type { EntityType, InputBinding, SceneNode } from './types';
-import { ownEntry, parseArgs, zSetupGameFromDescription } from './types';
+import type { ToolHandler, ExecutionResult } from './types';
+import type { EntityType, InputBinding } from './types';
+import { parseArgs, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { getCapabilityUnavailability } from '@/lib/config/providers';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
-import { buildStoreComponent, buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
-import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
+import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
 import type { GameplayAnalysis } from './helpers';
 import {
   buildCompoundResult,
@@ -32,30 +31,6 @@ import {
   mulberry32,
   wallFromStartEnd,
 } from './helpers';
-
-/**
- * Attach a game component built from a MODEL-AUTHORED properties bag, and keep
- * what the build did to the request (PF-1148).
- *
- * The store is handed the report so the inspector marks each adjusted field;
- * the caller's `corrections` list gets a copy of each record tagged with the
- * entity, because one compound call touches many and "speed was capped" is not
- * actionable without "on which one". Returns `false` for an unknown component
- * type, which the callers here have always skipped silently.
- */
-function attachModelComponent(
-  ctx: ToolCallContext,
-  entityId: string,
-  componentType: string,
-  props: Record<string, unknown>,
-  corrections: GameComponentFieldCorrection[],
-): boolean {
-  const built = buildStoreComponentWithReport(componentType, props);
-  if (!built) return false;
-  ctx.store.addGameComponent(entityId, built.component, built);
-  for (const correction of built.corrections) corrections.push({ ...correction, entityId });
-  return true;
-}
 
 // ===== setup_game_from_description planner =====
 
@@ -71,14 +46,14 @@ function attachModelComponent(
  *
  * Counts are extracted via `<number> <noun>` matches (e.g. "5 coins", "3
  * enemies") and clamped to a small range so a pathological description can't
- * spawn thousands of entities. `genre` is read only for the 2D/3D hint; it no
- * longer selects an input preset, because the scene's actions are the creator's
- * and a regex over their description is not a decision this code gets to make.
+ * spawn thousands of entities. Genre is a soft hint that only nudges the input
+ * preset; the scaffold shape is identical regardless.
  */
 type ProjectType = '2d' | '3d';
 
 interface GamePlan {
   projectType: ProjectType;
+  inputPreset: 'fps' | 'platformer' | 'topdown' | 'racing';
   enemyCount: number;
   coinCount: number;
   enemyBehavior: 'follower' | 'moving_platform';
@@ -118,19 +93,13 @@ function planGameFromDescription(
 ): GamePlan {
   const text = `${description} ${genre ?? ''}`.toLowerCase();
 
-  // NO GENRE IS INFERRED FROM THE PROMPT, AND NO PRESET IS APPLIED.
-  //
-  // This used to read the description for "fps", "racing", "roguelike" and so
-  // on, fall back to `platformer` when it recognised nothing, and hand the
-  // winner to `setInputPreset` — so a creator describing a game the regexes did
-  // not know was told they were making a platformer, and their scene's action
-  // map was replaced with that genre's five bindings.
-  //
-  // `InputMap::default()` binds every action the scaffolded scripts name, in
-  // every direction, so there is nothing left for a guess to add. A game that
-  // needs an action of its own — `grapple`, `possess`, `p2_attack` — gets one
-  // from `set_input_binding`, which is a decision the creator makes rather than
-  // one a regex makes for them.
+  // Input preset from genre/keywords. Defaults to platformer (the most broadly
+  // playable WASD+jump layout for the scaffolded primitives).
+  let inputPreset: GamePlan['inputPreset'] = 'platformer';
+  if (/\b(fps|shooter|first[- ]person)\b/.test(text)) inputPreset = 'fps';
+  else if (/\b(top[- ]?down|twin[- ]?stick|rogue)/.test(text)) inputPreset = 'topdown';
+  else if (/\b(racing|racer|kart|driving)\b/.test(text)) inputPreset = 'racing';
+  else if (/\b(platformer|jump|side[- ]?scroll)/.test(text)) inputPreset = 'platformer';
 
   const projectType: ProjectType = /\b2d\b|side[- ]?scroll|pixel/.test(text) ? '2d' : '3d';
 
@@ -142,6 +111,7 @@ function planGameFromDescription(
 
   return {
     projectType,
+    inputPreset,
     enemyCount: clampCount(extractCount(text, ['enemy', 'monster', 'foe'], 2), 0, 20),
     coinCount: clampCount(extractCount(text, ['coin', 'gem', 'collectible', 'pickup', 'star'], 5), 0, 50),
     enemyBehavior,
@@ -157,14 +127,14 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const { sceneGraph } = ctx.store;
 
     const nodes = filterIds
-      ? filterIds.map((id) => ownEntry(sceneGraph.nodes, id)).filter((node): node is SceneNode => node !== undefined)
+      ? filterIds.map((id) => sceneGraph.nodes[id]).filter(Boolean)
       : Object.values(sceneGraph.nodes);
 
     if (detail === 'summary') {
-      const typeCounts: Record<string, number> = Object.create(null) as Record<string, number>;
+      const typeCounts: Record<string, number> = {};
       for (const node of nodes) {
         const entityType = inferEntityType(node);
-        typeCounts[entityType] = (ownEntry(typeCounts, entityType) ?? 0) + 1;
+        typeCounts[entityType] = (typeCounts[entityType] || 0) + 1;
       }
       return {
         success: true,
@@ -189,9 +159,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         parentId: node.parentId,
         childCount: node.children.length,
         hasPhysics: node.components.some((c) => c.includes('Physics')),
-        hasScript: !!ownEntry(ctx.store.allScripts, node.entityId),
+        hasScript: !!ctx.store.allScripts[node.entityId],
         hasAudio: node.components.some((c) => c.includes('Audio')),
-        gameComponents: ((ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, node.entityId) : undefined) ?? []).map((c) => c.type),
+        gameComponents: (ctx.store.allGameComponents?.[node.entityId] ?? []).map((c) => c.type),
       }));
       return {
         success: true,
@@ -219,11 +189,11 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       parentId: node.parentId,
       children: node.children,
       hasPhysics: node.components.some((c) => c.includes('Physics')),
-      hasScript: !!ownEntry(ctx.store.allScripts, node.entityId),
+      hasScript: !!ctx.store.allScripts[node.entityId],
       hasAudio: node.components.some((c) => c.includes('Audio')),
       hasParticles: node.components.some((c) => c.includes('Particle')),
-      gameComponents: (ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, node.entityId) : undefined) ?? [],
-      terrain: (ctx.store.terrainData ? ownEntry(ctx.store.terrainData, node.entityId) : undefined) ?? null,
+      gameComponents: ctx.store.allGameComponents?.[node.entityId] ?? [],
+      terrain: ctx.store.terrainData?.[node.entityId] ?? null,
     }));
 
     return {
@@ -258,9 +228,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     };
 
     for (const node of allNodes) {
-      const components = (ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, node.entityId) : undefined) ?? [];
+      const components = ctx.store.allGameComponents?.[node.entityId] ?? [];
       const hasPhysics = node.components.some((c) => c.includes('Physics'));
-      const hasScript = !!ownEntry(ctx.store.allScripts, node.entityId);
+      const hasScript = !!ctx.store.allScripts[node.entityId];
 
       const role = identifyRole(node, components, hasPhysics, hasScript);
       analysis.entityRoles.push({ name: node.name, id: node.entityId, role });
@@ -289,7 +259,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     const collectibles = analysis.entityRoles.filter((e) => e.role === 'collectible');
     const winConditions = allNodes.filter((n) =>
-      ((ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, n.entityId) : undefined) ?? []).some((c) => c.type === 'winCondition')
+      (ctx.store.allGameComponents?.[n.entityId] ?? []).some((c) => c.type === 'winCondition')
     );
     if (collectibles.length > 0 && winConditions.length === 0) {
       analysis.suggestions.push(
@@ -334,7 +304,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     for (let i = 0; i < entityIds.length; i++) {
       const entityId = entityIds[i];
-      const node = ownEntry(ctx.store.sceneGraph.nodes, entityId);
+      const node = ctx.store.sceneGraph.nodes[entityId];
       if (!node) {
         operations.push({ action: `arrange "${entityId}"`, success: false, error: 'Entity not found' });
         continue;
@@ -445,19 +415,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const clearExisting = (args.clearExisting as boolean) ?? false;
     const envSettings = args.environment as Record<string, unknown> | undefined;
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
-    const nameToId: Record<string, string> = Object.create(null) as Record<string, string>;
-    const corrections: GameComponentFieldCorrection[] = [];
+    const nameToId: Record<string, string> = {};
 
-    // `newScene()` returns false when the engine refuses to clear the scene.
-    // Discarding it would spawn every entity below on top of the scene the user
-    // asked to replace, then report success — the same false-success class
-    // `newScene` was made boolean to close (#10056). Stop before spawning.
-    if (clearExisting && ctx.store.newScene() === false) {
-      return {
-        success: false,
-        error: 'The engine did not accept a new scene, so the existing scene was not cleared. Nothing was created.',
-      };
-    }
+    if (clearExisting) ctx.store.newScene();
 
     if (envSettings) {
       if (envSettings.ambientColor || envSettings.ambientBrightness) {
@@ -520,7 +480,8 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           // field — `dialogueTrigger` is the one component whose store field names
           // diverge from the Rust struct's, so it is also the only one where the
           // choice is visible at all.
-          attachModelComponent(ctx, entityId, componentType, componentProps, corrections);
+          const component = buildStoreComponent(componentType, componentProps);
+          if (component) ctx.store.addGameComponent(entityId, component);
         }
 
         results.push({ action: `spawn "${entName}"`, success: true, entityId });
@@ -534,14 +495,12 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     }
 
     for (const ent of entities) {
-      const childId = ownEntry(nameToId, ent.name as string);
-      const parentId = typeof ent.parentName === 'string' ? ownEntry(nameToId, ent.parentName) : undefined;
-      if (childId && parentId) {
-        ctx.store.reparentEntity(childId, parentId);
+      if (ent.parentName && nameToId[ent.name as string] && nameToId[ent.parentName as string]) {
+        ctx.store.reparentEntity(nameToId[ent.name as string], nameToId[ent.parentName as string]);
       }
     }
 
-    return { success: true, result: buildCompoundResult(results, nameToId, corrections) };
+    return { success: true, result: buildCompoundResult(results, nameToId) };
   },
 
   create_level_layout: async (args, ctx): Promise<ExecutionResult> => {
@@ -554,8 +513,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const inputPreset = args.inputPreset as string | undefined;
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
-    const nameToId: Record<string, string> = Object.create(null) as Record<string, string>;
-    const corrections: GameComponentFieldCorrection[] = [];
+    const nameToId: Record<string, string> = {};
 
     const rootId = ctx.store.spawnEntity('cube', levelName);
     if (!rootId) return { success: false, error: 'Failed to create level root' };
@@ -669,13 +627,11 @@ export const compoundHandlers: Record<string, ToolHandler> = {
             ctx.store.updatePhysics(obstId, buildPhysicsFromPartial(obstacle.physics as Record<string, unknown>));
           }
           if (obstacle.gameComponent) {
-            attachModelComponent(
-              ctx,
-              obstId,
+            const comp = buildStoreComponent(
               obstacle.gameComponent as string,
-              (obstacle.gameComponentProps as Record<string, unknown>) ?? {},
-              corrections,
+              (obstacle.gameComponentProps as Record<string, unknown>) ?? {}
             );
+            if (comp) ctx.store.addGameComponent(obstId, comp);
           }
           ctx.store.reparentEntity(obstId, rootId);
           results.push({ action: `create obstacle "${obstName}"`, success: true, entityId: obstId });
@@ -729,13 +685,11 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           ctx.store.updateMaterial(goalId, buildMaterialFromPartial({ baseColor: [1, 1, 0, 1], unlit: true }));
 
           if (goal.gameComponent) {
-            attachModelComponent(
-              ctx,
-              goalId,
+            const comp = buildStoreComponent(
               goal.gameComponent as string,
-              (goal.gameComponentProps as Record<string, unknown>) ?? {},
-              corrections,
+              (goal.gameComponentProps as Record<string, unknown>) ?? {}
             );
+            if (comp) ctx.store.addGameComponent(goalId, comp);
           } else if (goalType === 'reach') {
             const triggerComp = buildStoreComponent('trigger_zone', {
               eventName: 'goal_reached',
@@ -760,7 +714,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
     }
 
-    return { success: true, result: buildCompoundResult(results, nameToId, corrections) };
+    return { success: true, result: buildCompoundResult(results, nameToId) };
   },
 
   setup_character: async (args, ctx): Promise<ExecutionResult> => {
@@ -770,15 +724,12 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const material = args.material as Record<string, unknown> | undefined;
     const controller = (args.controller as Record<string, unknown>) ?? {};
     const health = args.health as Record<string, unknown> | undefined | null;
-    // No fallback. A caller that names a preset gets it; one that does not
-    // keeps the scene's own bindings, rather than being told it is a platformer.
-    const inputPreset = args.inputPreset as string | undefined;
+    const inputPreset = (args.inputPreset as string) ?? 'platformer';
     const cameraFollow = (args.cameraFollow as boolean) ?? true;
     const _cameraOffset = (args.cameraOffset as [number, number, number]) ?? [0, 5, -10];
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
-    const nameToId: Record<string, string> = Object.create(null) as Record<string, string>;
-    const corrections: GameComponentFieldCorrection[] = [];
+    const nameToId: Record<string, string> = {};
 
     try {
       const charId = ctx.store.spawnEntity(entityType as EntityType, charName);
@@ -798,19 +749,15 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       });
       ctx.store.updatePhysics(charId, physData);
 
-      attachModelComponent(ctx, charId, 'character_controller', controller, corrections);
+      const controllerComp = buildStoreComponent('character_controller', controller);
+      if (controllerComp) ctx.store.addGameComponent(charId, controllerComp);
 
       if (health !== null) {
-        attachModelComponent(ctx, charId, 'health', health ?? {}, corrections);
+        const healthComp = buildStoreComponent('health', health ?? {});
+        if (healthComp) ctx.store.addGameComponent(charId, healthComp);
       }
 
-      // ONLY IF THE CALLER NAMED ONE. This ran unconditionally on a value that
-      // defaulted to 'platformer', so setting up a character quietly decided
-      // what kind of game it was in. With the default gone the call has to be
-      // guarded, or it reaches the store as `setInputPreset(undefined)`.
-      if (inputPreset) {
-        ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
-      }
+      ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
 
       if (cameraFollow) {
         // Use forge.camera.setTarget with entity ID (not coordinates)
@@ -828,7 +775,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       });
     }
 
-    return { success: true, result: buildCompoundResult(results, nameToId, corrections) };
+    return { success: true, result: buildCompoundResult(results, nameToId) };
   },
 
   configure_game_mechanics: async (args, ctx): Promise<ExecutionResult> => {
@@ -838,8 +785,6 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const qualityPreset = args.qualityPreset as string | undefined;
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
-    const corrections: GameComponentFieldCorrection[] = [];
-    const entityNames = new Map<string, string>();
 
     if (inputPreset) {
       ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
@@ -885,15 +830,12 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         if (config.gameComponents) {
           const components = config.gameComponents as Array<Record<string, unknown>>;
           for (const comp of components) {
-            attachModelComponent(
-              ctx,
-              entityId,
+            const builtComp = buildStoreComponent(
               comp.type as string,
-              (comp.props as Record<string, unknown>) ?? {},
-              corrections,
+              (comp.props as Record<string, unknown>) ?? {}
             );
+            if (builtComp) ctx.store.addGameComponent(entityId, builtComp);
           }
-          entityNames.set(entityId, entityName);
         }
 
         if (config.script) {
@@ -924,12 +866,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       result: {
         configured: successCount,
         operations: results,
-        summary: withCorrectionSummary(
-          `Configured ${successCount} settings/entities.`,
-          corrections,
-          (entityId) => entityNames.get(entityId),
-        ),
-        corrections,
+        summary: `Configured ${successCount} settings/entities.`,
       },
     };
   },
@@ -945,7 +882,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     let targets: string[] = [];
     if (targetEntityIds) {
-      targets = targetEntityIds.filter((id) => ownEntry(ctx.store.sceneGraph.nodes, id) !== undefined);
+      targets = targetEntityIds;
     } else {
       const styleIndex = buildEntityIndex(ctx.store.sceneGraph);
       const meshSet = styleIndex.byComponent.get('Mesh3d');
@@ -973,8 +910,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
         ctx.store.updateMaterial(entityId, { ...mat, baseColor: color });
         results.push({
-          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank entity display name is unset; falls back to showing the raw entity id
-          action: `apply palette to ${ownEntry(ctx.store.sceneGraph.nodes, entityId)?.name || entityId}`,
+          action: `apply palette to ${ctx.store.sceneGraph.nodes[entityId]?.name || entityId}`,
           success: true,
           entityId,
         });
@@ -1002,8 +938,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
           ctx.store.updateMaterial(entityId, updated);
           results.push({
-            // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank entity display name is unset; falls back to showing the raw entity id
-            action: `apply material override to ${ownEntry(ctx.store.sceneGraph.nodes, entityId)?.name || entityId}`,
+            action: `apply material override to ${ctx.store.sceneGraph.nodes[entityId]?.name || entityId}`,
             success: true,
             entityId,
           });
@@ -1065,7 +1000,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     const plan = planGameFromDescription(description, genre);
     const operations: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
-    const nameToId: Record<string, string> = Object.create(null) as Record<string, string>;
+    const nameToId: Record<string, string> = {};
 
     // Deterministic spawn helper: spawn by type/name, capture the returned id
     // (the #8748 fix — never read ctx.store.primaryId after a spawn), record the
@@ -1207,14 +1142,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       if (trigger) ctx.store.addGameComponent(id, trigger);
     });
 
-    // (4) Camera-follow script targeting the player by id.
-    //
-    // No input preset. This used to set one chosen by regexes over the player's
-    // own description — defaulting to `platformer` for anything they did not
-    // recognise — which replaced the scene's action map with one genre's
-    // bindings. The scene's defaults already bind every action the scaffolded
-    // scripts name, so scaffolding a game no longer decides what kind of game
-    // it is.
+    // (4) Input preset + camera-follow script targeting the player by id.
+    ctx.store.setInputPreset(plan.inputPreset);
+    operations.push({ action: `set input preset "${plan.inputPreset}"`, success: true });
     if (playerId) {
       ctx.store.setScript(playerId, `forge.camera.setTarget("${playerId}");`, true);
       operations.push({ action: 'attach camera-follow script', success: true });

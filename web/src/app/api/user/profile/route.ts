@@ -4,8 +4,6 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { updateDisplayName } from '@/lib/auth/user-service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
-import { spendableTokensOf } from '@/lib/ai/tierAccess';
 
 const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(2).max(100),
@@ -15,7 +13,7 @@ const profileUpdateSchema = z.object({
  * GET /api/user/profile
  * Get the authenticated user's profile data.
  */
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -34,10 +32,6 @@ async function GET_impl(req: NextRequest) {
     // until an entitlement summary has been synced; the client then falls back
     // to tier-derived capability defaults.
     activeFeatures: user.activeFeatures ?? null,
-    // Tokens the account can spend now. The client derives its access tier
-    // from this on first paint (#7715): a starter account holding trial tokens
-    // opens the hobbyist AI surfaces instead of the upgrade overlay.
-    spendableTokens: spendableTokensOf(user),
   });
 }
 
@@ -45,7 +39,7 @@ async function GET_impl(req: NextRequest) {
  * PUT /api/user/profile
  * Update the authenticated user's display name.
  */
-async function PUT_impl(request: NextRequest) {
+export async function PUT(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     rateLimit: true,
@@ -69,8 +63,3 @@ async function PUT_impl(request: NextRequest) {
     return internalError('Failed to update profile');
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);
-export const PUT = withEgressGuard(PUT_impl);

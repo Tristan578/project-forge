@@ -11,8 +11,6 @@ import {
   PG_INT4_MAX,
   LEADERBOARD_METADATA_MAX_BYTES,
 } from '@/lib/config/databaseLimits';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,7 +115,7 @@ function validateMetadata(raw: unknown): MetadataCheck {
 // Returns top N scores for the named leaderboard.
 // ---------------------------------------------------------------------------
 
-async function GET_impl(
+export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
@@ -179,7 +177,7 @@ async function GET_impl(
     return response;
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]/leaderboard GET' });
-    return redactedJson({ error: 'Failed to fetch leaderboard' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch leaderboard' }, { status: 500 });
   }
 }
 
@@ -189,7 +187,7 @@ async function GET_impl(
 // Rate limited: 10 submissions per minute per IP.
 // ---------------------------------------------------------------------------
 
-async function POST_impl(
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
@@ -204,7 +202,7 @@ async function POST_impl(
     try {
       body = await req.json();
     } catch {
-      return redactedJson({ error: 'Invalid JSON body' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
     // Validate fields
@@ -347,7 +345,7 @@ async function POST_impl(
     }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]/leaderboard POST' });
-    return redactedJson({ error: 'Failed to submit score' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to submit score' }, { status: 500 });
   }
 }
 
@@ -377,8 +375,3 @@ async function pruneLeaderboard(
     await queryWithResilience(() => getDb().delete(leaderboardEntries).where(eq(leaderboardEntries.id, id)));
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);
-export const POST = withEgressGuard(POST_impl);

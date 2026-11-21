@@ -44,43 +44,28 @@ pub(super) fn apply_input_binding_updates(
 ) {
     let mut changed = false;
 
-    // A PRESET ADDS BINDINGS. IT DOES NOT REPLACE A CREATOR'S VOCABULARY.
-    //
-    // This was `*input_map = request.preset.default_bindings()` — choosing a
-    // starting point destroyed every action the project had, including the
-    // working defaults a new scene now begins with and any action the creator
-    // had authored themselves. That is what made "pick a genre" the whole
-    // input model rather than a convenience: a template declaring
-    // `inputPreset: 'platformer'` ended up with exactly five actions and no
-    // `move_left` at all, which is why nothing responded to the left key.
-    //
-    // Merged, with the preset's own definitions winning where the names
-    // collide, so applying one is additive and never silently discards work.
-    // Clearing bindings is `remove_input_binding` — an explicit act, on a named
-    // action, rather than a side effect of picking a starting point.
+    // Process preset requests first (replaces entire map)
     for request in pending.input_preset_requests.drain(..) {
-        // Scoped by player slot: applying a preset to player 2 merges into player
-        // 2 alone, and marks only that slot's provenance. `apply_preset` keeps
-        // the additive semantics — the preset's own definitions win on name
-        // collisions and nothing already in the slot is discarded.
-        input_map.apply_preset(request.player, request.preset);
+        *input_map = request.preset.default_bindings();
         changed = true;
-        tracing::info!("Merged input preset {:?} into player {}", request.preset, request.player);
+        tracing::info!("Applied input preset: {:?}", request.preset);
     }
 
-    // Process individual binding updates (per player slot)
+    // Process individual binding updates
     for update in pending.input_binding_updates.drain(..) {
         let name = update.action_def.name.clone();
-        input_map.set_binding(update.player, update.action_def);
+        input_map.actions.insert(name.clone(), update.action_def);
+        input_map.preset = None; // Mark as custom
         changed = true;
-        tracing::info!("Updated input binding {} for player {}", name, update.player);
+        tracing::info!("Updated input binding: {}", name);
     }
 
-    // Process binding removals (per player slot)
+    // Process binding removals
     for removal in pending.input_binding_removals.drain(..) {
-        if input_map.remove_binding(removal.player, &removal.action_name) {
+        if input_map.actions.remove(&removal.action_name).is_some() {
+            input_map.preset = None;
             changed = true;
-            tracing::info!("Removed input binding {} for player {}", removal.action_name, removal.player);
+            tracing::info!("Removed input binding: {}", removal.action_name);
         }
     }
 

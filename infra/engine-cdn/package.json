@@ -3,15 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker serving the public engine bucket. Tests cover the handler and the canonical Wrangler config in local workerd/R2.",
+  "description": "Cloudflare Worker serving the SpawnForge WASM engine from the spawnforge-engine R2 bucket at engine.spawnforge.ai. Hermetic tests run via `node --test infra/engine-cdn/worker.test.mjs`.",
   "scripts": {
-    "test": "node --test worker.test.mjs worker.workerd.test.mjs"
-  },
-  "devDependencies": {
-    "wrangler": "4.116.0"
-  },
-  "overrides": {
-    "sharp": "0.35.4",
-    "undici": "7.29.0"
+    "test": "node --test worker.test.mjs"
   }
 }

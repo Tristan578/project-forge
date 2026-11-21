@@ -263,11 +263,7 @@ test.describe('Demo Regression Walkthrough @ui @dev', () => {
 
   test('sidebar contains tool groups', async ({ page }) => {
     // The sidebar should have tool buttons (transform tools, entity add, etc.)
-    // The union used to be `[data-testid="sidebar"], aside, [class*="sidebar"]`.
-    // The first alternative never matched anything -- the real attribute is
-    // `editor-sidebar` -- so this was resting on `aside`, with a class-substring
-    // fallback that `lucide-react` >= 1.43 now satisfies with `PanelLeft` icons.
-    const sidebar = page.getByTestId('editor-sidebar');
+    const sidebar = page.locator('[data-testid="sidebar"], aside, [class*="sidebar"]').first();
     await expect(sidebar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const buttons = sidebar.locator('button');
     const count = await buttons.count();

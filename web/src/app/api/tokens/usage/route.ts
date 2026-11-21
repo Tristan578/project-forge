@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getUsageHistory } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -20,10 +18,6 @@ async function GET_impl(req: NextRequest) {
     return NextResponse.json({ usage });
   } catch (error) {
     captureException(error, { route: '/api/tokens/usage', method: 'GET' });
-    return redactedJson({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

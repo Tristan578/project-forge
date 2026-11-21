@@ -30,13 +30,6 @@ vi.mock('@/lib/analytics/posthog', async (importOriginal) => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }));
 
-// The toast's own behaviour (draft + reveal, never a send) is pinned in
-// customizeWithAi.test.ts; here only WHEN the gallery offers it (#10172).
-const mockOfferCustomizeWithAi = vi.fn();
-vi.mock('@/lib/chat/customizeWithAi', () => ({
-  offerCustomizeWithAi: (...args: unknown[]) => mockOfferCustomizeWithAi(...args),
-}));
-
 vi.mock('@/data/templates', () => ({
   TEMPLATE_REGISTRY: [
     {
@@ -57,11 +50,6 @@ describe('TemplateGallery', () => {
     .fn()
     .mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
   const mockNewScene = vi.fn();
-  // `newScene()` returns false for two unrelated facts — the engine REFUSED, or
-  // there is no dispatcher yet and the call was DEFERRED — and this is what
-  // separates them. Defaults to an attached engine, the state every other test
-  // in this file describes.
-  const mockIsEngineAttached = vi.fn(() => true);
 
   function setupStore() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,7 +57,6 @@ describe('TemplateGallery', () => {
       const state = {
         loadTemplate: mockLoadTemplate,
         newScene: mockNewScene,
-        isEngineAttached: mockIsEngineAttached,
       };
       return typeof selector === 'function' ? selector(state) : state;
     });
@@ -78,7 +65,6 @@ describe('TemplateGallery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLoadTemplate.mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
-    mockIsEngineAttached.mockReturnValue(true);
     setupStore();
   });
 
@@ -121,36 +107,6 @@ describe('TemplateGallery', () => {
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
     fireEvent.click(screen.getByText('Blank Project').closest('button')!);
     expect(mockNewScene).toHaveBeenCalled();
-    expect(mockOnClose).toHaveBeenCalled();
-  });
-
-  // #10056: the blank-project branch fired GAME_CREATED and closed the dialog
-  // no matter what `newScene()` returned, reporting a blank project the engine
-  // never accepted — the same false success the template branch already guards.
-  it('Blank Project when the engine rejects keeps the gallery open and shows the reason', () => {
-    mockNewScene.mockReturnValueOnce(false);
-    render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-    fireEvent.click(screen.getByText('Blank Project').closest('button')!);
-    expect(mockNewScene).toHaveBeenCalled();
-    expect(mockOnClose).not.toHaveBeenCalled();
-    expect(mockTrackEvent).not.toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, expect.anything());
-    expect(screen.getByRole('alert')).toHaveTextContent('The engine did not accept a new scene. Please try again.');
-  });
-
-  // The other half of the same boolean. `newScene()` is ALSO false when there is
-  // no dispatcher yet — the ordinary cold open, since the engine mounts after
-  // the editor page — and the first fix for the line above read that as a
-  // refusal, so picking Blank Project on a still-loading editor put an error
-  // banner up and trapped the user in the dialog. Nothing was cleared because
-  // nothing needed to be: the editor is already blank.
-  it('Blank Project with no dispatcher starts the project (deferral is not an error)', () => {
-    mockNewScene.mockReturnValueOnce(false);
-    mockIsEngineAttached.mockReturnValue(false);
-    render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-    fireEvent.click(screen.getByText('Blank Project').closest('button')!);
-    expect(mockNewScene).toHaveBeenCalled();
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(mockTrackEvent).toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
     expect(mockOnClose).toHaveBeenCalled();
   });
 
@@ -200,15 +156,6 @@ describe('TemplateGallery', () => {
       expect(mockTrackEvent).not.toHaveBeenCalled();
     });
 
-    it('offers no "Customize with AI" for a load that failed', async () => {
-      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-
-      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
-      await screen.findByRole('alert');
-
-      expect(mockOfferCustomizeWithAi).not.toHaveBeenCalled();
-    });
-
     it('clears the error when the retry succeeds', async () => {
       render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
       fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
@@ -237,16 +184,6 @@ describe('TemplateGallery', () => {
         source: 'gallery',
       });
       expect(screen.queryByRole('alert')).toBeNull();
-    });
-
-    it('offers "Customize with AI" once, naming the template that loaded', async () => {
-      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-
-      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
-
-      await waitFor(() => expect(mockOnClose).toHaveBeenCalled());
-      expect(mockOfferCustomizeWithAi).toHaveBeenCalledTimes(1);
-      expect(mockOfferCustomizeWithAi).toHaveBeenCalledWith('Platformer');
     });
 
     it('blocks a second selection while a load is in flight', async () => {

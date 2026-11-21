@@ -26,24 +26,22 @@ A ticket can be moved to `done` only when:
 2. **Subtasks completed** — every implementation step toggled in the taskboard
 3. **Acceptance criteria verified** — each Given/When/Then confirmed
 4. **Context updated** — `.claude/rules/`, `MEMORY.md`, `CLAUDE.md` reflect any new patterns
-5. **Cross-IDE configs current** — if skills or tools changed, every config in the table below is updated, and the generated Codex surface is regenerated (`node tools/agentic-sync/port.mjs --write`)
+5. **Cross-IDE configs current** — if skills or tools changed, all 4 IDE configs updated
 6. **No orphaned artifacts** — no stale feature flags, no dead imports, no TODO comments without tickets
 
-## Cross-IDE Consistency
+## Cross-IDE Consistency (4 configs that must stay in sync)
 
-SpawnForge supports several AI coding tools. When skills or tools change, update ALL of the hand-written configs below, then regenerate the generated ones:
+SpawnForge supports 5 IDE tools. When skills or tools change, update ALL of these:
 
 | Config File | IDE | Key contents |
 |-------------|-----|-------------|
 | `.claude/CLAUDE.md` | Claude Code | Skills list, agents, hooks, rules |
 | `.cursorrules` | Cursor | Referenced skills, tool paths, patterns |
 | `GEMINI.md` | Gemini CLI | Same as .cursorrules format |
-| `AGENTS.md`, `.codex/AGENTS.md` | OpenAI Codex CLI / Devin | Agent profiles, capabilities, the Codex hook and planning workflow |
+| `AGENTS.md` | OpenAI Codex CLI / Devin | Agent profiles, capabilities |
 | `.github/copilot-instructions.md` | GitHub Copilot | Code style, patterns |
 
 Run `bash .claude/tools/dx-audit.sh` after any skill or tool addition to check consistency.
-
-**Generated, never hand-edited** (#9745): the project skills under `.agents/skills/` (read by Codex, Gemini CLI and Copilot), `.codex/agents/*.toml`, `.codex/hooks.json` and `.codex/hook-conditions.json` are derived from `.claude/skills/`, `.claude/agents/` and the `hooks` block of `.claude/settings.json`. After changing any of those sources run `node tools/agentic-sync/port.mjs --write` and commit the result; `bash scripts/check-codex-port.sh` is the gate. What each tool can and cannot enforce is recorded in `docs/guides/codex-cli-support-matrix.md`.
 
 ## Feature Documentation Requirements
 
@@ -103,7 +101,7 @@ All hooks in `.claude/hooks/` must:
 | Stale version refs in docs | Agent reads wrong API, ships bug | Update immediately when upgrading |
 | Broken script paths in skills | Agent hits `not found`, wastes time | Run `dx-audit.sh` after any rename |
 | Missing `CLAUDE.md` entry for new skill | New agent sessions don't know it exists | Add to Skills section after every skill creation |
-| IDE config drift | Agents on different IDEs use different patterns | After every skill change, update the hand-written configs in the Cross-IDE table and run `node tools/agentic-sync/port.mjs --write` for the generated ones |
+| IDE config drift | Agents on different IDEs use different patterns | Sync all 4 configs after every skill change |
 | Undocumented gotchas | Same mistake repeated by every agent | Add to `.claude/rules/lessons-learned.md` immediately |
 | Ticket without user story or AC | Agent doesn't know what "done" looks like | Enforce template at ticket creation |
 
@@ -113,6 +111,6 @@ All hooks in `.claude/hooks/` must:
 |---------|------|---------|
 | Session start | audit | `bash .claude/skills/developer-experience/scripts/run-dx-audit.sh` |
 | Feature completed | dod | `bash .claude/tools/validate-all.sh` |
-| New skill added | refresh | Update the hand-written IDE configs, `git add` the new skill's files (only tracked files are mirrored — an unstaged one is reported as `untracked:` and `--write` exits 1), then `node tools/agentic-sync/port.mjs --write` and commit the mirror it generates under `.agents/skills/` |
+| New skill added | refresh | Update all 4 IDE configs manually |
 | New contributor | onboard | `bash .claude/tools/dx-audit.sh onboard` |
 | PR before merge | full | `bash .claude/tools/validate-all.sh` |

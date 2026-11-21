@@ -6,11 +6,9 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { generateText, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
-import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { z } from 'zod';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 interface PacingSegment {
   sceneIndex: number;
@@ -52,12 +50,11 @@ Your task is to:
 2. Add 2–4 additional AI-generated suggestions that are specific, actionable, and grounded in established game design theory.
 3. Each suggestion must include: title (max 10 words), description (2-3 sentences), targetSceneIndex (null or 0-based integer), priority ("low" | "medium" | "high").`;
 
-const POST_impl = createGenerationHandler<
+export const POST = createGenerationHandler<
   { report: PacingReport },
   PacingReport
 >({
   route: '/api/generate/pacing',
-  panel: 'pacing-analyzer',
   provider: DB_PROVIDER.chat,
   operation: 'pacing_analysis',
   rateLimitKey: 'gen-pacing',
@@ -113,9 +110,7 @@ ${existingSuggestions || 'None yet.'}
 
 Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
 
-    // A platform key can be a federated Bearer token (#8858); passing it as
-    // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
-    const anthropicClient = createAnthropic(anthropicClientAuthForKey(apiKey));
+    const anthropicClient = createAnthropic({ apiKey });
     const startedAt = Date.now();
     const aiResult = await generateText({
       model: anthropicClient(AI_MODEL_FAST),
@@ -155,7 +150,3 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
     };
   },
 });
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

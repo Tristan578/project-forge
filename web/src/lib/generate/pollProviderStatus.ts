@@ -21,32 +21,46 @@
  */
 
 import { MeshyClient } from '@/lib/generate/meshyClient';
+import { SunoClient } from '@/lib/generate/sunoClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
-import { withRetryGuidance } from '@/lib/generate/retryGuidance';
-import type { AsyncGenerationType } from './asyncTypeCapability';
 
 /**
- * Terminal message for a music-job poll (PF-1301 / #9522). Music routes to
- * ElevenLabs `/v1/music`, which returns audio inline, so there is no async task
- * to poll: `POST /api/generate/music` resolves synchronously. If a music job is
- * ever polled anyway, both this poller and `/api/generate/music/status` return
- * this exact terminal message — the parity suite pins them together.
+ * Async generation types that have a status route and a `generation_jobs` row.
+ *
+ * `pixel-art` is intentionally EXCLUDED: it has no member in the
+ * `generation_type` DB enum (its route asserts `type: 'pixel-art'` → 400), so
+ * there is no `generation_jobs` row for a durable callback to finalize. Adding
+ * it here would force an enum migration for zero benefit — pixel-art stays on
+ * the client-poll path. Any new value added to this union MUST also (1) have a
+ * `generation_type` enum member, (2) map in `ASYNC_TYPE_TO_DB_CAPABILITY`
+ * below, and (3) be exercised by the parity test.
  */
-export const MUSIC_SYNC_TERMINAL_MESSAGE = withRetryGuidance(
-  'Music generation completes inline and has no job to poll',
-);
+export type AsyncGenerationType =
+  | 'model'
+  | 'texture'
+  | 'skybox'
+  | 'music'
+  | 'sprite'
+  | 'sprite_sheet'
+  | 'tileset';
+
+/** Provider-capability key (in DB_PROVIDER) used to resolve the poll key. */
+export type DbCapabilityForType = 'model3d' | 'texture' | 'music' | 'sprite';
 
 /**
- * The async type union and its type→capability map live in the leaf module
- * `asyncTypeCapability.ts` (so `POST /api/jobs` can derive the ownership
- * provider without importing the provider clients above, #10262) and are
- * re-exported here for every existing import site.
+ * Maps each async type to the `DB_PROVIDER` capability whose key the callback
+ * must resolve to poll the provider. Skybox reuses the texture provider
+ * (Meshy); all sprite variants use the sprite provider (Replicate).
  */
-export {
-  ASYNC_TYPE_TO_DB_CAPABILITY,
-  type AsyncGenerationType,
-  type DbCapabilityForType,
-} from './asyncTypeCapability';
+export const ASYNC_TYPE_TO_DB_CAPABILITY: Record<AsyncGenerationType, DbCapabilityForType> = {
+  model: 'model3d',
+  texture: 'texture',
+  skybox: 'texture',
+  music: 'music',
+  sprite: 'sprite',
+  sprite_sheet: 'sprite',
+  tileset: 'sprite',
+};
 
 /** Normalized, provider-agnostic status the callback acts on. */
 export interface NormalizedProviderStatus {
@@ -83,7 +97,7 @@ export async function pollProviderStatus(
     case 'skybox':
       return pollMeshySkybox(providerJobId, apiKey);
     case 'music':
-      return pollElevenLabsMusic();
+      return pollSuno(providerJobId, apiKey);
     case 'sprite':
     case 'sprite_sheet':
     case 'tileset':
@@ -99,10 +113,10 @@ async function pollMeshyModel(jobId: string, apiKey: string): Promise<Normalized
     if (status.modelUrls?.glb) {
       return { status: 'completed', progress: status.progress, resultUrl: status.modelUrls.glb, succeededButEmpty: false };
     }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Model generation produced no file') };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Model generation produced no file' };
   }
   if (status.status === 'FAILED' || status.status === 'EXPIRED') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Model generation failed') };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Model generation failed' };
   }
   if (status.status === 'IN_PROGRESS') {
     return { status: 'processing', progress: status.progress, succeededButEmpty: false };
@@ -119,10 +133,10 @@ async function pollMeshyTexture(jobId: string, apiKey: string): Promise<Normaliz
     if (hasMaps) {
       return { status: 'completed', progress: status.progress, resultMeta: status.maps, succeededButEmpty: false };
     }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Texture generation produced no maps') };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Texture generation produced no maps' };
   }
   if (status.status === 'FAILED' || status.status === 'EXPIRED') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Texture generation failed') };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Texture generation failed' };
   }
   if (status.status === 'IN_PROGRESS') {
     return { status: 'processing', progress: status.progress, succeededButEmpty: false };
@@ -139,10 +153,10 @@ async function pollMeshySkybox(jobId: string, apiKey: string): Promise<Normalize
     if (skyboxUrl) {
       return { status: 'completed', progress: status.progress, resultUrl: skyboxUrl, succeededButEmpty: false };
     }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Skybox generation produced no image') };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Skybox generation produced no image' };
   }
   if (status.status === 'FAILED' || status.status === 'EXPIRED') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Skybox generation failed') };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Skybox generation failed' };
   }
   if (status.status === 'IN_PROGRESS') {
     return { status: 'processing', progress: status.progress, succeededButEmpty: false };
@@ -150,19 +164,23 @@ async function pollMeshySkybox(jobId: string, apiKey: string): Promise<Normalize
   return { status: 'pending', progress: status.progress, succeededButEmpty: false };
 }
 
-// --- music (ElevenLabs) — mirrors generate/music/status/route.ts ---
-// ElevenLabs `/v1/music` returns audio inline (no async task), so the generate
-// route resolves synchronously and nothing enqueues a music job for polling. A
-// poll reaching here is defensive: report a single terminal `failed` state so a
-// phantom job is refunded rather than left in flight. Takes no provider call —
-// there is no music status endpoint to hit.
-function pollElevenLabsMusic(): NormalizedProviderStatus {
-  return {
-    status: 'failed',
-    progress: 0,
-    succeededButEmpty: false,
-    errorMessage: MUSIC_SYNC_TERMINAL_MESSAGE,
-  };
+// --- music (Suno) — mirrors generate/music/status/route.ts ---
+async function pollSuno(jobId: string, apiKey: string): Promise<NormalizedProviderStatus> {
+  const status = await new SunoClient({ apiKey }).getStatus(jobId);
+
+  if (status.status === 'completed' || status.status === 'succeeded') {
+    if (status.audioUrl) {
+      return { status: 'completed', progress: status.progress, resultUrl: status.audioUrl, succeededButEmpty: false };
+    }
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Music generation produced no audio' };
+  }
+  if (status.status === 'failed' || status.status === 'error') {
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Music generation failed' };
+  }
+  if (status.status === 'processing' || status.status === 'generating') {
+    return { status: 'processing', progress: status.progress, succeededButEmpty: false };
+  }
+  return { status: 'pending', progress: status.progress, succeededButEmpty: false };
 }
 
 // --- sprite / sprite_sheet / tileset (Replicate SDXL) — mirrors the three sprite status routes ---
@@ -188,10 +206,10 @@ async function pollReplicate(
     if (status.output?.length) {
       return { status: 'completed', progress: 100, resultUrl: status.output[0], succeededButEmpty: false };
     }
-    return { status: 'failed', progress: 100, succeededButEmpty: true, errorMessage: withRetryGuidance(REPLICATE_EMPTY_MESSAGE[type]) };
+    return { status: 'failed', progress: 100, succeededButEmpty: true, errorMessage: REPLICATE_EMPTY_MESSAGE[type] };
   }
   if (status.status === 'failed' || status.status === 'canceled') {
-    return { status: 'failed', progress: 10, succeededButEmpty: false, errorMessage: withRetryGuidance(REPLICATE_FAILED_MESSAGE[type]) };
+    return { status: 'failed', progress: 10, succeededButEmpty: false, errorMessage: REPLICATE_FAILED_MESSAGE[type] };
   }
   if (status.status === 'processing') {
     return { status: 'processing', progress: 50, succeededButEmpty: false };

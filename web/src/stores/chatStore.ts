@@ -4,7 +4,6 @@ import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
 import { detectGameCreationIntent } from '@/lib/chat/intentDetector';
 import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
-import { formatToolResultOutput } from '@/lib/chat/toolResultOutput';
 
 /**
  * Confidence at or above which a message is routed to the game-creation
@@ -14,40 +13,6 @@ import { formatToolResultOutput } from '@/lib/chat/toolResultOutput';
  * direction, and the reason this can afford to be a plain threshold.
  */
 const GAME_CREATION_CONFIDENCE_THRESHOLD = 0.7;
-
-/**
- * Every lifecycle state a tool invocation can be in, as ONE runtime list
- * (PF-950 / #8931). The `status` field below is typed from it, so adding a
- * state here is the only way to add one — and `ToolCallCard.test.tsx` and
- * `chatStore.toolStates.test.ts` iterate it, so a new state without a
- * rendering branch or a wire transition fails a test instead of falling
- * through a `default`.
- *
- * How each state is reached (chunk names are the AI SDK v6 `UIMessageChunk`
- * types `streamOneTurn` switches on; the fixtures in
- * `test/utils/streamingTestUtils.ts` are the canonical bytes):
- *   pending            `tool-input-start`
- *   success | error    local execution after `finish` drains the buffered
- *                      `tool-input-available`; or `tool-input-error` /
- *                      `tool-output-error` from the wire (→ error, errorText)
- *   preview | rejected the client-only `approvalMode` toggle: held for the
- *                      user, then approveToolCalls / rejectToolCalls
- *   undone             the user reverted a successful call
- *   approval-required  `tool-approval-request` (server gate, PF-8860)
- *   denied             `tool-output-denied` on the resumed stream
- */
-export const TOOL_CALL_STATUSES = [
-  'pending',
-  'success',
-  'error',
-  'preview',
-  'rejected',
-  'undone',
-  'approval-required',
-  'denied',
-] as const;
-
-export type ToolCallStatusName = (typeof TOOL_CALL_STATUSES)[number];
 
 export interface ToolCallStatus {
   id: string;
@@ -61,9 +26,16 @@ export interface ToolCallStatus {
    * and the model is never told about it; an `'approval-required'` call is
    * blocked by the SDK server-side and can only be resolved by resuming the
    * turn with an approval-response — which is what `resumeAfterApproval` does.
-   * The full list, with how each state is reached, is `TOOL_CALL_STATUSES`.
    */
-  status: ToolCallStatusName;
+  status:
+    | 'pending'
+    | 'success'
+    | 'error'
+    | 'preview'
+    | 'rejected'
+    | 'undone'
+    | 'approval-required'
+    | 'denied';
   result?: unknown;
   error?: string;
   undoable: boolean;
@@ -162,12 +134,6 @@ interface ChatState {
   showEntityPicker: boolean;
   entityPickerFilter: string;
   pendingEntityRefs: Record<string, string>; // @DisplayName → entity ID for current input
-  /**
-   * Text waiting to be placed in the composer (#10172). `ChatInput` adopts a
-   * non-empty draft once, after any text the user already typed, and clears it.
-   * Never sent automatically: the user reviews the token estimate and sends.
-   */
-  composerDraft: string;
   conversations: Conversation[];
   activeConversationId: string | null;
   /** Non-null while a turn is parked on a server-side tool approval (PF-8860). */
@@ -201,7 +167,6 @@ interface ChatState {
   setEntityPickerFilter: (filter: string) => void;
   addEntityRef: (displayName: string, entityId: string) => void;
   clearEntityRefs: () => void;
-  setComposerDraft: (text: string) => void;
   createConversation: (name?: string) => string;
   switchConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
@@ -277,7 +242,6 @@ async function streamOneTurn(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: response.statusText }));
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
     throw new Error(errorData.error || `Chat request failed: ${response.status}`);
   }
 
@@ -478,7 +442,7 @@ async function streamOneTurn(
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
+    buffer = lines.pop() || '';
 
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
@@ -501,7 +465,7 @@ async function streamOneTurn(
           break;
 
         case 'reasoning-delta':
-          onUpdate((msg) => ({ ...msg, thinking: (msg.thinking ?? '') + str(event.delta) }));
+          onUpdate((msg) => ({ ...msg, thinking: (msg.thinking || '') + str(event.delta) }));
           break;
 
         case 'tool-input-start': {
@@ -698,13 +662,9 @@ function appendToolTurn(
     // is how a denied destructive action gets narrated as done.
     let output: { type: 'text' | 'error-text'; value: string };
     if (tc.status === 'error') {
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank tool-call error message falls back to a generic one, same as an absent one
       output = { type: 'error-text', value: `Error: ${tc.error || 'Unknown error'}` };
     } else if (tc.status === 'success' || tc.status === 'undone') {
-      // Serialised, not `String()`-coerced: most handlers return an object
-      // here, and `String({...})` handed the model "[object Object]" for every
-      // one of them, so query tools returned nothing (#10143).
-      output = { type: 'text', value: formatToolResultOutput(tc.result) };
+      output = { type: 'text', value: String(tc.result ?? 'Success') };
     } else {
       output = { type: 'error-text', value: `Not executed (status: ${tc.status}).` };
     }
@@ -878,7 +838,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showEntityPicker: false,
   entityPickerFilter: '',
   pendingEntityRefs: {},
-  composerDraft: '',
   conversations: [],
   activeConversationId: null,
   pausedTurnState: null,
@@ -1412,13 +1371,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ pendingEntityRefs: refs });
   },
   clearEntityRefs: () => set({ pendingEntityRefs: {} }),
-  setComposerDraft: (text) => set({ composerDraft: text }),
 
   createConversation: (name?: string) => {
     const { messages, conversations, activeConversationId } = get();
     const now = Date.now();
     const id = `conv_${now}_${Math.random().toString(36).slice(2, 8)}`;
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested chat name is unset; falls back to a generated name
     const newName = name || `Chat ${conversations.length + 1}`;
 
     // Save current messages to the active conversation before creating new one

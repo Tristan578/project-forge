@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useId } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
@@ -27,10 +27,6 @@ const POLY_BUDGET_LABELS: Record<PolyBudget, string> = {
 };
 
 export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProps) {
-  // useId, not literal ids: the panel can mount more than once, and a
-  // repeated id sends the second <label for> to the first panel's control.
-  const baseId = useId();
-  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [artStyle, setArtStyle] = useState<ArtStyle>('realistic');
   const [quality, setQuality] = useState<Quality>('standard');
@@ -47,10 +43,6 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
   // Capability gate (#9117): blocked only on a positive "unavailable" report.
   const gate = useGenerationGate('model-generation');
   const canSubmit =
-    // `blocked` is false until the first /api/capabilities body lands, so
-    // without this a permanently-unavailable capability presented a live
-    // Generate button with no notice beside it (#9725 p8).
-    !gate.loading &&
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
@@ -123,7 +115,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-model-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-model-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -143,9 +135,8 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
           {/* Art Style */}
           <div>
-            <label htmlFor={fieldId('art-style')} className="mb-1 block text-xs font-medium text-zinc-300">Art Style</label>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Art Style</label>
             <select
-              id={fieldId('art-style')}
               value={artStyle}
               onChange={(e) => setArtStyle(e.target.value as ArtStyle)}
               disabled={isSubmitting || gate.blocked}
@@ -160,9 +151,8 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
           {/* Quality */}
           <div>
-            <label htmlFor={fieldId('quality')} className="mb-1 block text-xs font-medium text-zinc-300">Quality</label>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Quality</label>
             <select
-              id={fieldId('quality')}
               value={quality}
               onChange={(e) => setQuality(e.target.value as Quality)}
               disabled={isSubmitting || gate.blocked}
@@ -175,9 +165,8 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
           {/* Poly Budget */}
           <div>
-            <label htmlFor={fieldId('poly-budget')} className="mb-1 block text-xs font-medium text-zinc-300">Poly Budget</label>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Poly Budget</label>
             <select
-              id={fieldId('poly-budget')}
               value={polyBudget}
               onChange={(e) => setPolyBudget(e.target.value as PolyBudget)}
               disabled={isSubmitting || gate.blocked}

@@ -120,11 +120,7 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     scenes: [],
     activeSceneId: null,
     saveScene: vi.fn(),
-    // Defaults to an accepted load — `restore_checkpoint` now reads this
-    // return value to tell a rejected engine load apart from a successful
-    // one (scene.FR-3.OP-02's #9813 fix), and every other suite here mocks
-    // an engine that always accepts.
-    loadScene: vi.fn(() => true),
+    loadScene: vi.fn(),
     newScene: vi.fn(),
     setScenes: vi.fn(),
     startSceneTransition: vi.fn().mockResolvedValue(undefined),

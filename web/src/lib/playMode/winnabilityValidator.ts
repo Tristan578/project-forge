@@ -28,11 +28,7 @@
  * contract regardless of which delivery path fires.
  */
 
-import type { SceneGraph, GameComponentData, WinConditionData, CompletionMode } from '@/stores/slices/types';
-// Fail-closed: absent or unrecognised modes are `win`. Shared with the plan
-// builder's default-goal guarantee so the two cannot disagree (#9998). The
-// mode is never inferred from entity names (issue #9901).
-import { requiresWinCondition } from '@/lib/playMode/completionMode';
+import type { SceneGraph, GameComponentData, WinConditionData } from '@/stores/slices/types';
 
 /**
  * Neutralize a scene-supplied identifier before interpolating it into a message
@@ -170,19 +166,10 @@ function evaluateCondition(
  * Validate whether the given scene can be won. A scene is winnable when at
  * least one of its win conditions is satisfiable; the report lists every reason
  * the others (or all) fail so the message back to the user is specific.
- *
- * `completionMode` (issue #9901) makes the "no win condition" requirement
- * intentional rather than universal: a `sandbox`/`endless`/`narrative` scene
- * with no win condition is winnable (it was never trying to be won), while a
- * `win`-mode scene — and every legacy scene, where the argument is omitted and
- * defaults to `win` — still fails with `NO_WIN_CONDITION`. A win condition that
- * IS present is validated in EVERY mode: a malformed goal never passes just
- * because the mode does not require a win.
  */
 export function validateWinnability(
   sceneGraph: SceneGraph,
   allGameComponents: Record<string, GameComponentData[]>,
-  completionMode: CompletionMode = 'win',
 ): WinnabilityReport {
   const graph: SceneGraph = sceneGraph ?? { nodes: {}, rootIds: [] };
   const winConditions: Array<{ entityId: string; data: WinConditionData }> = [];
@@ -202,20 +189,11 @@ export function validateWinnability(
   }
 
   if (winConditions.length === 0) {
-    // A sandbox/endless/narrative game is COMPLETE without a win condition —
-    // the creator chose that. Only win-mode (and legacy, defaulted) scenes are
-    // blocked here.
-    if (!requiresWinCondition(completionMode)) {
-      return { winnable: true, issues: [] };
-    }
     return {
       winnable: false,
       issues: [{
         code: 'NO_WIN_CONDITION',
-        // The last sentence (#9998): the Play toast and the AI tool result both
-        // carry this text, and it is where a creator of a goal-free game first
-        // learns the requirement is a choice, not a rule.
-        message: 'This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items. If the game is not meant to be won, set its completion mode to endless, sandbox or narrative instead.',
+        message: 'This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items.',
       }],
     };
   }

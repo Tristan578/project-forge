@@ -34,9 +34,7 @@ WF_YML="$REPO_ROOT/.github/workflows/security-alerts.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
-readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
-readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required to run these tests"; exit 1; }
@@ -51,10 +49,8 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
-readonly -f run_gate
 
 fixture() { local name="$1"; cat > "$FIX/$name"; echo "$FIX/$name"; }
-readonly -f fixture
 
 EMPTY="$(fixture empty.json <<'JSON'
 []

@@ -658,16 +658,13 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   it('allows update_material', () => expect(SCRIPT_ALLOWED_COMMANDS.has('update_material')).toBe(true));
 
   it('allows apply_force', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_force')).toBe(true));
-  it('does NOT allow set_velocity — no engine arm', () =>
-    expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity')).toBe(false));
+  it('allows set_velocity', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity')).toBe(true));
   it('allows apply_impulse', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_impulse')).toBe(true));
 
   it('allows apply_force2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_force2d')).toBe(true));
   it('allows apply_impulse2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_impulse2d')).toBe(true));
-  it('does NOT allow set_velocity2d — no engine arm', () =>
-    expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity2d')).toBe(false));
-  it('does NOT allow set_angular_velocity2d — no engine arm', () =>
-    expect(SCRIPT_ALLOWED_COMMANDS.has('set_angular_velocity2d')).toBe(false));
+  it('allows set_velocity2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity2d')).toBe(true));
+  it('allows set_angular_velocity2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_angular_velocity2d')).toBe(true));
   it('allows set_gravity2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_gravity2d')).toBe(true));
 
   it('allows play_audio', () => expect(SCRIPT_ALLOWED_COMMANDS.has('play_audio')).toBe(true));
@@ -690,10 +687,8 @@ describe('Script Sandbox Security: Command Whitelist', () => {
 
   it('allows camera_follow', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_follow')).toBe(true));
   it('allows camera_stop_follow', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_stop_follow')).toBe(true));
-  it('does NOT allow camera_set_position — no engine arm', () =>
-    expect(SCRIPT_ALLOWED_COMMANDS.has('camera_set_position')).toBe(false));
-  it('does NOT allow camera_look_at — no engine arm', () =>
-    expect(SCRIPT_ALLOWED_COMMANDS.has('camera_look_at')).toBe(false));
+  it('allows camera_set_position', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_set_position')).toBe(true));
+  it('allows camera_look_at', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_look_at')).toBe(true));
 
   it('allows paint_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('paint_tile')).toBe(true));
   it('allows erase_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('erase_tile')).toBe(true));
@@ -705,8 +700,7 @@ describe('Script Sandbox Security: Command Whitelist', () => {
 
   it('allows create_skeleton2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('create_skeleton2d')).toBe(true));
   it('allows play_skeletal_animation2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('play_skeletal_animation2d')).toBe(true));
-  it('does NOT allow set_ik_target2d — no engine arm', () =>
-    expect(SCRIPT_ALLOWED_COMMANDS.has('set_ik_target2d')).toBe(false));
+  it('allows set_ik_target2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_ik_target2d')).toBe(true));
 
   it('allows vibrate', () => expect(SCRIPT_ALLOWED_COMMANDS.has('vibrate')).toBe(true));
   it('allows stop (for scene reset)', () => expect(SCRIPT_ALLOWED_COMMANDS.has('stop')).toBe(true));
@@ -732,16 +726,10 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   it('blocks update_terrain', () => expect(SCRIPT_ALLOWED_COMMANDS.has('update_terrain')).toBe(false));
   it('blocks load_scene', () => expect(SCRIPT_ALLOWED_COMMANDS.has('load_scene')).toBe(false));
 
-  // These seven were in the allowlist with NO engine arm: `route_domain`
-  // did not name them and no domain module armed them, so a script calling
-  // one got no error and no effect. Asserting they are ABSENT is what stops
-  // a name being re-added without an arm — the tests below used to assert
-  // the opposite, which pinned the defect in place (#9284).
-  it('whitelist has exactly 59 commands', () => {
+  it('whitelist has exactly 62 commands', () => {
     // Pins the SHIPPED set: the former local copy had silently drifted three
-    // names behind it and still asserted 59. 59 after OP-04 added
-    // `set_tile_collision_shape` (#9814).
-    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(59);
+    // names behind it and still asserted 59.
+    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(62);
   });
 });
 
@@ -1445,28 +1433,6 @@ describe('Script Sandbox Security: Memory Limit Detection', () => {
       typeof e.message === 'string' && e.message.includes('memory limit exceeded'),
     );
     expect(memError).toBeDefined();
-  });
-
-  it('a tick stopped by the memory guard still ends with tick_done', () => {
-    // The memory guard leaves the tick early; the tick still returned, so the
-    // runner's watchdog must still hear about it (#10286).
-    sendToWorker({ type: 'set_limits', memoryLimitMb: 1 });
-    sendToWorker({
-      type: 'init',
-      scripts: [{ entityId: 'mem-hog', enabled: true, source: `function onUpdate() {}` }],
-      entities: { 'mem-hog': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
-      entityInfos: { 'mem-hog': { name: 'MemHog', type: 'Cube', colliderRadius: 1 } },
-    });
-    clearMessages();
-
-    const originalPerformance = (globalThis as Record<string, unknown>).performance;
-    vi.stubGlobal('performance', { now: () => 0, memory: { usedJSHeapSize: 2 * 1024 * 1024 } });
-    sendToWorker({ type: 'tick', dt: 0.016, elapsed: 0.016, entities: {} });
-    vi.stubGlobal('performance', originalPerformance);
-
-    expect(getMessages('error').some(e => typeof e.message === 'string' && e.message.includes('memory limit exceeded'))).toBe(true);
-    expect(postedMessages[postedMessages.length - 1]).toEqual({ type: 'tick_done' });
-    expect(getMessages('tick_done')).toHaveLength(1);
   });
 
   it('memory error message includes heap usage and limit', () => {

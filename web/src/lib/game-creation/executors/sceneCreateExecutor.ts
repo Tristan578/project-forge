@@ -72,10 +72,9 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // is why creation was conditional; it now plans a `world_build` step that
     // spawns real geometry, so every step reaching this executor is a real scene
     // creation (PF-1138).
-    const projectId = ctx.getStore().projectId;
-    const project = loadProjectScenes(projectId);
+    const project = loadProjectScenes();
     const { project: withScene, sceneId } = createScene(project, name);
-    saveProjectScenes({ ...withScene, activeSceneId: sceneId }, projectId);
+    saveProjectScenes({ ...withScene, activeSceneId: sceneId });
     ctx.getStore().setScenes(
       withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       sceneId,
@@ -95,28 +94,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // Phase 1 runs before Phase 3, so this despawn cannot wipe the world
     // geometry `world_build` spawns — that ordering is why the geometry is a
     // separate step rather than part of this one.
-    //
-    // `newScene()` returns false when the engine refuses to clear the starter
-    // scene. Discarding it (this executor's own PF-1097 defect, one layer up)
-    // reports a created scene the engine never emptied, so every later step
-    // then stacks the generated game on top of Ground/Player/Sun. Fail the step
-    // instead — the same false-success class this campaign's acceptance
-    // criterion 3 targets (#10056).
-    //
-    // The brief's completion mode (#9998) rides on this call: `new_scene`
-    // emits the SCENE_LOADED that sets the incoming scene's mode, so the mode
-    // is staged for it here rather than written to the store before it (where
-    // that same event would wipe it). No brief, or a brief with no mode, opens
-    // a legacy `win` scene — never whatever the previous scene had.
-    if (ctx.getStore().newScene({ completionMode: ctx.gdd?.completionMode }) === false) {
-      return failResult(
-        makeStepError(
-          'COMMAND_FAILED',
-          'Engine refused new_scene while clearing the starter scene',
-          this.userFacingErrorMessage,
-        ),
-      );
-    }
+    ctx.getStore().newScene();
 
     // The step must not return until the engine has actually applied the
     // despawn, because JS step order is not engine frame order. `new_scene` and

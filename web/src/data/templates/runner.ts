@@ -19,6 +19,7 @@ export const RUNNER_TEMPLATE: GameTemplate = {
   },
   tags: ['3d', 'runner', 'procedural', 'score'],
 
+  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,

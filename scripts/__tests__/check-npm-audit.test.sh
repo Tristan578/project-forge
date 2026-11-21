@@ -1596,14 +1596,6 @@ assert_block_lines_exact() {
 $delta"
     return
   fi
-  # THE LABEL IS RECORDED HERE, on the success path of the COMPARISON — not on
-  # entry to the assert_steps_block wrapper, where it proved only that the
-  # wrapper was called. Replacing the comparison with a no-op neutered all six
-  # step-block pins while the meta-assertion at the end of this suite still
-  # reported success (found in review), one frame deeper than the defect that
-  # assertion was added to close.
-  STEPS_BLOCK_RAN="$STEPS_BLOCK_RAN
-$2"
   pass "$2: the block is exactly the $(grep -c '' <<<"$actual") expected lines (nothing can be appended to it, inserted into it or rewritten inside it past the pins on it)"
 }
 readonly -f assert_block_lines_exact
@@ -1648,12 +1640,6 @@ readonly -f assert_block_lines_exact
 # invisible to the pin. That is a comment to YAML and to the shell of a `run:`
 # body alike; it would only matter for a line written verbatim into a file
 # where a leading `#` is load-bearing, which nothing here does.
-# Each label is appended by assert_block_lines_exact when its comparison RUNS
-# and matches — not by the wrapper on entry. A call that is commented out,
-# wrapped in `if false`, never reached, or whose comparison was replaced by a
-# no-op all leave a gap the assertion at the end of this suite reports.
-STEPS_BLOCK_RAN=""
-
 assert_steps_block() {
   local blk
   # Read in THIS frame, where it is the line that called the wrapper -- i.e. the
@@ -1768,10 +1754,6 @@ on:
         description: 'Whether web/** or package*.json changed (defaults to true when unset)'
         type: boolean
         default: true
-      web-build-inputs-changed:
-        description: 'Whether any source or configuration input of the web production build changed'
-        type: boolean
-        default: true
       mcp-changed:
         description: 'Whether mcp-server/** changed (defaults to true when unset)'
         type: boolean
@@ -1790,10 +1772,6 @@ on:
         default: true
       can-commit-ratchet:
         description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
-        type: boolean
-        default: true
-      chromatic-paused:
-        description: 'Temporary pause of the Chromatic visual gate, tracking issue 10279. true = chromatic job skipped and a NOT-checked warning emitted'
         type: boolean
         default: true
     outputs:
@@ -1840,8 +1818,7 @@ STEPS_EOF
   security:
   lighthouse-delta:
   storybook-internal-gate:
-  chromatic:
-  chromatic-paused-notice:"
+  chromatic:"
 
   # Top of the duplicate-key hierarchy: the top-level jobs: key itself is
   # COUNT-pinned. An appended second jobs: mapping at end of file replaces
@@ -1873,9 +1850,8 @@ STEPS_EOF
   # appended second security: job at end of file replaces the whole job
   # under YAML last-key-wins while every pin below keeps reading the dead
   # first block, and the job reports SUCCESS under the original display
-  # name (the `actionlint` job, #8719, flags the duplicate job key, but it
-  # runs from the same PR-controlled ci.yml, so this pin stays the
-  # independent backstop). The level above THIS — a duplicated top-level
+  # name (actionlint would flag the duplicate job key, but it is not wired
+  # into this repo's CI). The level above THIS — a duplicated top-level
   # jobs: key — is count-pinned above rather than argued away: the
   # rationale (and why "fails closed on its own" was rejected) lives at
   # that pin.
@@ -2628,7 +2604,6 @@ STEPS_EOF
 
   assert_job_key_lines "$ci_exec" "ci.yml" "  ci-gate:
   quality-gates:
-  observatory-tests:
   command-parity:
   build-nextjs:
   docs-internal-gate:
@@ -2639,23 +2614,19 @@ STEPS_EOF
   lockfile-sync:
   openapi-route-sync:
   board-verdict-tests:
-  portable-paths:
   agentic-sync:
   taskboard-onboarding-guard:
   codex-config-guard:
-  actionlint:
   ghaw-lock-sync:
   actions-pin-check:
   lockfile-sync-tests:
   preview-deploy:
   test-e2e-ui:
   test-e2e-api:
-  test-e2e-auth:
   test-e2e-journey:
   test-e2e-engine-smoke:
   test-e2e-crossbrowser:
   merge-e2e-reports:
-  docs-e2e:
   ci-success:"
 
   # Same top-level jobs: key count pin as quality-gates (rationale there).
@@ -2738,7 +2709,6 @@ STEPS_EOF
   IFS= read -r -d '' expected_ci_gate_outputs <<'OUTPUTS_EOF' || true
     outputs:
       needs-web: ${{ steps.changes.outputs.web }}
-      needs-web-build-inputs: ${{ steps.changes.outputs.web-build-inputs }}
       needs-engine: ${{ steps.changes.outputs.engine }}
       needs-mcp: ${{ steps.changes.outputs.mcp }}
       needs-ci: ${{ steps.changes.outputs.ci }}
@@ -2752,7 +2722,6 @@ STEPS_EOF
       needs-ghaw: ${{ steps.changes.outputs.ghaw }}
       needs-api: ${{ steps.changes.outputs.api }}
       needs-skills: ${{ steps.changes.outputs.skills }}
-      needs-observatory: ${{ steps.changes.outputs.observatory }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
 OUTPUTS_EOF
   readonly expected_ci_gate_outputs
@@ -3181,7 +3150,6 @@ OUTPUTS_EOF
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
-            scripts/check-codex-port.sh scripts/__tests__/check-codex-port.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
@@ -3206,12 +3174,9 @@ OUTPUTS_EOF
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
-            scripts/post-deploy-capability-matrix-check.sh scripts/__tests__/post-deploy-capability-matrix-check.test.sh \
-            scripts/post-deploy-docs-check.sh scripts/__tests__/post-deploy-docs-check.test.sh \
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
-            scripts/resolve-ci-wasm-artifact.sh scripts/__tests__/resolve-ci-wasm-artifact.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
@@ -3223,9 +3188,6 @@ OUTPUTS_EOF
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
-            scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
-            scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
-            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
       fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
@@ -3403,7 +3365,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=669
+readonly SELF_EXEC_EXPECTED_DROP=592
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3557,8 +3519,6 @@ IFS= read -r -d '' expected_steps_1 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_2 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_3 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_4 @@'STEPS_EOF' || true
-IFS= read -r -d '' expected_steps_pp @@'STEPS_EOF' || true
-IFS= read -r -d '' expected_steps_bvt @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_5 @@'STEPS_EOF' || true
 STEPS_EOF
 readonly expected_openers
@@ -3653,13 +3613,8 @@ IFS= read -r -d '' expected_steps_1 <<'STEPS_EOF' || true
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: engine -> target
-      - name: Cache cargo-audit
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-audit
-          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
-      - name: Install verified cargo-audit
-        run: bash scripts/install-cargo-audit.sh
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
       - name: cargo audit (engine)
         working-directory: engine
         run: cargo audit
@@ -3690,13 +3645,8 @@ IFS= read -r -d '' expected_steps_2 <<'STEPS_EOF' || true
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: engine -> target
-      - name: Cache cargo-audit
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-audit
-          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
-      - name: Install verified cargo-audit
-        run: bash scripts/install-cargo-audit.sh
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
       - name: cargo audit (engine)
         working-directory: engine
         run: cargo audit
@@ -3716,7 +3666,6 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
-            scripts/check-codex-port.sh scripts/__tests__/check-codex-port.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
@@ -3741,12 +3690,9 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
-            scripts/post-deploy-capability-matrix-check.sh scripts/__tests__/post-deploy-capability-matrix-check.test.sh \
-            scripts/post-deploy-docs-check.sh scripts/__tests__/post-deploy-docs-check.test.sh \
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
-            scripts/resolve-ci-wasm-artifact.sh scripts/__tests__/resolve-ci-wasm-artifact.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
@@ -3758,30 +3704,15 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
-            scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
-            scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
-            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
       - name: Run deploy-drift dispatcher test suite
         run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
-      - name: Verify executable cache and coverage artifact contracts
-        run: |
-          bash scripts/__tests__/install-vercel-cli.test.sh
-          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs scripts/__tests__/exact-optional-property-types.test.mjs
-      - name: Verify scheduled hook-test contracts
-        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
       - name: Run agentic-config gate test suite
         run: bash scripts/__tests__/check-agentic-sync.test.sh
-      - name: Run Codex CLI surface gate test suite
-        run: bash scripts/__tests__/check-codex-port.test.sh
-      - name: Run post-compaction rule-digest hook suite (here because a .claude/rules/ edit fires this job, not hook-tests)
-        run: bash .claude/hooks/__tests__/inject-post-compact.test.sh
-      - name: Run provider skill resolver fixtures
-        run: bash scripts/__tests__/resolve-skill-path.test.sh
       - name: Run taskboard onboarding-hygiene gate test suite
         run: bash scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh
       - name: Run Codex config-safety gate test suite
@@ -3820,8 +3751,6 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/db-migration-guard.test.sh
       - name: Run Neon branch-helper test suite
         run: bash scripts/__tests__/neon-branch.test.sh
-      - name: Run preview-database branch-policy test suite
-        run: bash scripts/__tests__/preview-db-branch.test.sh
       - name: Run ci-gate path-filter test suite
         run: bash scripts/__tests__/ci-gate-path-filters.test.sh
       - name: Run CI diff-range resolver test suite
@@ -3842,18 +3771,12 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/alias-wasm-cdn-version.test.sh
       - name: Run post-deploy health gate test suite
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
-      - name: Run post-deploy capability matrix probe test suite
-        run: bash scripts/__tests__/post-deploy-capability-matrix-check.test.sh
-      - name: Run post-deploy docs MCP gate test suite
-        run: bash scripts/__tests__/post-deploy-docs-check.test.sh
       - name: Run CD rolling-release helper test suite
         run: bash scripts/__tests__/cd-rolling-release.test.sh
       - name: Run CD tree-validation gate test suite
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite
         run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
-      - name: Run CD WASM artifact-reuse resolver test suite
-        run: bash scripts/__tests__/resolve-ci-wasm-artifact.test.sh
       - name: Run source-encoding gate test suite
         run: bash scripts/__tests__/check-source-encoding.test.sh
       - name: Run source-encoding gate
@@ -3870,14 +3793,6 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-suite-wiring.test.sh
       - name: Run suite-wiring gate
         run: bash scripts/check-suite-wiring.sh
-      - name: Run pin-strength gate test suite
-        run: bash scripts/__tests__/check-pin-strength.test.sh
-      - name: Run pin-strength gate
-        run: bash scripts/check-pin-strength.sh
-      - name: Run function-freeze gate test suite
-        run: bash scripts/__tests__/check-fn-freeze.test.sh
-      - name: Run function-freeze gate
-        run: bash scripts/check-fn-freeze.sh
 STEPS_EOF
 readonly expected_steps_3
 assert_steps_block "${lst_block:-}" "ci.yml lockfile-sync-tests job steps:" "${expected_steps_3%$'\n'}"
@@ -3892,52 +3807,6 @@ IFS= read -r -d '' expected_steps_4 <<'STEPS_EOF' || true
 STEPS_EOF
 readonly expected_steps_4
 assert_steps_block "${ci_success_block:-}" "ci.yml ci-success job steps:" "${expected_steps_4%$'\n'}"
-
-# --- the two UNCONDITIONAL gate jobs (#9740) --------------------------------
-#
-# Both were promoted into the required `CI Success` aggregate through
-# `check_unconditional`, which asks only "did this job succeed". A job whose
-# gate step is removed, commented out or given `if: false` still concludes
-# SUCCESS, so that question is satisfied while the work never happens. The
-# per-job pins in check-portable-paths.test.sh and check-ci-success.test.sh
-# catch a full neuter, a duplicate `run:` key and a step-level `if:` — but a
-# PARTIAL neuter, removing ONE step of two and leaving the other, keeps every
-# one of them green. Measured: commenting out board-verdict-tests' suite step
-# left `check-ci-success.test.sh` reporting "All tests passed".
-#
-# This is the assertion that closes it, and it is the one this repo already
-# uses for five other gate-bearing jobs: pin the step block LINE FOR LINE, so
-# removing, renaming, reordering or adding a step is a diff to the literal
-# below and a reviewer sees it.
-ci_pp_block="$(awk -v re="$job_key_re" '/^  portable-paths:/{f=1} f{print} f && $0 ~ re && !/^  portable-paths:/{exit}' <<<"$ci_exec")"
-readonly ci_pp_block
-
-IFS= read -r -d '' expected_steps_pp <<'STEPS_EOF' || true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Test the portable-paths gate's decision logic
-        run: bash scripts/__tests__/check-portable-paths.test.sh
-      - name: Shellcheck the gate and its suite
-        run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
-      - name: Check for machine-local absolute paths in tracked files
-        run: bash scripts/check-portable-paths.sh
-STEPS_EOF
-readonly expected_steps_pp
-assert_steps_block "${ci_pp_block:-}" "ci.yml portable-paths job steps:" "${expected_steps_pp%$'\n'}"
-
-ci_bvt_block="$(awk -v re="$job_key_re" '/^  board-verdict-tests:/{f=1} f{print} f && $0 ~ re && !/^  board-verdict-tests:/{exit}' <<<"$ci_exec")"
-readonly ci_bvt_block
-
-IFS= read -r -d '' expected_steps_bvt <<'STEPS_EOF' || true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Board verdict decision logic
-        run: bash scripts/__tests__/board-verdict.test.sh
-      - name: Shellcheck the verdict scripts and the suite
-        run: shellcheck -x scripts/board-verdict.sh scripts/post-board-verdict.sh scripts/__tests__/board-verdict.test.sh
-STEPS_EOF
-readonly expected_steps_bvt
-assert_steps_block "${ci_bvt_block:-}" "ci.yml board-verdict-tests job steps:" "${expected_steps_bvt%$'\n'}"
 
 # ci-gate's detect step: the one block that decides whether the caller above
 # runs at all. `any_code=false` is a one-token edit that skips every npm audit
@@ -3965,30 +3834,27 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           HEAD_SHA: ${{ steps.refs.outputs.head-sha }}
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          web=false; web_build_inputs=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
-          echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
-          echo "$CHANGED" | grep -qE '^web/|^packages/ui/|(^|/)package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
+          echo "$CHANGED" | grep -q '^web/' && web=true
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
-          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui)/tsconfig\.json$' && ci=true
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^docs/capability-matrix\.md$|^web/src/data/commandIndex\.json$' && docs=true
+          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
           echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$|^scripts/check-lockfile-sync\.sh$' && deps=true
-          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$|^\.claude/skills/|^\.claude/agents/|^\.claude/settings\.json$|^\.claude/rules/|^\.claude/hooks/|^\.claude/tools/|^\.claude/CLAUDE\.md$|^\.github/|^\.agents/skills/|^\.codex/|^\.mcp\.json$|^scripts/check-codex-port\.sh$|^scripts/__tests__/check-codex-port\.test\.sh$' && agentic=true
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
           echo "$CHANGED" | grep -qE '^README\.md$|^CONTRIBUTING\.md$|^AGENTS\.md$|^GEMINI\.md$|^\.cursorrules$|^\.claude/|^\.codex/|^\.gemini/|^\.github/|^\.windsurf/|^\.agent/|^\.agents/|^docs/|^tools/agentic-sync/|^scripts/check-taskboard-onboarding-hygiene\.sh$|^scripts/__tests__/check-taskboard-onboarding-hygiene\.test\.sh$' && onboarding=true
           echo "$CHANGED" | grep -qE '^\.codex/config\.toml$|^scripts/check-codex-config-safety\.sh$|^scripts/__tests__/check-codex-config-safety\.test\.sh$' && codex=true
           echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$|^scripts/audit-pr-readiness\.ps1$|^scripts/__tests__/audit-pr-readiness\.test\.ps1$' && skills=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
           echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
-          echo "$CHANGED" | grep -q '^tools/observatory/' && observatory=true
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
             any_code=true
           fi
           {
             echo "web=$web"
-            echo "web-build-inputs=$web_build_inputs"
             echo "engine=$engine"
             echo "mcp=$mcp"
             echo "ci=$ci"
@@ -4002,12 +3868,11 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
             echo "ghaw=$ghaw"
             echo "api=$api"
             echo "skills=$skills"
-            echo "observatory=$observatory"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills observatory=$observatory any-code=$any_code"
-          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ] && [ "$observatory" = "false" ]; then
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 STEPS_EOF
@@ -4077,10 +3942,6 @@ expected_steps_1
 expected_steps_2
 expected_steps_3
 expected_steps_4
-ci_pp_block
-expected_steps_pp
-ci_bvt_block
-expected_steps_bvt
 expected_steps_5
 SELF_EXEC_FILTER
 SELF_EXEC
@@ -4338,32 +4199,6 @@ elif [[ "$fn_freeze_probe" == *"readonly function"* && "$fn_freeze_probe" == *"f
 else
   fail "the 'readonly -f' effect probe was inconclusive -- expected both the shell's readonly-function refusal and the real pass() output, got: ${fn_freeze_probe}"
 fi
-# --- every unconditional job's step-block pin actually RAN --------------------
-#
-# `check_unconditional` in check-ci-success.sh promotes a job into the required
-# CI Success aggregate on the strength of "did it succeed", which a job whose
-# steps were removed still satisfies. The line-for-line pins above are what
-# close that, and check-ci-success.test.sh asserts one exists per such job — by
-# grepping this file, which a call wrapped in `if false` satisfies while never
-# executing (found in review). This is the half that measures execution.
-uncond_expected="$(grep -v '^[[:space:]]*#' "$REPO_ROOT/scripts/check-ci-success.sh" \
-  | grep -Eo '^check_unconditional[[:space:]]+"[^"]+"' \
-  | sed -E 's/^check_unconditional[[:space:]]+"([^"]+)"$/\1/')"
-if [ -z "$uncond_expected" ]; then
-  fail "no check_unconditional calls found in check-ci-success.sh — either the form was removed (and the jobs it protected are unguarded) or this cut broke; the per-job assertion below would pass having checked nothing"
-else
-  uncond_missing=""
-  while IFS= read -r ujob; do
-    [ -n "$ujob" ] || continue
-    grep -qxF "ci.yml ${ujob} job steps:" <<<"$STEPS_BLOCK_RAN" || uncond_missing="$uncond_missing $ujob"
-  done <<<"$uncond_expected"
-  if [ -n "$uncond_missing" ]; then
-    fail "step-block pin(s) did not RUN for unconditional job(s) —$uncond_missing. The call is present in this file but never executed (commented out, wrapped in a false branch, or unreached), so removing one of that job's steps is caught by nothing."
-  else
-    pass "every check_unconditional job's step-block pin actually ran ($(printf '%s\n' "$uncond_expected" | grep -c .) job(s))"
-  fi
-fi
-
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

@@ -10,7 +10,6 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { getCronMonitor, withCronMonitor } from '@/lib/monitoring/cronMonitors';
 import { logger } from '@/lib/logging/logger';
 import { cleanupExpired } from '@/lib/billing/webhookIdempotency';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // Sentry cron check-in monitor for this Vercel-scheduled route (#8818). The
 // non-null assertion is guarded by `cronMonitors.test.ts`, which asserts every
@@ -21,8 +20,8 @@ const HEALTH_MONITOR = getCronMonitor('/api/cron/health-monitor')!;
  * GET /api/cron/health-monitor
  *
  * Runs every 15 minutes via Vercel Cron. Executes all service health checks and
- * reports any failures to Sentry as structured exceptions so the owner is
- * notified without manual polling (there is no paging service).
+ * reports any failures to Sentry as structured exceptions so on-call engineers
+ * are alerted without manual polling.
  *
  * Auth: Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` on every
  * invocation. Requests without a matching secret are rejected 401. If
@@ -71,26 +70,6 @@ async function pruneExpiredWebhookClaims(): Promise<void> {
   }
 }
 
-/**
- * Whether a non-healthy service should page, rather than only be logged.
- *
- * A `degraded` service carrying `configurationOnly` is degraded BY DECISION:
- * production runs with no `PLATFORM_*` key and `docs/guides/platform-keys.md`
- * records that provisioning is deliberately deferred, so `AI Providers` is
- * degraded on every single run of this 15-minute cron. Capturing that is ~96
- * synthetic-monitor exceptions a day, indefinitely — and the run where AI
- * Providers GENUINELY breaks then arrives inside a stream everyone has learned
- * to ignore (lesson 13). It is still logged at warn: the same noise-reduction
- * trade #7075 made in this file for non-critical degradations, which stopped at
- * the logger and left this Sentry capture unconditional (#9727 review).
- *
- * `down` always pages, marker or not — nothing serving at all is an incident
- * whatever configured it. So does every degradation without the marker.
- */
-function shouldPage(service: ServiceHealth): boolean {
-  return !(service.status === 'degraded' && service.configurationOnly === true);
-}
-
 function reportFailuresToSentry(
   failedServices: ServiceHealth[],
   overallStatus: string,
@@ -133,11 +112,8 @@ async function runHealthMonitor(): Promise<NextResponse> {
       (s.name === 'Database (Neon)' || s.name === 'Clerk') && s.status !== 'healthy',
   );
 
-  // Degraded by a deliberate configuration state (#9727): logged, never paged.
-  const configurationOnly = failedServices.filter((s) => !shouldPage(s));
-
   if (failedServices.length > 0) {
-    reportFailuresToSentry(failedServices.filter(shouldPage), report.overall);
+    reportFailuresToSentry(failedServices, report.overall);
 
     // Critical failures (Database, Clerk) or any 'down' status → error
     // Non-critical degraded services → warn to reduce alert noise (#7075)
@@ -145,20 +121,8 @@ async function runHealthMonitor(): Promise<NextResponse> {
       (s) => criticalFailures.some((c) => c.name === s.name) || s.status === 'down',
     );
     const nonCriticalDegraded = failedServices.filter(
-      (s) => !criticalOrDown.includes(s) && !configurationOnly.includes(s),
+      (s) => !criticalOrDown.includes(s),
     );
-
-    if (configurationOnly.length > 0) {
-      logger.warn('Synthetic health monitor detected configuration-only degradation (not paged)', {
-        endpoint: 'GET /api/cron/health-monitor',
-        failureCount: configurationOnly.length,
-        failures: configurationOnly.map((s) => ({
-          name: s.name,
-          status: s.status,
-          error: s.error,
-        })),
-      });
-    }
 
     if (criticalOrDown.length > 0) {
       logger.error('Synthetic health monitor detected critical failures', {
@@ -206,7 +170,7 @@ async function runHealthMonitor(): Promise<NextResponse> {
   return NextResponse.json(summary, { status: 200 });
 }
 
-async function GET_impl(req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorizedCron(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -218,9 +182,5 @@ async function GET_impl(req: NextRequest): Promise<NextResponse> {
 }
 
 export const dynamic = 'force-dynamic';
-// Allow up to 30s for all 10 health checks (six of them outbound probes) to complete
+// Allow up to 30s for all 9 health checks to complete
 export const maxDuration = 30;
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

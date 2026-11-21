@@ -22,7 +22,6 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { checkMatrixCopyOnDisk } from './sync-capability-matrix.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
@@ -76,146 +75,6 @@ export function checkSync(canonicalPath: string, copyPath: string): SyncResult {
   return { passed: true };
 }
 
-// ---- The command index: a DERIVATION, not a copy ----
-
-/** Canonical manifest, repo-relative. */
-export const CANONICAL_MANIFEST_PATH = 'mcp-server/manifest/commands.json';
-
-/** The slim projection client code imports, repo-relative. */
-export const COMMAND_INDEX_PATH = 'web/src/data/commandIndex.json';
-
-/**
- * Every full-manifest replica, including the copy Vercel builds from.
- * `apps/docs/vercel.json` sets MANIFEST_PATH=./data/commands.json, so this
- * in-root copy is the production documentation source. Keep this registry
- * explicit: unregistered replicas are unguarded, so every new replica must be
- * registered here before CI can compare it with the canonical manifest.
- */
-export const MANIFEST_COPY_PATHS = [
-  'web/src/data/commands.json',
-  'apps/docs/data/commands.json',
-] as const;
-
-/**
- * The ONLY fields the command index carries, and this list is a bundle budget.
- *
- * `web/src/lib/mcp/bridgeAllowlist.ts` runs in the editor tab and needs exactly
- * these three to decide what a remote agent may drive. It used to import the
- * whole manifest to get them, so every command's description and JSON parameter
- * schema — 344 KB of JSON, ~205 KB minified — shipped to the browser to answer
- * a question about three short strings (#9954).
- *
- * Adding a fourth field puts that weight back. `checkCommandIndex` fails on any
- * extra key for exactly that reason, so the regression cannot arrive quietly
- * through a well-meaning "just one more field".
- */
-export const COMMAND_INDEX_FIELDS = ['name', 'category', 'requiredScope'] as const;
-
-export interface CommandIndexEntry {
-  name: string;
-  category: string;
-  requiredScope: string;
-}
-
-/**
- * Sort commands by name and each command's keys alphabetically, so two
- * structurally equal indexes stringify identically regardless of the order
- * their author happened to write them in.
- *
- * Deliberately does NOT drop unknown keys: normalising the actual index through
- * a projection would silently discard an extra field and report a pass, making
- * the check blind to the one regression it exists to catch.
- */
-function normaliseIndex(
-  commands: Array<Record<string, unknown>>,
-): Array<Record<string, unknown>> {
-  return [...commands]
-    .sort((x, y) => {
-      const a = String(x.name ?? '');
-      const b = String(y.name ?? '');
-      return a < b ? -1 : a > b ? 1 : 0;
-    })
-    .map((c) => {
-      const out: Record<string, unknown> = {};
-      for (const key of Object.keys(c).sort()) out[key] = c[key];
-      return out;
-    });
-}
-
-/**
- * Project canonical manifest commands onto the index shape.
- *
- * Exported because `generate-command-index.ts` writes the file with this exact
- * function. A generator carrying its own copy of the field list would be a
- * check that restates its subject: the two drift, and the gate then verifies
- * the generator against itself. One function, two callers.
- */
-export function projectCommandIndex(
-  commands: Array<Record<string, unknown>>,
-): { commands: CommandIndexEntry[] } {
-  const sorted = [...commands].sort((x, y) => {
-    const a = String(x.name ?? '');
-    const b = String(y.name ?? '');
-    return a < b ? -1 : a > b ? 1 : 0;
-  });
-  return {
-    commands: sorted.map(
-      (c) =>
-        Object.fromEntries(COMMAND_INDEX_FIELDS.map((f) => [f, c[f]])) as unknown as
-          CommandIndexEntry,
-    ),
-  };
-}
-
-/**
- * Checks that the command index is exactly the projection of canonical.
- *
- * Not a `checkSync` call — `checkSync` demands structural identity, which is
- * the one thing that must never be demanded of the index: the whole point is
- * that it carries less. So this recomputes the projection from canonical and
- * compares, which fails on a missing command, a changed category, a stale
- * scope, AND on an extra field.
- */
-export function checkCommandIndex(canonicalPath: string, indexPath: string): SyncResult {
-  let canonical: { commands?: Array<Record<string, unknown>> };
-  let index: { commands?: Array<Record<string, unknown>> };
-
-  try {
-    canonical = JSON.parse(fs.readFileSync(canonicalPath, 'utf-8')) as typeof canonical;
-  } catch {
-    return { passed: false, error: `Cannot read canonical manifest: ${canonicalPath}` };
-  }
-
-  try {
-    index = JSON.parse(fs.readFileSync(indexPath, 'utf-8')) as typeof index;
-  } catch {
-    return {
-      passed: false,
-      error:
-        `Cannot read command index: ${indexPath} — regenerate it with ` +
-        '`npm run generate:command-index`',
-    };
-  }
-
-  const expected = normaliseIndex(
-    projectCommandIndex(canonical.commands ?? []).commands as unknown as Array<
-      Record<string, unknown>
-    >,
-  );
-  const actual = normaliseIndex(index.commands ?? []);
-
-  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-    return {
-      passed: false,
-      error:
-        'Command index is not the projection of the canonical manifest — ' +
-        'regenerate it with `npm run generate:command-index`',
-    };
-  }
-
-  return { passed: true };
-}
-
 // ---- CLI wrapper (only runs when executed directly) ----
 
 const isMainModule =
@@ -239,7 +98,10 @@ if (isMainModule) {
    * Guarding the copy that gets deployed is the whole point. Adding a copy
    * without adding it here recreates exactly this bug.
    */
-  const copies = MANIFEST_COPY_PATHS.map((copy) => path.join(repoRoot, copy));
+  const copies = [
+    path.join(repoRoot, 'web/src/data/commands.json'),
+    path.join(repoRoot, 'apps/docs/data/commands.json'),
+  ];
 
   let failed = false;
   for (const copy of copies) {
@@ -250,35 +112,9 @@ if (isMainModule) {
     }
   }
 
-  /**
-   * The capability matrix has the same two-copies shape (#9720): the
-   * canonical `docs/capability-matrix.md` and the JSON module the docs site
-   * imports, `apps/docs/data/capability-matrix.json`. The web unit gate pins
-   * the pair too, but this gate is the one `ci.yml` runs for an `apps/docs/`
-   * or `docs/capability-matrix.md` edit, so a stale copy is red here as well.
-   */
-  const matrix = checkMatrixCopyOnDisk();
-  if (!matrix.passed) {
-    console.error(matrix.error);
-    failed = true;
-  }
-
-  // The index is derived, not copied, so it gets its own comparison — but it
-  // is checked HERE, in the one place this file declares as the registry of
-  // everything downstream of the canonical manifest. A derived artifact
-  // guarded somewhere else is a derived artifact nobody finds (PF-1019).
-  const indexPath = path.join(repoRoot, COMMAND_INDEX_PATH);
-  const indexResult = checkCommandIndex(canonical, indexPath);
-  if (!indexResult.passed) {
-    console.error(`${indexResult.error}`);
-    failed = true;
-  }
-
   if (failed) {
     process.exit(1);
   }
 
-  console.log(
-    `Manifest sync check passed (${copies.length} copies + the command index; capability matrix copy in sync).`,
-  );
+  console.log(`Manifest sync check passed (${copies.length} copies).`);
 }

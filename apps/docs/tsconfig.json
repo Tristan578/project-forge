@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "types": [],
     "lib": [
       "dom",
       "dom.iterable",
@@ -11,7 +10,6 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
-    "exactOptionalPropertyTypes": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "paths": {

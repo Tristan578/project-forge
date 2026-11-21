@@ -25,13 +25,7 @@ vi.mock('@/lib/keys/resolver', () => ({
   resolveApiKey: vi.fn(),
   ApiKeyError: class ApiKeyError extends Error {},
 }));
-// Spread the actual module: `createGenerationHandler` now imports
-// `@/lib/ai/tierAccess` for the panel tier gate (#7715), which reaches
-// `TRIAL_GRANT_TOKENS` off this module at import time — a bare mock throws.
-vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
-  return { ...actual, getTokenCost: vi.fn().mockReturnValue(10) };
-});
+vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn().mockReturnValue(10) }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 vi.mock('@/lib/rateLimit', () => ({
   rateLimitResponse: vi.fn().mockReturnValue(new Response('{}', { status: 429 })),
@@ -49,12 +43,6 @@ vi.mock('@/lib/qstash/client', () => ({
   isQstashConfigured: vi.fn(() => true),
   publishGenerationCallback: vi.fn(async () => {}),
 }));
-// Job-ownership binding (#10262) is a separate concern from the QStash
-// callback wiring this file covers — isolate it so a mocked `getDb()` with no
-// `insert` doesn't silently fail inside `bindProviderJob` on every test here.
-vi.mock('@/lib/generate/jobOwnership', () => ({
-  bindProviderJob: vi.fn(async () => {}),
-}));
 // Mocked only to drive the cache HIT/MISS branches that gate the second after()
 // publish site. Inert for the no-cacheKeyParams tests (they never call it).
 vi.mock('@/lib/api/responseCache', () => ({ cachedGenerate: vi.fn() }));
@@ -66,7 +54,6 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import { cachedGenerate } from '@/lib/api/responseCache';
-import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import { createGenerationHandler } from '../createGenerationHandler';
 
 const mockAuth = vi.mocked(authenticateRequest);
@@ -78,7 +65,6 @@ const mockCapture = vi.mocked(captureException);
 const mockConfigured = vi.mocked(isQstashConfigured);
 const mockPublish = vi.mocked(publishGenerationCallback);
 const mockCachedGenerate = vi.mocked(cachedGenerate);
-const mockBindProviderJob = vi.mocked(bindProviderJob);
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/model', {
@@ -98,7 +84,6 @@ function makeAsyncHandler(over: Partial<{
 }> = {}) {
   return createGenerationHandler<{ prompt: string }, ModelResult>({
     route: '/api/generate/model',
-    panel: 'generate-model',
     provider: 'elevenlabs',
     operation: 'model_generation',
     rateLimitKey: 'gen-model',
@@ -118,7 +103,6 @@ function makeAsyncHandler(over: Partial<{
 function makeCachedAsyncHandler() {
   return createGenerationHandler<{ prompt: string }, ModelResult>({
     route: '/api/generate/model',
-    panel: 'generate-model',
     provider: 'elevenlabs',
     operation: 'model_generation',
     rateLimitKey: 'gen-model',
@@ -200,71 +184,6 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     expect(mockPublish).not.toHaveBeenCalled();
   });
 
-  // Job-ownership binding (#10262): independent of the QStash callback wiring
-  // above, but the SAME `asyncJob.providerJobId` extractor doubles as the
-  // ownership extractor by default — see `jobIdForOwnership` in
-  // createGenerationHandler.ts.
-  describe('job ownership binding (#10262)', () => {
-    it('binds the resolved provider and extracted job id BEFORE the response is returned', async () => {
-      const callOrder: string[] = [];
-      mockBindProviderJob.mockImplementation(async () => {
-        callOrder.push('bind');
-      });
-      const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
-      callOrder.push('response-received');
-
-      expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
-      // Awaited inline (never via after()), unlike the QStash publish above:
-      // the whole point is that the binding exists before the client can ever
-      // see the job id, so it must complete before this call returns at all.
-      expect(callOrder).toEqual(['bind', 'response-received']);
-      expect(res.status).toBe(200);
-    });
-
-    it('does not bind when the extractor returns null (synchronous result — nothing to poll)', async () => {
-      const handler = makeAsyncHandler({ provider: 'dalle3', providerJobId: (r) => (r.provider === 'sdxl' ? r.jobId : null) });
-      await handler(makeRequest({ prompt: 'a hero' }));
-      expect(mockBindProviderJob).not.toHaveBeenCalled();
-    });
-
-    it('never fails the request when the bind write throws (bindProviderJob itself swallows and reports), and reports enough to identify the job and user', async () => {
-      mockBindProviderJob.mockRejectedValueOnce(new Error('db down'));
-      const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
-      expect(res.status).toBe(200);
-      expect(mockCapture).toHaveBeenCalledWith(
-        expect.any(Error),
-        expect.objectContaining({
-          action: 'job_ownership_bind',
-          providerJobId: 'task-123',
-          userId: 'user-1',
-        }),
-      );
-    });
-
-    it('never binds and never fails the request when the ownership extractor throws, and reports the user it left unbound', async () => {
-      // The generic extractor-throws test below only asserts SOME capture
-      // happened — the QStash extract site captures too, so it could not see
-      // this catch losing the userId. There is no providerJobId to report
-      // (extracting it is what threw), but the user whose job is now unbound
-      // is in scope and is what an on-call engineer needs to find them.
-      const handler = makeAsyncHandler({ providerJobId: () => { throw new Error('bad result shape'); } });
-      const res = await handler(makeRequest({ prompt: 'a castle' }));
-
-      expect(res.status).toBe(200);
-      expect(mockBindProviderJob).not.toHaveBeenCalled();
-      expect(mockCapture).toHaveBeenCalledWith(
-        expect.any(Error),
-        expect.objectContaining({ action: 'job_ownership_extract', userId: 'user-1' }),
-      );
-    });
-
-    it('still binds when QStash is unconfigured — ownership binding does not depend on the durable-callback feature flag', async () => {
-      mockConfigured.mockReturnValue(false);
-      await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
-      expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
-    });
-  });
-
   it('does not publish when the extractor returns null (synchronous result)', async () => {
     const handler = makeAsyncHandler({ provider: 'dalle3', providerJobId: (r) => (r.provider === 'sdxl' ? r.jobId : null) });
     const res = await handler(makeRequest({ prompt: 'a hero' }));
@@ -295,7 +214,6 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
   it('does not publish for a handler with no asyncJob config', async () => {
     const plain = createGenerationHandler<{ prompt: string }, ModelResult>({
       route: '/api/generate/sfx',
-      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'sfx_generation',
       rateLimitKey: 'gen-sfx',
@@ -306,9 +224,6 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     expect(res.status).toBe(200);
     await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
-    // No asyncJob and no jobIdForOwnership: nothing declares a pollable job
-    // id, so nothing is bound either (#10262).
-    expect(mockBindProviderJob).not.toHaveBeenCalled();
   });
 
   it('publishes on a cache MISS (durable callback armed for the new provider job)', async () => {
@@ -329,10 +244,6 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
       { userId: 'user-1', providerJobId: 'task-123', type: 'model', tokenUsageId: 'usage-1', attempt: 0 },
       { delaySeconds: 30 },
     );
-    // The cached path has its OWN bind site (inside the cacheMiss factory,
-    // #10262) — a new provider job was issued here, so it must be bound to
-    // the caller exactly like the uncached path.
-    expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
   });
 
   it('does NOT publish on a cache HIT (re-served result — no new job to poll)', async () => {
@@ -348,9 +259,5 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     await expect(res.json()).resolves.not.toHaveProperty('durable');
     await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
-    // A HIT re-serves a job id that was bound to whoever first created it;
-    // this caller must NOT be bound to it (first writer wins would refuse
-    // anyway, but the call must never be made).
-    expect(mockBindProviderJob).not.toHaveBeenCalled();
   });
 });

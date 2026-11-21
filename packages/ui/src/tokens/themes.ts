@@ -1,4 +1,3 @@
-/** Complete built-in theme palettes and generated CSS, including verified status color pairs. */
 import { THEME_NAMES, type ThemeName, type ThemeTokens } from './colors';
 
 const BASE_STRUCTURE: Pick<ThemeTokens, '--sf-radius-sm' | '--sf-radius-full' | '--sf-font-mono'> = {
@@ -7,56 +6,9 @@ const BASE_STRUCTURE: Pick<ThemeTokens, '--sf-radius-sm' | '--sf-radius-full' | 
   '--sf-font-mono': "'Geist Mono', ui-monospace, monospace",
 };
 
-/**
- * Status-colour semantic (PF-1068 / #9108). Foreground/background PAIRS so a
- * filled status band can carry normal-weight text at >= WCAG AA 4.5:1 (proven
- * per theme in themes.test.ts). Shared across every theme — a status must not
- * change meaning between themes, and holding the pair constant is what lets the
- * contrast be verified once rather than re-derived at each site. Measured
- * ratios: healthy 5.02, degraded 10.95, down 6.47, unknown 7.73 (:1). Any
- * single-theme override must keep clearing 4.5 or themes.test.ts fails.
- */
-const STATUS_COLORS: Pick<
-  ThemeTokens,
-  | '--sf-status-healthy-bg'
-  | '--sf-status-healthy-fg'
-  | '--sf-status-degraded-bg'
-  | '--sf-status-degraded-fg'
-  | '--sf-status-down-bg'
-  | '--sf-status-down-fg'
-  | '--sf-status-unknown-bg'
-  | '--sf-status-unknown-fg'
-> = {
-  '--sf-status-healthy-bg': '#15803d',
-  '--sf-status-healthy-fg': '#ffffff',
-  '--sf-status-degraded-bg': '#eab308',
-  '--sf-status-degraded-fg': '#000000',
-  '--sf-status-down-bg': '#b91c1c',
-  '--sf-status-down-fg': '#ffffff',
-  '--sf-status-unknown-bg': '#52525b',
-  '--sf-status-unknown-fg': '#ffffff',
-};
-
-/** Status foregrounds for unfilled labels and dots on card surfaces. */
-const DARK_STATUS_INDICATORS = {
-  '--sf-status-healthy-indicator': '#4ade80',
-  '--sf-status-degraded-indicator': '#facc15',
-  '--sf-status-down-indicator': '#f87171',
-  '--sf-status-unknown-indicator': '#a1a1aa',
-};
-const LIGHT_STATUS_INDICATORS = {
-  '--sf-status-healthy-indicator': '#15803d',
-  '--sf-status-degraded-indicator': '#854d0e',
-  '--sf-status-down-indicator': '#b91c1c',
-  '--sf-status-unknown-indicator': '#52525b',
-};
-
-/** Complete built-in palettes; every theme includes the shared readable status pairs. */
 export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   dark: {
     ...BASE_STRUCTURE,
-    ...STATUS_COLORS,
-    ...DARK_STATUS_INDICATORS,
     '--sf-bg-app': '#09090b',
     '--sf-bg-surface': '#18181b',
     '--sf-bg-elevated': '#27272a',
@@ -83,8 +35,6 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   },
   light: {
     ...BASE_STRUCTURE,
-    ...STATUS_COLORS,
-    ...LIGHT_STATUS_INDICATORS,
     '--sf-bg-app': '#fafafa',
     '--sf-bg-surface': '#ffffff',
     '--sf-bg-elevated': '#f4f4f5',
@@ -111,8 +61,6 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   },
   ember: {
     ...BASE_STRUCTURE,
-    ...STATUS_COLORS,
-    ...DARK_STATUS_INDICATORS,
     '--sf-bg-app': '#1a0f05',
     '--sf-bg-surface': '#2a1a0a',
     '--sf-bg-elevated': '#3d2814',
@@ -139,8 +87,6 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   },
   rust: {
     ...BASE_STRUCTURE,
-    ...STATUS_COLORS,
-    ...DARK_STATUS_INDICATORS,
     '--sf-bg-app': '#1c1917',
     '--sf-bg-surface': '#292524',
     '--sf-bg-elevated': '#44403c',
@@ -167,8 +113,6 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   },
   ice: {
     ...BASE_STRUCTURE,
-    ...STATUS_COLORS,
-    ...DARK_STATUS_INDICATORS,
     '--sf-bg-app': '#0f172a',
     '--sf-bg-surface': '#1e293b',
     '--sf-bg-elevated': '#334155',
@@ -195,8 +139,6 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   },
   leaf: {
     ...BASE_STRUCTURE,
-    ...STATUS_COLORS,
-    ...DARK_STATUS_INDICATORS,
     '--sf-bg-app': '#0a1a0f',
     '--sf-bg-surface': '#132a1a',
     '--sf-bg-elevated': '#1e3d24',
@@ -226,8 +168,6 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   },
   mech: {
     ...BASE_STRUCTURE,
-    ...STATUS_COLORS,
-    ...DARK_STATUS_INDICATORS,
     '--sf-bg-app': '#0c0c0e',
     '--sf-bg-surface': '#141418',
     '--sf-bg-elevated': '#1e1e24',

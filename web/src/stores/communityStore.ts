@@ -18,11 +18,6 @@ export interface GalleryGame {
   createdAt: string;
 }
 
-export interface ForkGameResult {
-  projectId: string;
-  quarantinedScripts: number;
-}
-
 interface CommunityState {
   // Gallery
   games: GalleryGame[];
@@ -50,7 +45,7 @@ interface CommunityState {
   likeGame: (gameId: string) => Promise<void>;
   unlikeGame: (gameId: string) => Promise<void>;
   rateGame: (gameId: string, rating: number) => Promise<void>;
-  forkGame: (gameId: string) => Promise<ForkGameResult>;
+  forkGame: (gameId: string) => Promise<string>;
 }
 
 export const useCommunityStore = create<CommunityState>((set, get) => ({
@@ -223,14 +218,8 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
       });
       if (!res.ok) throw new Error('Failed to fork game');
 
-      const data: { projectId: string; quarantinedScripts?: unknown } = await res.json();
-      const count = data.quarantinedScripts;
-      return {
-        projectId: data.projectId,
-        quarantinedScripts: typeof count === 'number' && Number.isSafeInteger(count) && count >= 0
-          ? count
-          : 0,
-      };
+      const data = await res.json();
+      return data.projectId;
     } catch (err) {
       console.error('Failed to fork game:', err);
       throw err;

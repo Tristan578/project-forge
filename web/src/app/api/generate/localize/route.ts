@@ -13,11 +13,9 @@ import {
 } from '@/lib/i18n/gameLocalization';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
-import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const CHUNK_SIZE = 200;
 
@@ -27,12 +25,11 @@ interface LocalizeParams {
   targetLocales: string[];
 }
 
-const POST_impl = createGenerationHandler<
+export const POST = createGenerationHandler<
   LocalizeParams,
   { locales: Record<string, LocaleBundle> }
 >({
   route: '/api/generate/localize',
-  panel: 'ai-chat',
   // Batch route: matches `export const maxDuration` above so the generation
   // agent derives its step-timeout cap against the real 120s budget.
   maxDurationSeconds: 120,
@@ -123,9 +120,7 @@ const POST_impl = createGenerationHandler<
     targetLocales: params.targetLocales,
   }),
   execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
-    // A platform key can be a federated Bearer token (#8858); passing it as
-    // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
-    const anthropicProvider = createAnthropic(anthropicClientAuthForKey(apiKey));
+    const anthropicProvider = createAnthropic({ apiKey });
     const result: Record<string, LocaleBundle> = {};
 
     // Resolve consent + a single trace id once for the whole localize op — every
@@ -176,7 +171,3 @@ const POST_impl = createGenerationHandler<
     return { locales: result };
   },
 });
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

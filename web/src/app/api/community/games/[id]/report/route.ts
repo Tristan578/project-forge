@@ -65,8 +65,6 @@ import {
   REPORT_RATE_LIMIT_MAX,
   REPORT_RATE_LIMIT_WINDOW_SECONDS,
 } from '@/lib/config/moderation';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,7 +88,7 @@ interface ReportResultRow {
   hidden: boolean | null;
 }
 
-async function POST_impl(
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -243,10 +241,6 @@ async function POST_impl(
     });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/report' });
-    return redactedJson({ error: 'Failed to report game' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to report game' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

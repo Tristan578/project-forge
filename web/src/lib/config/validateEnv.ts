@@ -14,12 +14,6 @@
 // edge runtime too, where node `crypto` (pulled in by encryption.ts) is unavailable.
 import { MASTER_KEY_HEX } from '@/lib/keys/masterKeyFormat';
 import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
-import {
-  ANTHROPIC_WIF_REQUIRED_ENV,
-  ANTHROPIC_WIF_REQUIRED_ENV_NAMES,
-  ANTHROPIC_WIF_WORKSPACE_ENV,
-  missingAnthropicWifEnv,
-} from '@/lib/config/anthropicWif';
 
 /** Descriptor for a required environment variable. */
 interface RequiredVar {
@@ -51,29 +45,6 @@ const OPTIONAL_VARS: OptionalVar[] = [
   {
     key: 'ANTHROPIC_API_KEY',
     description: 'Anthropic API key for direct AI calls (AI Gateway OIDC is preferred)',
-    defaultValue: '',
-  },
-  // Anthropic Workload Identity Federation (#8858) — all three or none; see
-  // `@/lib/config/anthropicWif` and docs/guides/anthropic-wif-setup.md. Unset,
-  // the direct chat client uses ANTHROPIC_API_KEY exactly as before.
-  {
-    key: ANTHROPIC_WIF_REQUIRED_ENV.federationRuleId,
-    description: 'Anthropic WIF federation rule ID (fdrl_...) for the token exchange',
-    defaultValue: '',
-  },
-  {
-    key: ANTHROPIC_WIF_REQUIRED_ENV.organizationId,
-    description: 'Anthropic organization UUID for the WIF token exchange',
-    defaultValue: '',
-  },
-  {
-    key: ANTHROPIC_WIF_REQUIRED_ENV.serviceAccountId,
-    description: 'Anthropic service account ID (svac_...) the federated token acts as',
-    defaultValue: '',
-  },
-  {
-    key: ANTHROPIC_WIF_WORKSPACE_ENV,
-    description: 'Anthropic workspace (wrkspc_... or default); needed only when the WIF rule spans several workspaces',
     defaultValue: '',
   },
   {
@@ -142,14 +113,10 @@ export interface EnvValidationResult {
  *
  * - In development (`NODE_ENV === 'development'`), validation is skipped and
  *   always returns `{ valid: true }` so local dev works without full config.
- * - Outside development, unset required vars and invalid present credentials
- *   are reported in `missing`. Staging requires a Stripe secret or restricted
- *   key beginning with sk_test_ or rk_test_; live or malformed keys are invalid.
- *   The development early return skips these credential checks.
+ * - In production/staging, missing required vars are reported as errors.
  * - Optional vars with missing values produce warnings (informational only).
  *
- * @returns Validation result with unset or invalid required fields in `missing`
- *   and optional configuration notices in `warnings`.
+ * @returns Validation result with lists of missing required and optional vars.
  */
 export function validateEnvironment(): EnvValidationResult {
   const isDev = process.env.NODE_ENV === 'development';
@@ -187,14 +154,6 @@ export function validateEnvironment(): EnvValidationResult {
     console.warn(`[validateEnvironment] WARNING: ${msg}`);
   }
 
-  // Staging and preview must never charge a live payment account. Secrets can
-  // remain opaque in Vercel; the running deployment proves their mode at boot.
-  const stripeKey = process.env.STRIPE_SECRET_KEY;
-  if (isStaging && stripeKey && !/^(sk|rk)_test_/.test(stripeKey)) {
-    missing.push('STRIPE_SECRET_KEY');
-    console.error('[validateEnvironment] CRITICAL: Staging requires a Stripe test-mode secret or restricted key.');
-  }
-
   // Encryption key charset validation: a present-but-malformed key (right length,
   // non-hex chars) passes the missing-var check above, then crashes the first
   // BYOK encrypt/decrypt with 'Invalid key length' instead of failing at boot.
@@ -204,15 +163,6 @@ export function validateEnvironment(): EnvValidationResult {
     const msg = 'ENCRYPTION_MASTER_KEY is set but is not a 64-character hex string (32 bytes). BYOK encryption will crash on first use.';
     if (!missing.includes('ENCRYPTION_MASTER_KEY')) missing.push('ENCRYPTION_MASTER_KEY');
     console.error(`[validateEnvironment] CRITICAL: ${msg}`);
-  }
-
-  // Anthropic WIF is all-three-or-none (#8858). A partial set is not an error
-  // — boot must not break — but it silently leaves federation OFF, so say so.
-  const wifMissing = missingAnthropicWifEnv();
-  if (wifMissing.length > 0 && wifMissing.length < ANTHROPIC_WIF_REQUIRED_ENV_NAMES.length) {
-    const msg = `Anthropic Workload Identity Federation is partially configured — ${wifMissing.join(', ')} not set. Federation stays OFF and direct chat uses ANTHROPIC_API_KEY. Set all of ${ANTHROPIC_WIF_REQUIRED_ENV_NAMES.join(', ')}, or none.`;
-    warnings.push(msg);
-    console.warn(`[validateEnvironment] WARNING: ${msg}`);
   }
 
   for (const v of OPTIONAL_VARS) {

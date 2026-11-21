@@ -6,10 +6,7 @@ import { safeAuth } from '@/lib/auth/safe-auth';
 import { createProject } from '@/lib/projects/service';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { isPublishedSceneData } from '@/lib/storage/publishedGameStorage';
 import { quarantineRemixedScripts } from '@/lib/security/remixSanitizer';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +20,7 @@ export const dynamic = 'force-dynamic';
  * quarantined (kept, but disabled) on the way across the user boundary — see
  * `@/lib/security/remixSanitizer` and SEC-2 in CLAUDE.md.
  */
-async function POST_impl(
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
@@ -81,48 +78,43 @@ async function POST_impl(
           id: publishedGames.id,
           title: publishedGames.title,
           projectId: publishedGames.projectId,
-          status: publishedGames.status,
-          publishedSceneData: publishedGames.publishedSceneData,
         })
         .from(publishedGames)
         .where(
           and(
             eq(publishedGames.userId, creator.id),
-            eq(publishedGames.slug, slug),
-            eq(publishedGames.status, 'published')
+            eq(publishedGames.slug, slug)
           )
         )
         .limit(1)
     );
 
-    if (!game || game.status !== 'published') {
+    if (!game) {
       return NextResponse.json(
         { error: 'Game not found' },
         { status: 404 }
       );
     }
 
-    // Copy exactly the published revision, including when the creator has
-    // continued editing. Only legacy rows without a snapshot use project data.
-    let publishedScene: unknown = game.publishedSceneData;
-    if (publishedScene == null) {
-      const [sourceProject] = await queryWithResilience(() => getDb()
+    // Fetch the original project's scene data
+    const [sourceProject] = await queryWithResilience(() =>
+      getDb()
         .select({ sceneData: projects.sceneData })
         .from(projects)
-        .where(and(eq(projects.id, game.projectId), eq(projects.userId, creator.id)))
-        .limit(1));
-      if (!sourceProject) {
-        return NextResponse.json({ error: 'Game data not found' }, { status: 404 });
-      }
-      publishedScene = sourceProject.sceneData;
-    }
-    if (!isPublishedSceneData(publishedScene)) {
-      throw new Error('Invalid publication snapshot');
+        .where(eq(projects.id, game.projectId))
+        .limit(1)
+    );
+
+    if (!sourceProject) {
+      return NextResponse.json(
+        { error: 'Game data not found' },
+        { status: 404 }
+      );
     }
 
     // Disable the creator's scripts before the scene lands in someone else's
     // project. Source text is preserved; the remixer opts in to running it.
-    const { sceneData, quarantined } = quarantineRemixedScripts(publishedScene);
+    const { sceneData, quarantined } = quarantineRemixedScripts(sourceProject.sceneData);
 
     // Create the remixed project (respects tier-based project limits)
     const remixedProject = await createProject(
@@ -157,19 +149,15 @@ async function POST_impl(
     );
   } catch (error) {
     if (error instanceof Error && error.message === 'Project limit exceeded') {
-      return redactedJson(
+      return NextResponse.json(
         { error: 'Project limit reached — upgrade your plan to remix more games' },
         { status: 403 }
       );
     }
     captureException(error, { route: '/api/play/[userId]/[slug]/remix' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to remix game' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

@@ -27,7 +27,6 @@ async function invoke(
     setSpriteAnimator: vi.fn(),
     setAnimationStateMachine: vi.fn(),
     setTilemapData: vi.fn(),
-    setTileCollisionShape: vi.fn(() => 'queued'),
     setTileset: vi.fn(),
     setPhysics2d: vi.fn(),
     removePhysics2d: vi.fn(),
@@ -383,85 +382,6 @@ describe('handlers2d tilemap edge cases', () => {
       );
       expect(result.success).toBe(true);
       expect(store.setTilemapData).toHaveBeenCalled();
-    });
-  });
-
-  // OP-04: the in-app AI path must share the manual path's validated contract.
-  describe('set_tile_collision_shape', () => {
-    it('authors a shape at a valid cell through the shared store action', async () => {
-      const { result, store } = await invoke(
-        'set_tile_collision_shape',
-        { entityId: 'e1', layerIndex: 0, x: 3, y: 4, shape: 'halfTop' },
-        { tilemaps: { e1: baseTilemap } },
-      );
-      expect(result.success).toBe(true);
-      expect(store.setTileCollisionShape).toHaveBeenCalledWith('e1', 0, 3, 4, 'halfTop');
-      expect(result.result).toMatchObject({ status: 'queued', message: expect.stringContaining('awaiting the engine update') });
-    });
-
-    it('reports an engine rejection without claiming the shape was saved', async () => {
-      const { result } = await invoke(
-        'set_tile_collision_shape',
-        { entityId: 'e1', layerIndex: 0, x: 0, y: 0, shape: 'full' },
-        {
-          tilemaps: { e1: baseTilemap },
-          setTileCollisionShape: vi.fn(() => { throw new Error('The engine is not ready'); }),
-        },
-      );
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('engine is not ready');
-    });
-
-    it('accepts every shape in the vocabulary', async () => {
-      for (const shape of ['none', 'full', 'halfTop', 'halfBottom', 'slopeLeft', 'slopeRight']) {
-        const { result, store } = await invoke(
-          'set_tile_collision_shape',
-          { entityId: 'e1', layerIndex: 0, x: 0, y: 0, shape },
-          { tilemaps: { e1: baseTilemap } },
-        );
-        expect(result.success, `shape ${shape}`).toBe(true);
-        expect(store.setTileCollisionShape).toHaveBeenCalledWith('e1', 0, 0, 0, shape);
-      }
-    });
-
-    it('rejects an unknown shape without touching the store', async () => {
-      const { result, store } = await invoke(
-        'set_tile_collision_shape',
-        { entityId: 'e1', layerIndex: 0, x: 0, y: 0, shape: 'wedge' },
-        { tilemaps: { e1: baseTilemap } },
-      );
-      expect(result.success).toBe(false);
-      expect(store.setTileCollisionShape).not.toHaveBeenCalled();
-    });
-
-    it('fails with no tilemap for the entity', async () => {
-      const { result, store } = await invoke(
-        'set_tile_collision_shape',
-        { entityId: 'e1', layerIndex: 0, x: 0, y: 0, shape: 'full' },
-        { tilemaps: {} },
-      );
-      expect(result.success).toBe(false);
-      expect(store.setTileCollisionShape).not.toHaveBeenCalled();
-    });
-
-    it('rejects an out-of-range coordinate without corrupting the tilemap', async () => {
-      const { result, store } = await invoke(
-        'set_tile_collision_shape',
-        { entityId: 'e1', layerIndex: 0, x: 99, y: 0, shape: 'full' },
-        { tilemaps: { e1: baseTilemap } },
-      );
-      expect(result.success).toBe(false);
-      expect(store.setTileCollisionShape).not.toHaveBeenCalled();
-    });
-
-    it('rejects an out-of-range layer', async () => {
-      const { result, store } = await invoke(
-        'set_tile_collision_shape',
-        { entityId: 'e1', layerIndex: 9, x: 0, y: 0, shape: 'full' },
-        { tilemaps: { e1: baseTilemap } },
-      );
-      expect(result.success).toBe(false);
-      expect(store.setTileCollisionShape).not.toHaveBeenCalled();
     });
   });
 
@@ -923,17 +843,6 @@ describe('handlers2d sprite animation edge cases', () => {
       });
       expect(result.success).toBe(true);
       expect(store.setSpriteSheet).toHaveBeenCalled();
-    });
-
-    it('preserves an own __proto__ clip name through storage and JSON serialization', async () => {
-      const { result, store } = await invoke('slice_sprite_sheet', {
-        entityId: 'e1', assetId: 'tex-1', clips: [{ name: '__proto__', frames: [0], fps: 12 }],
-      });
-      const sheet = vi.mocked(store.setSpriteSheet).mock.calls[0][1];
-
-      expect(result.success).toBe(true);
-      expect(Object.hasOwn(sheet.clips, '__proto__')).toBe(true);
-      expect(JSON.parse(JSON.stringify(sheet.clips)).__proto__.name).toBe('__proto__');
     });
 
     it('fails without assetId', async () => {

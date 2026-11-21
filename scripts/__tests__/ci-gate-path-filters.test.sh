@@ -5,7 +5,7 @@
 # WHY THIS STEP IS TESTED
 # -----------------------
 # `ci-gate` decides, from a `git diff --name-only` list, which downstream jobs
-# run. Each output is a grep against that list. A gate
+# run. Every one of its fourteen outputs is a grep against that list. A gate
 # whose trigger does not fire is indistinguishable from a gate that passed:
 # GitHub renders a skipped required check as green, and `check-ci-success.sh`
 # deliberately tolerates a legitimate path-filter skip. So an under-scoped grep
@@ -41,9 +41,7 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
-readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
-readonly -f fail
 
 [ -f "$CI_YML" ] || { echo "ci.yml not found: $CI_YML"; exit 1; }
 
@@ -71,7 +69,6 @@ extract_step_body() {
     }
   ' "$CI_YML" | grep -v '^CHANGED='
 }
-readonly -f extract_step_body
 
 extract_step_body > "$STEP_BODY"
 
@@ -95,13 +92,12 @@ assert_extraction_is_real() {
   for sentinel in 'web=true' 'engine=true' 'mcp=true' 'ci=true' 'docs=true' \
                   'design=true' 'hooks=true' 'deps=true' 'agentic=true' \
                   'onboarding=true' 'codex=true' 'ghaw=true' 'api=true' \
-                  'skills=true' 'observatory=true' 'any-code='; do
+                  'skills=true' 'any-code='; do
     grep -qF "$sentinel" "$STEP_BODY" || { echo "  FAIL: extracted body has no '$sentinel'"; missing=1; }
   done
   [ "$missing" -eq 0 ] || exit 1
-  pass "step body extracted from ci.yml ($body_lines lines, all 16 outputs present)"
+  pass "step body extracted from ci.yml ($body_lines lines, all 15 outputs present)"
 }
-readonly -f assert_extraction_is_real
 
 # ---- Harness ----------------------------------------------------------------
 #
@@ -117,7 +113,6 @@ run_gate() {
   cat "$out"
   rm -f "$out"
 }
-readonly -f run_gate
 
 # assert_output <case name> <file list> <key> <expected>
 assert_output() {
@@ -130,7 +125,6 @@ assert_output() {
     fail "$name: expected $key=$expected, got '${actual:-<unset>}'"
   fi
 }
-readonly -f assert_output
 
 echo "=== ci-gate path filters ==="
 assert_extraction_is_real
@@ -142,9 +136,6 @@ assert_output "web copy alone still fires web" "web/src/data/commands.json" web 
 assert_output "canonical manifest fires docs" "mcp-server/manifest/commands.json" docs true
 assert_output "docs copy fires docs" "apps/docs/data/commands.json" docs true
 assert_output "the sync gate script fires docs" "apps/docs/scripts/check-manifest-sync.ts" docs true
-assert_output "the command index fires docs" "web/src/data/commandIndex.json" docs true
-assert_output "the command index still fires web" "web/src/data/commandIndex.json" web true
-assert_output "the index generator fires docs" "apps/docs/scripts/generate-command-index.ts" docs true
 
 # Controls. Without these the docs filter could be `docs=true` unconditionally
 # and every assertion above would still pass.
@@ -154,27 +145,6 @@ assert_output "engine file does NOT fire docs" "engine/src/lib.rs" docs false
 # near-miss path must not match.
 assert_output "near-miss path does NOT fire docs" "web/src/data/commands.jsonx" docs false
 assert_output "commands.json elsewhere does NOT fire docs" "web/src/other/commands.json" docs false
-assert_output "near-miss index path does NOT fire docs" "web/src/data/commandIndex.jsonx" docs false
-assert_output "commandIndex.json elsewhere does NOT fire docs" "web/src/other/commandIndex.json" docs false
-
-# ---- #9720: the capability matrix must fire the web AND docs gates ----------
-#
-# docs/capability-matrix.md is prose whose only content gate is a web unit test
-# (web/src/lib/config/__tests__/capabilityMatrix.test.ts); its docs-site copy
-# (apps/docs/data/capability-matrix.json) is verified by the docs gate's
-# check-manifest-sync.ts. `^docs/` alone maps only to the onboarding tripwire,
-# so a matrix-only PR used to run neither check.
-echo "--- capability matrix (#9720) ---"
-assert_output "capability matrix alone fires web" "docs/capability-matrix.md" web true
-assert_output "capability matrix alone fires docs" "docs/capability-matrix.md" docs true
-assert_output "capability matrix reaches any-code" "docs/capability-matrix.md" any-code true
-assert_output "the docs-site matrix copy fires docs" "apps/docs/data/capability-matrix.json" docs true
-# Controls: the alternative is anchored and dot-escaped, so a sibling doc or a
-# near-miss name must not fire web.
-assert_output "another docs file does NOT fire web" "docs/known-limitations.md" web false
-assert_output "another docs file does NOT fire docs" "docs/known-limitations.md" docs false
-assert_output "near-miss matrix path does NOT fire web" "docs/capability-matrix.mdx" web false
-assert_output "matrix name elsewhere does NOT fire web" "specs/capability-matrix.md" web false
 
 # ---- The other thirteen outputs ---------------------------------------------
 echo "--- other filters ---"
@@ -215,83 +185,11 @@ assert_output "SKILL.md-only change does not set any-code" ".claude/skills/kanba
 assert_output "web change DOES set any-code" "web/src/app/page.tsx" any-code true
 assert_output "docs copy DOES set any-code" "web/src/data/commands.json" any-code true
 
-# Observatory tools have their own lightweight unit/type gate.
-echo "--- Observatory filters ---"
-for path in tools/observatory/index.ts tools/observatory/tsconfig.json tools/observatory/vitest.config.ts tools/observatory/__tests__/scanner.test.ts; do
-  assert_output "Observatory path fires its gate" "$path" observatory true
-  assert_output "Observatory-only stays outside heavy fan-out" "$path" any-code false
-  assert_output "Observatory-only does not trigger CI-wide work" "$path" ci false
-done
-assert_output "Observatory package manifest still triggers dependency checks" "tools/observatory/package.json" deps true
-assert_output "near-miss directory does not fire Observatory" "tools/observatory-extra/index.ts" observatory false
-assert_output "nested lookalike does not fire Observatory" "other/tools/observatory/index.ts" observatory false
-assert_output "unrelated tool does not fire Observatory" "tools/agentic-sync/sync.mjs" observatory false
-assert_output "web-only does not fire Observatory output" "web/src/app/page.tsx" observatory false
-assert_output "empty diff leaves Observatory false" "" observatory false
-# The CI/deps arms run the job without falsely marking its own source changed.
-assert_output "workflow change triggers CI arm" ".github/workflows/ci.yml" ci true
-assert_output "root lockfile triggers dependencies arm" "package-lock.json" deps true
-
-# All aggregate measurement inputs must reach the successful CI producer.
-echo "--- aggregate coverage measurement inputs ---"
-for path in web/vitest.config.ts web/vitest.config.node.ts web/vitest.config.jsdom.ts web/vitest.test-selection.ts web/vitest.setup.ts; do
-  assert_output "coverage input reaches web producer" "$path" web true
-  assert_output "coverage input reaches required fan-out" "$path" any-code true
-done
-assert_output "lookalike outside web does not fire producer" "other/web/vitest.test-selection.ts" web false
-
-# ---- #9745: the Codex CLI surface gate runs in the agentic job --------------
-#
-# scripts/check-codex-port.sh regenerates .agents/skills, .codex/agents and
-# .codex/hooks.json from .claude/ and compares. Its inputs are the SOURCES, the
-# generated side, and every repository path the .codex/ files NAME (the gate
-# resolves them, and dies when a wired hook script is missing). A filter naming
-# only the generated side lets a skill edit merge with a stale mirror; one that
-# omits what is merely READ lets a rename merge green and turns the NEXT,
-# unrelated agentic PR red for someone else's change.
-echo "--- Codex surface gate (#9745) ---"
-assert_output "a skill SOURCE fires agentic" ".claude/skills/testing/SKILL.md" agentic true
-assert_output "an agent SOURCE fires agentic" ".claude/agents/security-reviewer.md" agentic true
-assert_output "the hooks SOURCE fires agentic" ".claude/settings.json" agentic true
-assert_output "a generated skill fires agentic" ".agents/skills/testing/SKILL.md" agentic true
-assert_output "a generated agent fires agentic" ".codex/agents/security-reviewer.toml" agentic true
-assert_output "the generated hooks file fires agentic" ".codex/hooks.json" agentic true
-assert_output "the hook adapter fires agentic" ".codex/hooks/run-claude-hook.mjs" agentic true
-assert_output "the hand-written Codex config fires agentic" ".codex/config.toml" agentic true
-assert_output "the generator fires agentic" "tools/agentic-sync/port.mjs" agentic true
-assert_output "the gate script fires agentic" "scripts/check-codex-port.sh" agentic true
-assert_output "the gate's suite fires agentic" "scripts/__tests__/check-codex-port.test.sh" agentic true
-assert_output ".mcp.json fires agentic (MCP parity)" ".mcp.json" agentic true
-assert_output "a hook SCRIPT the surface names fires agentic" ".claude/hooks/block-main-commits.sh" agentic true
-assert_output "a rule file the agents name fires agentic" ".claude/rules/lessons-learned.md" agentic true
-assert_output "a validate tool the agents name fires agentic" ".claude/tools/validate-rust.sh" agentic true
-assert_output ".claude/CLAUDE.md fires agentic" ".claude/CLAUDE.md" agentic true
-assert_output "a workflow the agents name fires agentic" ".github/workflows/cd.yml" agentic true
-# Near misses: the anchors and escapes must hold, not merely contain the text.
-assert_output "the ROOT CLAUDE.md does NOT fire agentic" "CLAUDE.md" agentic false
-assert_output "a near-miss of .mcp.json does NOT fire agentic" ".mcp.jsonx" agentic false
-assert_output "a nested .mcp.json does NOT fire agentic" "web/.mcp.json" agentic false
-assert_output "a near-miss of settings.json does NOT fire agentic" ".claude/settings.json.bak" agentic false
-assert_output "web source does NOT fire agentic" "web/src/app/page.tsx" agentic false
-assert_output "engine source does NOT fire agentic" "engine/src/lib.rs" agentic false
-assert_output "a docs file does NOT fire agentic" "docs/known-limitations.md" agentic false
-
-assert_output "the hook adapter fires hooks (so the Windows hook job runs)" ".codex/hooks/run-claude-hook.mjs" hooks true
-assert_output "the generator fires hooks (so the Windows hook job runs)" "tools/agentic-sync/port.mjs" hooks true
-assert_output "the generator manifest fires hooks" "tools/agentic-sync/port.json" hooks true
-assert_output "the GENERATED lock beside them does NOT fire hooks (it changes with every skill edit)" "tools/agentic-sync/port.lock.json" hooks false
-assert_output "…but it still fires agentic, where its drift is checked" "tools/agentic-sync/port.lock.json" agentic true
-assert_output "a near-miss of the manifest does NOT fire hooks" "tools/agentic-sync/port.json.bak" hooks false
-assert_output "the OTHER agentic generator does NOT fire hooks" "tools/agentic-sync/sync.mjs" hooks false
-assert_output "a generated agent does NOT fire hooks" ".codex/agents/security-reviewer.toml" hooks false
-
 # ---- Empty diff -------------------------------------------------------------
 echo "--- empty diff ---"
 assert_output "empty diff leaves docs false" "" docs false
 assert_output "empty diff leaves any-code false" "" any-code false
 assert_output "empty diff leaves deps false" "" deps false
-assert_output "empty diff leaves agentic false" "" agentic false
-assert_output "empty diff leaves hooks false" "" hooks false
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

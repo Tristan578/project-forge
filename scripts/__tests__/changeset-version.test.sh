@@ -23,9 +23,7 @@ NPM_ARGS_OUT="$(mktemp)"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
-readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
-readonly -f fail
 
 # Assert actual == expected without the `A && B || C` footgun (SC2015).
 check() {
@@ -36,7 +34,6 @@ check() {
     fail "$desc — expected '$expected', got '$actual'"
   fi
 }
-readonly -f check
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
 
@@ -89,7 +86,6 @@ EOF
   echo "$exit_code $calls $npm_called"
   rm -rf "$dir"
 }
-readonly -f run_case
 
 echo "=== changeset-version.sh retry-wrapper tests ==="
 

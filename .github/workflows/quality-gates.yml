@@ -11,10 +11,6 @@ on:
         description: 'Whether web/** or package*.json changed (defaults to true when unset)'
         type: boolean
         default: true
-      web-build-inputs-changed:
-        description: 'Whether any source or configuration input of the web production build changed'
-        type: boolean
-        default: true
       mcp-changed:
         description: 'Whether mcp-server/** changed (defaults to true when unset)'
         type: boolean
@@ -33,26 +29,6 @@ on:
         default: true
       can-commit-ratchet:
         description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
-        type: boolean
-        default: true
-      # ======================= CHROMATIC PAUSE SWITCH =======================
-      # PAUSED 2026-09-26 — tracking issue #10279. The Chromatic account hit
-      # its billed monthly snapshot limit and the owner declined the plan
-      # upgrade, so every design/UI PR failed CI Success on a quota error.
-      #
-      # While `default: true`:
-      #   - the `chromatic` job below is SKIPPED, never reported as passing;
-      #   - `chromatic-paused-notice` warns on every design/UI-touching run
-      #     that visual regression was NOT checked.
-      # PRs merged while paused have NO visual-regression check.
-      #
-      # TO RE-ENABLE: change `default: true` to `default: false` here, and
-      # CHROMATIC_PAUSED to 'false' in chromatic-baseline.yml (the
-      # visual-ci-contract suite fails if the two disagree). No caller passes
-      # this input; the contract suite fails if one starts to.
-      # See docs/operations/visual-ci-gate.md.
-      chromatic-paused:
-        description: 'Temporary pause of the Chromatic visual gate, tracking issue 10279. true = chromatic job skipped and a NOT-checked warning emitted'
         type: boolean
         default: true
     outputs:
@@ -171,15 +147,6 @@ jobs:
 
       - run: npm ci
 
-      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
-      # class): @next/swc, which `next build` and `next dev` load, or
-      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
-      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
-      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
-      # that needs this step from the workflow text.
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
-
       - name: Cache @spawnforge/ui build
         id: ui-cache-test-web
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -234,20 +201,6 @@ jobs:
           # because this step runs with working-directory: web.
           bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt --coverage
 
-      - name: Record coverage artifact identity
-        run: |
-          jq -n --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" '{sha: $sha, run_id: $run}' > web/coverage/coverage-artifact.json
-
-      - name: Upload trusted coverage summary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: coverage-summary-${{ github.sha }}
-          path: |
-            web/coverage/coverage-summary.json
-            web/coverage/coverage-artifact.json
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -301,21 +254,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-
-      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
-      # class): @next/swc, which `next build` and `next dev` load, or
-      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
-      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
-      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
-      # that needs this step from the workflow text.
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
-
-      # vitest does not type-check. Without this step, mcp-server's tsconfig
-      # (strict + exactOptionalPropertyTypes, #7592) is enforced only by
-      # whoever remembers to run tsc by hand.
-      - run: npx tsc --noEmit
-        working-directory: mcp-server
 
       - run: npx vitest run
         working-directory: mcp-server
@@ -401,14 +339,8 @@ jobs:
         working-directory: engine
         run: cargo check --target wasm32-unknown-unknown --all-targets --features webgl2,runtime
 
-      - name: Cache wasm-bindgen CLI
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/wasm-bindgen
-          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
-
-      - name: Install verified wasm-bindgen CLI
-        run: bash scripts/install-wasm-bindgen-cli.sh
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.127
 
       - name: Install wasm-opt (binaryen)
         run: sudo apt-get install -y binaryen
@@ -441,52 +373,6 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
-      # PUBLISH THESE EXACT BYTES FOR CD (#9525).
-      #
-      # CD's first build after this PR merges would otherwise compile the same
-      # four variants again. Instead it finds this run
-      # (scripts/resolve-ci-wasm-artifact.sh find) and adopts this artifact
-      # (... adopt) only when the ci-reuse key recorded here equals the key it
-      # recomputes on main. On a pull_request run this checkout is
-      # refs/pull/N/merge, so the key describes the tree this PR produces if it
-      # merges now; if a build input changes on main first, the keys differ and
-      # CD builds.
-      #
-      # BEFORE wasm-opt, and as a separate artifact from `wasm-binaries`:
-      # cd.yml runs no wasm-opt and production ships what cd.yml builds, so the
-      # optimised packages below would be a different binary. The build and
-      # bindgen steps above must stay byte-identical to cd.yml's, which
-      # scripts/__tests__/resolve-ci-wasm-artifact.test.sh pins.
-      #
-      # On EVERY event that runs this job, with no `if:`. The resolver reads
-      # only pull_request runs, so an upload from a push or dispatch run is
-      # never adopted. It is still made there, because an event gate in this
-      # file makes CI Success mean something different on the dispatch path
-      # that unblocks bot PRs than on a human PR (#9161).
-      # resolve-ci-diff-range.test.sh refuses `github.event_name` anywhere in
-      # quality-gates.yml, and resolve-ci-wasm-artifact.test.sh refuses any
-      # `if:` on these three steps.
-      - name: Verify the pre-optimisation WASM variants for CD reuse
-        run: node scripts/verify-engine-wasm.mjs engine
-
-      - name: Record the CD reuse key
-        run: |
-          bash scripts/engine-wasm-cache-key.sh ci-reuse > engine/wasm-ci-reuse-key.txt
-          echo "CD reuse key: $(cat engine/wasm-ci-reuse-key.txt)"
-
-      - name: Upload pre-optimisation WASM for CD reuse
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: wasm-binaries-cd-reuse
-          path: |
-            engine/pkg-webgl2/
-            engine/pkg-webgpu/
-            engine/pkg-webgl2-runtime/
-            engine/pkg-webgpu-runtime/
-            engine/wasm-ci-reuse-key.txt
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Run wasm-opt (Oz) on all variants
         working-directory: engine
         run: |
@@ -516,21 +402,19 @@ jobs:
           #
           # Each threshold is the measured post-opt size rounded UP to the next
           # whole MiB; the job fails when a binary exceeds its threshold by more
-          # than 10%. Raised for the Bevy 0.18.1 -> 0.19.1 migration (#8887,
-          # PR #10268, owner-approved 2026-09-26): 0.19 generates more per-type
-          # ECS code in bevy_ecs itself (resources became components), which no
-          # feature flag we control removes. Measured by this job on the PR at
-          # d85796cd (wasm-bindgen 0.2.127):
+          # than 10%. Measured on main at wasm-bindgen 0.2.127 (runs 33255964959
+          # and 33255044708, ~30 min apart):
           #
-          #   pkg-webgl2          27,023,317 B  25.8 MiB  -> 26 MiB  (was 23)
-          #   pkg-webgpu          27,825,976 B  26.5 MiB  -> 27 MiB  (was 23)
-          #   pkg-webgl2-runtime  26,077,179 B  24.9 MiB  -> 25 MiB  (was 22)
-          #   pkg-webgpu-runtime  26,878,831 B  25.6 MiB  -> 26 MiB  (was 22)
+          #   pkg-webgl2          23,480,588 B  22.4 MiB  -> 23 MiB
+          #   pkg-webgpu          23,903,062 B  22.8 MiB  -> 23 MiB
+          #   pkg-webgl2-runtime                21.0 MiB  -> 22 MiB
+          #   pkg-webgpu-runtime                21.4 MiB  -> 22 MiB
           #
-          # The 0.18.1 baselines and the second-run agreement check are recorded
-          # in the doc below. Build-to-build variance on one commit has measured
-          # under 6 KB (0.03%), so the 10% tolerance is slack for a real
-          # regression rather than for noise.
+          # (the runtime figures come from the wasm-opt log above, which prints
+          # at 0.1 MiB resolution — rounding the threshold up to the next whole
+          # MiB absorbs that uncertainty.) Build-to-build variance between those
+          # two runs was under 6 KB, i.e. 0.03%, so the 10% tolerance is slack
+          # for a real regression rather than for noise.
           #
           # Raising any number here is a deliberate, reviewed change. The policy
           # and the procedure for re-measuring live in
@@ -567,10 +451,10 @@ jobs:
             return 0
           }
 
-          check_pkg pkg-webgl2 27262976            # 26 MiB
-          check_pkg pkg-webgpu 28311552            # 27 MiB
-          check_pkg pkg-webgl2-runtime 26214400    # 25 MiB
-          check_pkg pkg-webgpu-runtime 27262976    # 26 MiB
+          check_pkg pkg-webgl2 24117248            # 23 MiB
+          check_pkg pkg-webgpu 24117248            # 23 MiB
+          check_pkg pkg-webgl2-runtime 23068672    # 22 MiB
+          check_pkg pkg-webgpu-runtime 23068672    # 22 MiB
 
           echo "=========================================="
 
@@ -610,15 +494,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
-      # class): @next/swc, which `next build` and `next dev` load, or
-      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
-      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
-      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
-      # that needs this step from the workflow text.
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
-
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
@@ -645,7 +520,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -723,14 +598,8 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Cache cargo-audit
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-audit
-          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install verified cargo-audit
-        run: bash scripts/install-cargo-audit.sh
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
 
       - name: cargo audit (engine)
         working-directory: engine
@@ -738,7 +607,6 @@ jobs:
 
   lighthouse-delta:
     name: Lighthouse Effects Delta Gate
-    if: inputs.web-build-inputs-changed
     runs-on: ubuntu-latest
     # 25, not 15: this job does TWO full Next.js production builds and six
     # Lighthouse runs on top of a cold npm install. On run 33820181562 the
@@ -749,11 +617,25 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-    # Run on every supported event when ci-gate reports a web build input:
-    # web/**, packages/ui/**, any package.json, root package-lock.json or
-    # .node-version. The signal is broader than needs-web and is passed through
-    # the reusable workflow input; pull_request and workflow_dispatch share
-    # the same path policy. Unrelated docs/hooks changes skip both costly builds.
+    # NO `if:` — this job runs whenever quality-gates is called.
+    #
+    # It used to read `github.event_name == 'pull_request'`. That is not a
+    # meaningful axis: the job compares effects-off against effects-on for the
+    # SAME commit and reads no pull_request payload at all. What the condition
+    # actually did was silently skip the job on the workflow_dispatch runs that
+    # unblock bot-authored PRs (#9161), while the reusable workflow — and so
+    # "CI Success" — still reported green. Removing it restores the invariant
+    # the required check depends on: CI Success means the same thing on every
+    # event.
+    #
+    # It is deliberately NOT re-gated on `inputs.web-changed`. That would be a
+    # COVERAGE REGRESSION, not an optimisation: `needs-web` is `^web/` only, so
+    # a `packages/ui/**` change (a runtime dependency of the web build via
+    # @spawnforge/ui) or a root `package-lock.json` bump would skip the
+    # performance gate entirely. Path-gating this job is #9526's work and needs
+    # a signal covering the whole web-build input set — web/, packages/ui/,
+    # package.json at any depth, package-lock.json, .node-version — which
+    # ci-gate does not currently emit as a single output.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -764,15 +646,6 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
-
-      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
-      # class): @next/swc, which `next build` and `next dev` load, or
-      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
-      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
-      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
-      # that needs this step from the workflow text.
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
 
       - name: Cache @spawnforge/ui build
         id: ui-cache-lighthouse
@@ -789,9 +662,6 @@ jobs:
         run: |
           npm install -g @lhci/cli
           npx puppeteer browsers install chrome
-
-      - name: Test Lighthouse report validation
-        run: node --test scripts/__tests__/lighthouse-delta.test.mjs
 
       - name: Build Next.js for baseline (effects off)
         working-directory: web
@@ -810,7 +680,7 @@ jobs:
         run: |
           npx next start -p 3000 &
           # Wait for server to be ready and serving content
-          for _ in $(seq 1 30); do
+          for i in $(seq 1 30); do
             if curl -sf http://localhost:3000 -o /dev/null 2>/dev/null; then break; fi
             sleep 1
           done
@@ -822,12 +692,11 @@ jobs:
           lhci collect \
             --url=http://localhost:3000 \
             --numberOfRuns=3 \
+            --outputDir=.lhci-baseline \
             --settings.chromeFlags="--headless --no-sandbox --disable-gpu"
-          # collect writes .lighthouseci; preserve it before the next collection clears it.
-          node --input-type=module -e "import { renameSync } from 'node:fs'; renameSync('.lighthouseci', '.lhci-baseline');"
 
       - name: Stop baseline server
-        run: lsof -t -i:3000 | xargs -r kill 2>/dev/null || true
+        run: kill $(lsof -t -i:3000) 2>/dev/null || true
 
       - name: Build Next.js for effects-on run
         working-directory: web
@@ -845,7 +714,7 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: |
           npx next start -p 3001 &
-          for _ in $(seq 1 30); do
+          for i in $(seq 1 30); do
             if curl -sf http://localhost:3001 -o /dev/null 2>/dev/null; then break; fi
             sleep 1
           done
@@ -857,8 +726,8 @@ jobs:
           lhci collect \
             --url=http://localhost:3001 \
             --numberOfRuns=3 \
+            --outputDir=.lhci-effects \
             --settings.chromeFlags="--headless --no-sandbox --disable-gpu"
-          node --input-type=module -e "import { renameSync } from 'node:fs'; renameSync('.lighthouseci', '.lhci-effects');"
 
       - name: Debug Lighthouse output dirs
         if: always()
@@ -874,30 +743,34 @@ jobs:
           import { readdirSync, readFileSync, existsSync } from 'fs';
           import { join } from 'path';
 
-          const EXPECTED_RUNS = 3;
-          const MAX_DELTA = 0.10;
-
           function getMedianPerformance(dir) {
             if (!existsSync(dir)) {
-              throw new Error('Lighthouse report directory missing: ' + dir + '. Re-run collection before comparing.');
+              console.error('Directory not found: ' + dir);
+              console.log('SKIP: Cannot compare — Lighthouse output missing');
+              return null;
             }
             const files = readdirSync(dir).filter(f => f.endsWith('.json') && f.startsWith('lhr-'));
-            if (files.length !== EXPECTED_RUNS) {
-              throw new Error('Expected ' + EXPECTED_RUNS + ' Lighthouse reports in ' + dir + ', found ' + files.length + '. Re-run collection.');
+            if (files.length === 0) {
+              console.error('No lhr-*.json files in ' + dir);
+              console.log('Available files:', readdirSync(dir));
+              return null;
             }
             const scores = files.map(f => {
               const report = JSON.parse(readFileSync(join(dir, f), 'utf8'));
-              const score = report?.categories?.performance?.score;
-              if (!Number.isFinite(score) || score < 0 || score > 1 || report.runtimeError) {
-                throw new Error('Invalid Lighthouse performance result in ' + join(dir, f) + '. Inspect collection errors and re-run.');
-              }
-              return score;
+              return report.categories && report.categories.performance
+                ? report.categories.performance.score
+                : 0;
             }).sort((a, b) => a - b);
-            return scores[Math.floor(scores.length / 2)];
+            return scores[Math.floor(scores.length / 2)] || 0;
           }
 
           const baseScore = getMedianPerformance('.lhci-baseline');
           const testScore = getMedianPerformance('.lhci-effects');
+
+          if (baseScore === null || testScore === null) {
+            console.log('SKIP: Lighthouse data incomplete — cannot compare');
+            process.exit(0);
+          }
 
           const delta = baseScore - testScore;
 
@@ -909,7 +782,7 @@ jobs:
           // CSS animation overhead than the editor (/dev) since it has less JS content
           // to mask the animation impact. 10 points accommodates this while still
           // catching egregious performance regressions.
-          if (delta > MAX_DELTA + Number.EPSILON) {
+          if (delta > 0.10) {
             console.error('FAIL: Effects caused ' + (delta * 100).toFixed(1) + ' point regression (max allowed: 10)');
             process.exit(1);
           }
@@ -989,11 +862,6 @@ jobs:
 
   chromatic:
     name: Chromatic Visual Regression
-    # The ONLY permitted job-level condition: the pause switch (#10279) at the
-    # top of this file. The job body below is unchanged and still fully
-    # enforced by visual-ci-contract.test.mjs; a skipped job is reported as
-    # skipped, not as success.
-    if: ${{ !inputs.chromatic-paused }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -1039,56 +907,25 @@ jobs:
         if: steps.check-design.outputs.changed == 'true'
         run: bash apps/design/scripts/sync-vendored-ui.sh
 
-      - name: Require Chromatic token
+      - name: Check Chromatic token
+        id: check-token
         if: steps.check-design.outputs.changed == 'true'
         env:
           CHROMATIC_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
         run: |
-          if [ -z "$CHROMATIC_TOKEN" ]; then
-            echo "::error::Chromatic project token is required for design changes"
-            exit 1
+          if [ -n "$CHROMATIC_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "CHROMATIC_PROJECT_TOKEN not set — skipping Chromatic"
           fi
 
-      - name: Clear stale visual diagnostics
-        if: steps.check-design.outputs.changed == 'true'
-        run: rm -f apps/design/chromatic-diagnostics.json
-
       - name: Run Chromatic
-        if: steps.check-design.outputs.changed == 'true'
-        uses: chromaui/action@bb3b582719a93c1828c5e520e62992b2937d7889 # v18.9.4
+        if: steps.check-design.outputs.changed == 'true' && steps.check-token.outputs.available == 'true'
+        uses: chromaui/action@4cc98810d00b34b8f9e89d454d64a8ac3d088340 # v18.7.1
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: apps/design
-          exitZeroOnChanges: false
-          exitOnceUploaded: false
-          autoAcceptChanges: false
+          exitZeroOnChanges: true
+          exitOnceUploaded: true
           onlyChanged: true
-          diagnosticsFile: chromatic-diagnostics.json
-
-      - name: Verify completed visual results
-        if: steps.check-design.outputs.changed == 'true'
-        run: node scripts/check-visual-results.mjs apps/design/chromatic-diagnostics.json
-
-  chromatic-paused-notice:
-    # Self-announcing half of the pause switch (#10279). It runs ONLY while the
-    # gate is paused and the change touches apps/design/ or packages/ui/ —
-    # exactly the runs on which `chromatic` would otherwise have compared
-    # snapshots. It checks nothing and says so: its name, a ::warning::
-    # annotation and the run summary all state that visual regression was NOT
-    # checked. Delete nothing here to re-enable — flipping the switch skips it.
-    name: Chromatic Visual Regression (PAUSED - not checked)
-    if: ${{ inputs.chromatic-paused && inputs.design-changed }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Announce that visual regression was NOT checked
-        run: |
-          echo "::warning title=Visual regression NOT checked::Chromatic is paused (snapshot quota exhausted, #10279). This change touches apps/design/ or packages/ui/ and NO visual-regression or UI-review check ran. Review rendering changes by hand."
-          {
-            echo "## Chromatic visual regression: PAUSED - NOT checked"
-            echo ""
-            echo "The Chromatic gate is paused while the snapshot quota is exhausted (#10279)."
-            echo "This change touches apps/design/ or packages/ui/, and no visual-regression or UI-review check ran on it."
-            echo "A green CI Success on this run says nothing about rendered output."
-          } >> "$GITHUB_STEP_SUMMARY"

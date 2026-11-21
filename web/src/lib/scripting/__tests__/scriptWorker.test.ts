@@ -81,64 +81,6 @@ describe('scriptWorker', () => {
     });
   });
 
-  // The sandboxed frame reads the worker's FIRST message as "the scripts
-  // started" (SANDBOX_BOOTSTRAP's `started`). A script that never calls
-  // forge.* posts nothing of its own, so init has to announce itself, or a
-  // later uncaught error in that script is misread as a boot failure (#8700).
-  it('posts exactly one init_done when init completes, even for a script that posts nothing', async () => {
-    const handler = await setupWorker();
-    await handler(initMsg([{ entityId: 'quiet', enabled: true, source: 'var n = 0; function onStart() { n = 1; }' }]));
-
-    const posted = mockPostMessage.mock.calls.map((c) => c[0] as { type: string });
-    expect(posted).toEqual([{ type: 'init_done' }]);
-  });
-
-  it('posts init_done once, AFTER the messages init itself produced', async () => {
-    const handler = await setupWorker();
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: 'function onStart() { forge.log("hi"); }' }]));
-
-    const types = mockPostMessage.mock.calls.map((c) => (c[0] as { type: string }).type);
-    expect(types.filter((t) => t === 'init_done')).toHaveLength(1);
-    expect(types[types.length - 1]).toBe('init_done');
-    expect(types).toContain('log');
-  });
-
-  it('does not post init_done for a tick; the tick ends with tick_done instead', async () => {
-    const handler = await setupWorker();
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: 'function onUpdate() { forge.log("tick"); }' }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'tick', dt: 0.016 } });
-
-    // The tick ran (it logged), then acknowledged itself, and said nothing else.
-    expect(mockPostMessage.mock.calls.map((c) => (c[0] as { type: string }).type)).toEqual(['log', 'tick_done']);
-  });
-
-  // The runner arms a 5 s watchdog on each tick and clears it only when the
-  // worker posts something. A script that never calls forge.* made a tick
-  // post nothing, so Play stopped after 5 s as a "possible infinite loop"
-  // (#10286). Every tick that returns now says so.
-  it('posts exactly one tick_done per tick, even for a script that posts nothing', async () => {
-    const handler = await setupWorker();
-    await handler(initMsg([{ entityId: 'quiet', enabled: true, source: 'var n = 0; function onUpdate() { n += 1; }' }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'tick', dt: 0.016 } });
-    await handler({ data: { type: 'tick', dt: 0.016 } });
-
-    expect(mockPostMessage.mock.calls.map((c) => c[0])).toEqual([{ type: 'tick_done' }, { type: 'tick_done' }]);
-  });
-
-  it('posts tick_done even when no script is loaded', async () => {
-    const handler = await setupWorker();
-    await handler(initMsg([]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'tick', dt: 0.016 } });
-
-    expect(mockPostMessage.mock.calls.map((c) => c[0])).toEqual([{ type: 'tick_done' }]);
-  });
-
   it('reports compilation errors for syntax issues during init', async () => {
     const handler = await setupWorker();
     const invalidCode = 'function onStart() { return { x: 1 ; }';
@@ -600,65 +542,6 @@ describe('scriptWorker', () => {
     );
   });
 
-  // OP-04: forge.input resolves per-local-player state via the optional slot.
-  it('forge.input(action, player) resolves each local player independently (physics.FR-1.OP-04)', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      // Both players name "attack"; only player 1 is pressing it this frame.
-      forge.log("p0:" + (forge.input.isPressed("attack", 0) ? "on" : "off"));
-      forge.log("p1:" + (forge.input.isPressed("attack", 1) ? "on" : "off"));
-      forge.log("default:" + (forge.input.isPressed("attack") ? "on" : "off"));
-      forge.log("axis0:" + forge.input.getAxis("move", 0).toString());
-      forge.log("axis1:" + forge.input.getAxis("move", 1).toString());
-    }`;
-
-    await handler(initMsg(
-      [{ entityId: 'e1', enabled: true, source: code }],
-      {
-        inputState: {
-          // Player 0 (primary): not attacking, steering right.
-          pressed: { attack: false },
-          justPressed: {},
-          justReleased: {},
-          axes: { move: 1 },
-          players: {
-            // Player 1 (second local player): attacking, steering left.
-            '1': {
-              pressed: { attack: true },
-              justPressed: {},
-              justReleased: {},
-              axes: { move: -1 },
-            },
-          },
-        },
-      }
-    ));
-
-    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
-    expect(logs).toContain('p0:off');
-    expect(logs).toContain('p1:on');
-    expect(logs).toContain('default:off'); // no player arg == player 0
-    expect(logs).toContain('axis0:1');
-    expect(logs).toContain('axis1:-1');
-  });
-
-  it('forge.input for an unreported player slot reads as all-off, not a crash (physics.FR-1.OP-04)', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.log("p2:" + (forge.input.isPressed("attack", 2) ? "on" : "off"));
-      forge.log("axis2:" + forge.input.getAxis("move", 2).toString());
-    }`;
-
-    await handler(initMsg(
-      [{ entityId: 'e1', enabled: true, source: code }],
-      { inputState: { pressed: { attack: true }, justPressed: {}, justReleased: {}, axes: { move: 1 } } }
-    ));
-
-    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
-    expect(logs).toContain('p2:off');
-    expect(logs).toContain('axis2:0');
-  });
-
   // ─── Forge Physics API ──────────────────────────────────────────
 
   it('forge.physics.applyForce and applyImpulse push correct commands', async () => {
@@ -679,21 +562,16 @@ describe('scriptWorker', () => {
     );
   });
 
-  // `forge.physics.setVelocity` is GONE, along with six other methods whose
-  // command the engine never armed (#9284). This asserts the removal rather
-  // than deleting the case: while the method existed it pushed a command the
-  // engine discarded, so a script calling it got no error and no effect, and
-  // this test reported that as working. Calling it now throws a TypeError the
-  // author can actually see.
-  it('forge.physics.setVelocity no longer exists — it had no engine arm', async () => {
+  it('forge.physics.setVelocity pushes set_velocity command', async () => {
     const handler = await setupWorker();
     const code = 'function onStart() { forge.physics.setVelocity("e1", 10, 0, 0); }';
 
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
 
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
-    const commands = (cmdMsg?.[0]?.commands ?? []) as Array<{ cmd: string }>;
-    expect(commands.some((c) => c.cmd === 'set_velocity')).toBe(false);
+    expect(cmdMsg![0].commands).toContainEqual(
+      expect.objectContaining({ cmd: 'set_velocity', entityId: 'e1', velocity: [10, 0, 0] })
+    );
   });
 
   it('forge.physics.getContacts finds nearby entities', async () => {
@@ -756,6 +634,8 @@ describe('scriptWorker', () => {
     const code = `function onStart() {
       forge.physics2d.applyForce("e1", 10, 20);
       forge.physics2d.applyImpulse("e1", 5, 10);
+      forge.physics2d.setVelocity("e1", 1, 2);
+      forge.physics2d.setAngularVelocity("e1", 3.14);
       forge.physics2d.setGravity(0, -20);
     }`;
 
@@ -765,12 +645,9 @@ describe('scriptWorker', () => {
     const cmds = cmdMsg![0].commands;
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'apply_force2d', entityId: 'e1', forceX: 10, forceY: 20 }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'apply_impulse2d', entityId: 'e1', impulseX: 5, impulseY: 10 }));
+    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_velocity2d', entityId: 'e1', velocityX: 1, velocityY: 2 }));
+    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_angular_velocity2d', entityId: 'e1', omega: 3.14 }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_gravity2d', gravityX: 0, gravityY: -20 }));
-    // `setVelocity` and `setAngularVelocity` are gone: their commands had no
-    // engine arm, so both pushed something the engine discarded (#9284).
-    const names = (cmds as Array<{ cmd: string }>).map((c) => c.cmd);
-    expect(names).not.toContain('set_velocity2d');
-    expect(names).not.toContain('set_angular_velocity2d');
   });
 
   it('forge.physics2d.getVelocity reads from synced state', async () => {
@@ -937,6 +814,8 @@ describe('scriptWorker', () => {
     const handler = await setupWorker();
     const code = `function onStart() {
       forge.camera.follow("e1", [0, 5, -10]);
+      forge.camera.setPosition(1, 2, 3);
+      forge.camera.lookAt(0, 0, 0);
       forge.camera.stopFollow();
     }`;
 
@@ -945,13 +824,9 @@ describe('scriptWorker', () => {
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
     const cmds = cmdMsg![0].commands;
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_follow', entityId: 'e1', offset: [0, 5, -10] }));
+    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_set_position', position: [1, 2, 3] }));
+    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_look_at', target: [0, 0, 0] }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_stop_follow' }));
-    // `setPosition` and `lookAt` are gone: `camera_set_position` and
-    // `camera_look_at` have no engine arm, so both pushed a command the engine
-    // discarded and the camera never moved (#9284).
-    const names = (cmds as Array<{ cmd: string }>).map((c) => c.cmd);
-    expect(names).not.toContain('camera_set_position');
-    expect(names).not.toContain('camera_look_at');
   });
 
   it('forge.camera.setMode and shake post messages', async () => {
@@ -1145,121 +1020,6 @@ describe('scriptWorker', () => {
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'log', message: 'null' })
     );
-  });
-
-  it('queues a shape edit while reads wait for the next engine snapshot', async () => {
-    const handler = await setupWorker();
-    const tilemap = {
-      tileSize: [16, 16], mapSize: [2, 1], origin: 'TopLeft',
-      layers: [{ tiles: [1, 2], collisionShapes: ['halfTop', 'none'] }],
-    };
-    const source = `function onStart() {
-      forge.tilemap.setCollisionShape("tm1", 0.8, 0.2, "full", 0.9);
-      forge.log(String(forge.tilemap.getCollisionShape("tm1", 0, 0)));
-    }
-    function onUpdate() { forge.log(String(forge.tilemap.getCollisionShape("tm1", 0, 0))); }`;
-    await handler(initMsg(
-      [{ entityId: 'e1', enabled: true, source }],
-      { tilemapStates: { tm1: tilemap } },
-    ));
-
-    expect(pushedCommands()).toEqual([
-      { cmd: 'set_tile_collision_shape', entityId: 'tm1', layer: 0, x: 0, y: 0, shape: 'full' },
-    ]);
-    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'halfTop' }));
-
-    await handler({ data: {
-      type: 'tick', dt: 0.016,
-      tilemapStates: { tm1: { ...tilemap, layers: [{ tiles: [1, 2], collisionShapes: ['full', 'none'] }] } },
-    } });
-
-    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'full' }));
-  });
-
-  it('reads absent shapes as none and invalid or missing cells as null', async () => {
-    const handler = await setupWorker();
-    const source = `function onStart() {
-      forge.log(JSON.stringify([
-        forge.tilemap.getCollisionShape("tm1", 0, 0),
-        forge.tilemap.getCollisionShape("tm1", 0.5, 0),
-        forge.tilemap.getCollisionShape("tm1", NaN, 0),
-        forge.tilemap.getCollisionShape("tm1", 2, 0),
-        forge.tilemap.getCollisionShape("tm1", 0, 0, 9),
-        forge.tilemap.getCollisionShape("__proto__", 0, 0)
-      ]));
-    }`;
-    await handler(initMsg(
-      [{ entityId: 'e1', enabled: true, source }],
-      { tilemapStates: { tm1: { tileSize: [16, 16], mapSize: [2, 1], layers: [{ tiles: [1] }], origin: 'TopLeft' } } },
-    ));
-    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'log', message: '["none",null,null,null,null,null]',
-    }));
-    expect(pushedCommands()).toEqual([]);
-  });
-
-  it.each([
-    { call: 'forge.tilemap.setCollisionShape("tm1", 0, 0, "wedge")', error: 'unknown collision shape' },
-    { call: 'forge.tilemap.setCollisionShape("tm1", NaN, 0, "full")', error: 'finite number' },
-    { call: 'forge.tilemap.setCollisionShape("tm1", 0x100000000, 0, "full")', error: 'must be <=' },
-    { call: 'forge.tilemap.setCollisionShape("tm1", -1, 0, "full")', error: 'must be >=' },
-    { call: 'forge.tilemap.setCollisionShape("tm1", 3, 0, "full")', error: 'cell is unavailable' },
-    { call: 'forge.tilemap.setCollisionShape("missing", 0, 0, "full")', error: 'cell is unavailable' },
-  ])('rejects an invalid script shape request: $call', async ({ call, error }) => {
-    const handler = await setupWorker();
-    await handler(initMsg(
-      [{ entityId: 'e1', enabled: true, source: `function onStart() { ${call}; }` }],
-      { tilemapStates: { tm1: { tileSize: [16, 16], mapSize: [1, 1], layers: [{ tiles: [1] }], origin: 'TopLeft' } } },
-    ));
-    expect(pushedCommands()).toEqual([]);
-    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'error', message: expect.stringContaining(error),
-    }));
-  });
-
-  it('forge.tilemap.getCollisionShape reads authored shapes, defaults, and nulls (OP-04)', async () => {
-    const handler = await setupWorker();
-    // Distinct prefixes so each assertion pins WHICH call produced the value —
-    // several calls return 'none'/'null', and a bare message match would let one
-    // path stand in for another.
-    const code = `function onStart() {
-      forge.log("authored=" + forge.tilemap.getCollisionShape("tm1", 2, 0, 0));
-      forge.log("cellDefault=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 0));
-      forge.log("noArray=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 1));
-      forge.log("oobCoord=" + forge.tilemap.getCollisionShape("tm1", 9, 9, 0));
-      forge.log("oobLayer=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 5));
-      forge.log("noTilemap=" + forge.tilemap.getCollisionShape("nope", 0, 0, 0));
-    }`;
-
-    await handler(initMsg(
-      [{ entityId: 'e1', enabled: true, source: code }],
-      {
-        tilemapStates: {
-          tm1: {
-            tileSize: [32, 32],
-            mapSize: [3, 3],
-            layers: [
-              // Layer 0 carries a shapes array; idx 2 (x=2,y=0) is authored full.
-              { tiles: [0, 1, 2, 3, 4, 5, 6, 7, 8], collisionShapes: ['none', 'none', 'full', 'none', 'none', 'none', 'none', 'none', 'none'] },
-              // Layer 1 has no collisionShapes array at all → every cell 'none'.
-              { tiles: [0, 1, 2, 3, 4, 5, 6, 7, 8] },
-            ],
-            origin: 'TopLeft' as const,
-          },
-        },
-      }
-    ));
-
-    const logged = (msg: string) =>
-      expect(mockPostMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'log', message: msg })
-      );
-    logged('authored=full');       // authored cell returns its shape
-    logged('cellDefault=none');    // array present, cell defaults to 'none'
-    logged('noArray=none');        // layer with no shapes array → 'none'
-    logged('oobCoord=null');       // (9,9) outside the 3x3 map → null
-    logged('oobLayer=null');       // layer index 5 unknown → null
-    logged('noTilemap=null');      // unknown tilemap → null
   });
 
   it('forge.tilemap.setTile and fillRect push real engine commands', async () => {
@@ -1561,9 +1321,6 @@ describe('scriptWorker', () => {
     ['setTile', 'layer', 'forge.tilemap.setTile("tm1", 0, 0, 5, -1)'],
     ['setTile', 'tileId', 'forge.tilemap.setTile("tm1", 0, 0, -5)'],
     ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", -1, 0)'],
-    ['setCollisionShape', 'layer', 'forge.tilemap.setCollisionShape("tm1", 0, 0, "full", -1)'],
-    ['setCollisionShape', 'y', 'forge.tilemap.setCollisionShape("tm1", 0, -2, "full")'],
-    ['setCollisionShape', 'x', 'forge.tilemap.setCollisionShape("tm1", -1, 0, "full")'],
     ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", -1, 0, 2, 2, 1)'],
     ['fillRect', 'w', 'forge.tilemap.fillRect("tm1", 0, 0, -2, 2, 1)'],
   ])('forge.tilemap.%s rejects a negative %s and pushes nothing', async (_api, param, call) => {
@@ -1583,8 +1340,6 @@ describe('scriptWorker', () => {
 
   it.each([
     ['NaN', 'forge.tilemap.setTile("tm1", 0/0, 0, 5)'],
-    ['Infinity via setCollisionShape', 'forge.tilemap.setCollisionShape("tm1", 0, 1/0, "full")'],
-    ['NaN via setCollisionShape', 'forge.tilemap.setCollisionShape("tm1", 0/0, 0, "full")'],
     ['Infinity', 'forge.tilemap.fillRect("tm1", 0, 0, 1/0, 1, 5)'],
   ])('forge.tilemap rejects a non-finite coordinate (%s) and pushes nothing', async (_label, call) => {
     const handler = await setupWorker();
@@ -1610,9 +1365,6 @@ describe('scriptWorker', () => {
     ['setTile', 'layer', 'forge.tilemap.setTile("tm1", 0, 0, 5, TOO_BIG)'],
     ['setTile', 'tileId', 'forge.tilemap.setTile("tm1", 0, 0, TOO_BIG)'],
     ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", TOO_BIG, 0)'],
-    ['setCollisionShape', 'layer', 'forge.tilemap.setCollisionShape("tm1", 0, 0, "full", TOO_BIG)'],
-    ['setCollisionShape', 'y', 'forge.tilemap.setCollisionShape("tm1", 0, TOO_BIG, "full")'],
-    ['setCollisionShape', 'x', 'forge.tilemap.setCollisionShape("tm1", TOO_BIG, 0, "full")'],
     ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", TOO_BIG, 0, 2, 2, 1)'],
     ['fillRect', 'layer', 'forge.tilemap.fillRect("tm1", 0, 0, 2, 2, 1, TOO_BIG)'],
   ])('forge.tilemap.%s rejects a %s past TILE_FIELD_MAX and pushes nothing', async (_api, param, call) => {
@@ -2106,144 +1858,6 @@ describe('scriptWorker', () => {
     );
   });
 
-  // THE 2D CALLBACKS. `forge.physics2d.onCollisionEnter` pushed into a global
-  // array that nothing ever read, so every 2D collision handler a creator wrote
-  // was accepted and never invoked — no error, no effect. These cases fail on
-  // the pre-fix worker.
-  it('COLLISION_EVENT fires 2D enter callbacks for both participants', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.physics2d.onCollisionEnter(function(e) {
-        forge.log("2d:" + e.entityId + ">" + e.otherEntityId);
-      });
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
-
-    // Global, not per-entity: one collision reaches the handler once per
-    // participant, so a script reasoning about either entity sees its own id
-    // in `entityId` and what it hit in `otherEntityId`.
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: '2d:e1>e2' })
-    );
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: '2d:e2>e1' })
-    );
-  });
-
-  it('COLLISION_EVENT fires 2D exit callbacks, and not the enter ones', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.physics2d.onCollisionEnter(function(e) { forge.log("enter:" + e.otherEntityId); });
-      forge.physics2d.onCollisionExit(function(e) { forge.log("exit:" + e.otherEntityId); });
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: false } });
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'exit:e2' })
-    );
-    expect(mockPostMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'enter:e2' })
-    );
-  });
-
-  // RESTART LEAK (#9766, Sentry). `stop` clears the 3D callback MAPS and the
-  // win callbacks, and left the 2D callback ARRAYS untouched. The two are not
-  // equivalent failures: the 3D maps are keyed per entity, so re-registering
-  // overwrites, while the 2D arrays only ever grow. So after N restarts one
-  // collision fired every 2D handler N+1 times, which silently multiplies
-  // anything a creator counts -- score, lives, pickups.
-  it('stop clears 2D collision callbacks, so a restart does not double-fire them', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.physics2d.onCollisionEnter(function(e) { forge.log("hit:" + e.otherEntityId); });
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    await handler({ data: { type: 'stop' } });
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
-
-    // Two fires, not four: the callback is global, so one collision reaches it
-    // once per participant. A leaked registration doubles that.
-    const hits = mockPostMessage.mock.calls.filter(
-      ([m]) => (m as { type?: string; message?: string }).type === 'log' &&
-               String((m as { message?: string }).message).startsWith('hit:')
-    );
-    expect(hits).toHaveLength(2);
-  });
-
-  it('stop clears 2D EXIT callbacks too, not only the enter ones', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.physics2d.onCollisionExit(function(e) { forge.log("left:" + e.otherEntityId); });
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    await handler({ data: { type: 'stop' } });
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: false } });
-
-    const leaves = mockPostMessage.mock.calls.filter(
-      ([m]) => (m as { type?: string; message?: string }).type === 'log' &&
-               String((m as { message?: string }).message).startsWith('left:')
-    );
-    expect(leaves).toHaveLength(2);
-  });
-
-  it('a 2D collision handler that unsubscribes itself does not skip its siblings', async () => {
-    const handler = await setupWorker();
-    // The unsubscribe splices the live array. Iterating it directly would skip
-    // the next callback mid-loop, so the loop walks a copy.
-    const code = `function onStart() {
-      var off = forge.physics2d.onCollisionEnter(function(e) {
-        forge.log("first");
-        off();
-      });
-      forge.physics2d.onCollisionEnter(function(e) { forge.log("second"); });
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'second' })
-    );
-  });
-
-  it('a throwing 2D callback reports an error and does not stop the others', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.physics2d.onCollisionEnter(function(e) { throw new Error("boom"); });
-      forge.physics2d.onCollisionEnter(function(e) { forge.log("survived"); });
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-    mockPostMessage.mockClear();
-
-    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', message: expect.stringContaining('boom') })
-    );
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'survived' })
-    );
-  });
-
   it('COLLISION_EVENT fires exit callbacks', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {
@@ -2607,197 +2221,5 @@ describe('scriptWorker', () => {
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'remove_bone2d', entityId: 'e1', boneName: 'leg' }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_skeleton2d_skin', entityId: 'e1', skinName: 'warrior' }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'play_skeletal_animation2d', entityId: 'e1', animationName: 'walk' }));
-  });
-
-  // ─── forge.i18n (synchronous, resolved against init locale bundles) ──────
-
-  const jaBundle = {
-    ja: { locale: 'ja', translations: { 'ui.start': 'スタート' } },
-    fr: { locale: 'fr', translations: { 'ui.start': 'Commencer' } },
-  };
-
-  it('forge.i18n.t returns the translation for the active (preview) locale', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() { forge.log('t:' + forge.i18n.t('ui.start', 'Start')); }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
-      locales: jaBundle,
-      sourceLocale: 'en',
-      previewLocale: 'ja',
-    }));
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 't:スタート' }),
-    );
-  });
-
-  it('forge.i18n.t falls back to the default text when no translation exists', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() { forge.log('t:' + forge.i18n.t('ui.missing', 'Fallback')); }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
-      locales: jaBundle,
-      sourceLocale: 'en',
-      previewLocale: 'ja',
-    }));
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 't:Fallback' }),
-    );
-  });
-
-  it('forge.i18n.t falls back to default text when no bundle exists for the active locale', async () => {
-    const handler = await setupWorker();
-    // No previewLocale → activeLocale is the source locale 'en', which has no bundle.
-    const code = `function onStart() { forge.log('t:' + forge.i18n.t('ui.start', 'Start')); }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
-      locales: jaBundle,
-      sourceLocale: 'en',
-      previewLocale: null,
-    }));
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 't:Start' }),
-    );
-  });
-
-  it('forge.i18n.getLocale / setLocale round-trips and re-resolves t', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.log('loc0:' + forge.i18n.getLocale());
-      forge.i18n.setLocale('fr');
-      forge.log('loc1:' + forge.i18n.getLocale());
-      forge.log('t:' + forge.i18n.t('ui.start', 'Start'));
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
-      locales: jaBundle,
-      sourceLocale: 'en',
-      previewLocale: 'ja',
-    }));
-
-    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'loc0:ja' }));
-    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'loc1:fr' }));
-    // After switching to 'fr', t resolves against the fr bundle.
-    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 't:Commencer' }));
-  });
-
-  it('forge.i18n.getAvailableLocales lists every stored bundle', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() { forge.log('locales:' + forge.i18n.getAvailableLocales().sort().join(',')); }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
-      locales: jaBundle,
-      sourceLocale: 'en',
-      previewLocale: 'ja',
-    }));
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'locales:fr,ja' }),
-    );
-  });
-
-  it('forge.i18n.getLocale defaults to the source locale when no preview locale is set', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() { forge.log('loc:' + forge.i18n.getLocale()); }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
-      locales: {},
-      sourceLocale: 'de',
-      previewLocale: null,
-    }));
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'loc:de' }),
-    );
-  });
-
-  // ─── forge.leaderboard (async — routes through the 'leaderboard' channel) ─
-
-  it('forge.leaderboard.submit posts an async_request on the leaderboard channel', async () => {
-    const handler = await setupWorker();
-    const code = `function onStart() {
-      forge.leaderboard.submit('hs', 'Ada', 4200, { level: 7 });
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-
-    const asyncMsg = mockPostMessage.mock.calls.find(
-      (c) => (c[0] as Record<string, unknown>)?.type === 'async_request',
-    );
-    expect(asyncMsg).toBeDefined();
-    const msg = asyncMsg![0] as Record<string, unknown>;
-    expect(msg.channel).toBe('leaderboard');
-    expect(msg.method).toBe('submit');
-    expect(msg.args).toEqual({ name: 'hs', playerName: 'Ada', score: 4200, metadata: { level: 7 } });
-  });
-
-  it('forge.leaderboard.submit resolves with the rank from the channel response', async () => {
-    const handler = await setupWorker();
-    const code = `async function onStart() {
-      const r = await forge.leaderboard.submit('hs', 'Ada', 4200);
-      forge.log('submitted:' + JSON.stringify(r));
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-
-    const asyncMsg = mockPostMessage.mock.calls.find(
-      (c) => (c[0] as Record<string, unknown>)?.type === 'async_request',
-    );
-    const requestId = (asyncMsg![0] as Record<string, unknown>).requestId as string;
-
-    await handler({
-      data: {
-        type: 'tick',
-        dt: 0.016,
-        elapsed: 0.016,
-        entities: {},
-        asyncResponses: [{ requestId, status: 'ok', data: { rank: 3 } }],
-      },
-    });
-    // Flush the awaited microtask chain (real timers in this suite).
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'submitted:{"rank":3}' }),
-    );
-  });
-
-  it('forge.leaderboard.getTop posts an async_request and resolves with the entries', async () => {
-    const handler = await setupWorker();
-    const code = `async function onStart() {
-      const rows = await forge.leaderboard.getTop('hs', 5);
-      forge.log('top:' + JSON.stringify(rows));
-    }`;
-
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
-
-    const asyncMsg = mockPostMessage.mock.calls.find(
-      (c) => (c[0] as Record<string, unknown>)?.type === 'async_request',
-    );
-    const msg = asyncMsg![0] as Record<string, unknown>;
-    expect(msg.channel).toBe('leaderboard');
-    expect(msg.method).toBe('getTop');
-    expect(msg.args).toEqual({ name: 'hs', limit: 5 });
-
-    const requestId = msg.requestId as string;
-    const entries = [{ rank: 1, playerName: 'Ada', score: 9000, metadata: null, createdAt: 'x' }];
-    await handler({
-      data: {
-        type: 'tick',
-        dt: 0.016,
-        elapsed: 0.016,
-        entities: {},
-        asyncResponses: [{ requestId, status: 'ok', data: entries }],
-      },
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', message: 'top:' + JSON.stringify(entries) }),
-    );
   });
 });

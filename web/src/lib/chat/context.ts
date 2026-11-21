@@ -10,7 +10,6 @@ import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, Phy
 import type { GenerationJob } from '@/stores/generationStore';
 import { loadScripts as loadLibraryScripts } from '@/stores/scriptLibraryStore';
 import { buildEntityIndex } from '@/lib/engine/entityIndex';
-import { DEFAULT_COMPLETION_MODE, isCompletionMode, requiresWinCondition } from '@/lib/playMode/completionMode';
 
 /**
  * Render an entity id the scene graph has no name for.
@@ -217,18 +216,7 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Scene overview
   const sceneLabel = state.sceneName && state.sceneName !== 'Untitled' ? ` "${state.sceneName}"` : '';
-  // The completion mode (#9998) is stated so the AI can tell a sandbox the
-  // creator chose from a win game missing its goal — and so it reads the mode
-  // before `set_completion_mode` changes it, rather than overriding a manual
-  // choice it never saw. Absent is the legacy `win`, said as such. Narrowed
-  // before interpolation: this string is part of the system prompt, so only
-  // one of the four known words may ever reach it.
-  const mode = isCompletionMode(sceneGraph.completionMode) ? sceneGraph.completionMode : undefined;
-  const modeLabel = mode ?? `${DEFAULT_COMPLETION_MODE} (default, not set)`;
-  const modeRule = requiresWinCondition(mode)
-    ? 'Play requires a win condition the player can complete'
-    : 'Play does not require a win condition';
-  sections.push(`## Current Scene State${sceneLabel}\nEntities: ${nodeCount}\nCompletion mode: ${modeLabel} — ${modeRule}`);
+  sections.push(`## Current Scene State${sceneLabel}\nEntities: ${nodeCount}`);
 
   if (nodeCount === 0) {
     sections.push('(Empty scene — no entities yet)');
@@ -496,14 +484,7 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Input bindings
   if (state.inputBindings && state.inputBindings.length > 0) {
-    // THE ACTION LIST IS THE FACT; the preset is only where some of it came
-    // from. This read `(preset: fps)`, which presents the label as a
-    // description of the whole map — and since presets merge rather than
-    // replace, the map also holds the defaults and anything the creator
-    // authored. "includes" keeps it true. The `(custom)` alternative is gone
-    // too: it implied that a map with no preset is a deviation, when it is the
-    // ordinary case.
-    const presetLabel = state.inputPreset ? ` (includes the ${state.inputPreset} starting set)` : '';
+    const presetLabel = state.inputPreset ? ` (preset: ${state.inputPreset})` : ' (custom)';
     const actionNames = state.inputBindings.map((b) => b.actionName).join(', ');
     sections.push(`\n## Input Bindings${presetLabel}\n${state.inputBindings.length} actions: ${actionNames}`);
   }

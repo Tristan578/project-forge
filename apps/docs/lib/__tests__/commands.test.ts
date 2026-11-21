@@ -1,139 +1,135 @@
 /**
  * @vitest-environment node
- *
- * Logic tests for the manifest summariser and the category reader, driven by
- * fixture manifests through the pure `summarizeManifest` / `commandsInCategory`
- * entry points.
- *
- * This suite used to stub `fs.readFileSync` and import the module fresh per
- * case. That shape is what let #9718 ship: the loader's real defect was WHERE
- * the manifest came from, and a mocked `fs` is blind to exactly that (lesson
- * 14). The loader now imports the manifest statically, so there is no `fs`
- * to mock. This file is hermetic: every input is a fixture built here, and
- * nothing in it depends on the contents of the shipped `data/commands.json`.
- * The real file — and the page-facing `readCommandsManifest` /
- * `readCommandsByCategory` wrappers, which can only be exercised over it —
- * are `commandsManifestArtifact.test.ts`'s job.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'fs';
 
-import {
-  commandsInCategory,
-  publicCommandsOf,
-  summarizeManifest,
-  toParameterList,
-  type CommandEntry,
-  type CommandsManifest,
-} from '../commands';
+// We intercept fs.readFileSync before importing the module under test.
+// The module resolves MANIFEST_PATH at load time, so we mock at the fs layer:
+// any read of a path ending in 'commands.json' returns the content we prepared.
 
-function manifestOf(commands: CommandEntry[]): CommandsManifest {
-  return { commands };
+function makeManifestJson(commands: object[]): string {
+  return JSON.stringify({ commands });
 }
 
-describe('summarizeManifest', () => {
+describe('readCommandsManifest', () => {
+  let fsSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    // Default spy — overridden per test via mockReturnValue / mockImplementation
+    fsSpy = vi.spyOn(fs, 'readFileSync');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubManifest(commands: object[]): void {
+    const content = makeManifestJson(commands);
+    fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
+      if (String(filePath).endsWith('commands.json')) {
+        return content;
+      }
+      throw new Error(`ENOENT: ${String(filePath)}`);
+    });
+  }
+
   describe('public filtering', () => {
-    it('counts only public commands', () => {
-      const result = summarizeManifest(
-        manifestOf([
-          { name: 'spawn_entity', category: 'transform', visibility: 'public' },
-          { name: '_internal_reset', category: 'transform', visibility: 'internal' },
-          { name: 'delete_entity', category: 'transform', visibility: 'public' },
-        ]),
-      );
+    it('counts only public commands', async () => {
+      stubManifest([
+        { name: 'spawn_entity', category: 'transform', visibility: 'public' },
+        { name: '_internal_reset', category: 'transform', visibility: 'internal' },
+        { name: 'delete_entity', category: 'transform', visibility: 'public' },
+      ]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       expect(result.publicCount).toBe(2);
     });
 
-    it('returns publicCount of 0 when all commands are internal', () => {
-      const result = summarizeManifest(
-        manifestOf([{ name: '_debug_dump', category: 'internal', visibility: 'internal' }]),
-      );
+    it('returns publicCount of 0 when all commands are internal', async () => {
+      stubManifest([{ name: '_debug_dump', category: 'internal', visibility: 'internal' }]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       expect(result.publicCount).toBe(0);
       expect(result.categories).toEqual([]);
       expect(result.scopes).toEqual([]);
     });
-
-    it('treats a command with no visibility as not public', () => {
-      expect(publicCommandsOf(manifestOf([{ name: 'spawn_entity', category: 'scene' }]))).toEqual(
-        [],
-      );
-    });
   });
 
   describe('category extraction', () => {
-    it('extracts unique categories from public commands', () => {
-      const result = summarizeManifest(
-        manifestOf([
-          { name: 'spawn_entity', category: 'transform', visibility: 'public' },
-          { name: 'move_entity', category: 'transform', visibility: 'public' },
-          { name: 'set_material', category: 'material', visibility: 'public' },
-          { name: '_skip', category: 'internal', visibility: 'internal' },
-        ]),
-      );
+    it('extracts unique categories from public commands', async () => {
+      stubManifest([
+        { name: 'spawn_entity', category: 'transform', visibility: 'public' },
+        { name: 'move_entity', category: 'transform', visibility: 'public' },
+        { name: 'set_material', category: 'material', visibility: 'public' },
+        { name: '_skip', category: 'internal', visibility: 'internal' },
+      ]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       expect(result.categories).toHaveLength(2);
       expect(result.categories).toContain('transform');
       expect(result.categories).toContain('material');
     });
 
-    it('excludes categories from internal commands', () => {
-      const result = summarizeManifest(
-        manifestOf([
-          { name: 'spawn_entity', category: 'transform', visibility: 'public' },
-          { name: '_debug', category: 'debug', visibility: 'internal' },
-        ]),
-      );
+    it('excludes categories from internal commands', async () => {
+      stubManifest([
+        { name: 'spawn_entity', category: 'transform', visibility: 'public' },
+        { name: '_debug', category: 'debug', visibility: 'internal' },
+      ]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       expect(result.categories).not.toContain('debug');
-    });
-
-    it('skips a public command with an empty category', () => {
-      const result = summarizeManifest(
-        manifestOf([{ name: 'spawn_entity', category: '', visibility: 'public' }]),
-      );
-
-      expect(result.publicCount).toBe(1);
-      expect(result.categories).toEqual([]);
     });
   });
 
   describe('scope prefix regex', () => {
-    it('extracts namespace prefixes from command names via /^([a-z_]+)_/ regex', () => {
-      const result = summarizeManifest(
-        manifestOf([
-          { name: 'create_entity', category: 'transform', visibility: 'public' },
-          { name: 'query_scene', category: 'scene', visibility: 'public' },
-          { name: 'set_transform', category: 'transform', visibility: 'public' },
-        ]),
-      );
+    it('extracts namespace prefixes from command names via /^([a-z_]+)_/ regex', async () => {
+      stubManifest([
+        { name: 'create_entity', category: 'transform', visibility: 'public' },
+        { name: 'query_scene', category: 'scene', visibility: 'public' },
+        { name: 'set_transform', category: 'transform', visibility: 'public' },
+      ]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       expect(result.scopes).toContain('create');
       expect(result.scopes).toContain('query');
       expect(result.scopes).toContain('set');
     });
 
-    it('de-duplicates scope prefixes across multiple commands', () => {
-      const result = summarizeManifest(
-        manifestOf([
-          { name: 'create_entity', category: 'transform', visibility: 'public' },
-          { name: 'create_material', category: 'material', visibility: 'public' },
-          { name: 'create_light', category: 'lighting', visibility: 'public' },
-        ]),
-      );
+    it('de-duplicates scope prefixes across multiple commands', async () => {
+      stubManifest([
+        { name: 'create_entity', category: 'transform', visibility: 'public' },
+        { name: 'create_material', category: 'material', visibility: 'public' },
+        { name: 'create_light', category: 'lighting', visibility: 'public' },
+      ]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       const createCount = result.scopes.filter((s) => s === 'create').length;
       expect(createCount).toBe(1);
     });
 
-    it('does not extract a scope for commands with no underscore', () => {
-      const result = summarizeManifest(
-        manifestOf([
-          // 'spawn' has no underscore — regex /^([a-z_]+)_/ does not match
-          { name: 'spawn', category: 'transform', visibility: 'public' },
-          { name: 'create_entity', category: 'transform', visibility: 'public' },
-        ]),
-      );
+    it('does not extract a scope for commands with no underscore', async () => {
+      stubManifest([
+        // 'spawn' has no underscore — regex /^([a-z_]+)_/ does not match
+        { name: 'spawn', category: 'transform', visibility: 'public' },
+        { name: 'create_entity', category: 'transform', visibility: 'public' },
+      ]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       // Only 'create' from 'create_entity'; 'spawn' contributes no scope
       expect(result.scopes).toEqual(['create']);
@@ -141,47 +137,155 @@ describe('summarizeManifest', () => {
   });
 
   describe('empty manifest', () => {
-    it('returns zeros and empty arrays for a manifest with no commands', () => {
-      const result = summarizeManifest(manifestOf([]));
+    it('returns zeros and empty arrays for a manifest with no commands', async () => {
+      stubManifest([]);
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       expect(result.publicCount).toBe(0);
       expect(result.categories).toEqual([]);
       expect(result.scopes).toEqual([]);
     });
 
-    it('handles a missing commands key via nullish coalescing', () => {
+    it('handles missing commands key gracefully via nullish coalescing', async () => {
       // Manifest with no "commands" key — tests the `?? []` guard in the source
-      const result = summarizeManifest({});
+      fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
+        if (String(filePath).endsWith('commands.json')) {
+          return JSON.stringify({});
+        }
+        throw new Error(`ENOENT: ${String(filePath)}`);
+      });
+
+      const { readCommandsManifest } = await import('../commands.js');
+      const result = await readCommandsManifest();
 
       expect(result.publicCount).toBe(0);
+    });
+  });
+
+  /**
+   * These two tests previously asserted the OPPOSITE — that an unreadable
+   * manifest "returns safe empty result". That assertion is what let PF-1019
+   * ship: the manifest path pointed outside the Vercel deploy root, every read
+   * threw, the catch turned it into `{ publicCount: 0 }`, and a test certified
+   * that as correct. The docs site rendered zero commands and no signal
+   * reached anyone.
+   *
+   * The requirement inverted, so the tests invert with it. This is not
+   * weakening a guard: an empty docs build is never a valid outcome, and these
+   * replacements are strictly stronger — they pin the failure mode AND assert
+   * the message names the offending path, which is the part that makes the
+   * next occurrence diagnosable instead of silent.
+   */
+  describe('unreadable manifest is fatal', () => {
+    it('throws, naming the path, when the manifest file does not exist', async () => {
+      fsSpy.mockImplementation((_filePath: unknown, _enc: unknown) => {
+        throw new Error('ENOENT: no such file');
+      });
+
+      const { readCommandsManifest } = await import('../commands.js');
+
+      await expect(readCommandsManifest()).rejects.toThrow(
+        /Cannot read the MCP commands manifest at .*commands\.json/,
+      );
+    });
+
+    it('explains the deploy-root constraint that caused this', async () => {
+      fsSpy.mockImplementation((_filePath: unknown, _enc: unknown) => {
+        throw new Error('ENOENT: no such file');
+      });
+
+      const { readCommandsManifest } = await import('../commands.js');
+
+      // The failure is only actionable if it says WHY a path that works
+      // locally fails on Vercel.
+      await expect(readCommandsManifest()).rejects.toThrow(/deploy root/);
+    });
+
+    it('throws when the manifest contains invalid JSON', async () => {
+      fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
+        if (String(filePath).endsWith('commands.json')) {
+          return '{ not valid json }';
+        }
+        throw new Error(`ENOENT: ${String(filePath)}`);
+      });
+
+      const { readCommandsManifest } = await import('../commands.js');
+
+      await expect(readCommandsManifest()).rejects.toThrow(
+        /Cannot read the MCP commands manifest/,
+      );
+    });
+
+    it('preserves the underlying error as `cause`', async () => {
+      const underlying = new Error('ENOENT: no such file');
+      fsSpy.mockImplementation((_filePath: unknown, _enc: unknown) => {
+        throw underlying;
+      });
+
+      const { readCommandsManifest } = await import('../commands.js');
+
+      // Without the cause chain the real fs error is lost and the build log
+      // shows only our wrapper.
+      await expect(readCommandsManifest()).rejects.toMatchObject({
+        cause: underlying,
+      });
     });
   });
 });
 
 /**
- * `commandsInCategory` and `toParameterList` back `/mcp/[category]`, the
+ * `readCommandsByCategory` and `toParameterList` back `/mcp/[category]`, the
  * route added for #9046 — every category tile on `/mcp` linked to
  * `/mcp/${category}` while no such route existed.
  */
-describe('commandsInCategory', () => {
-  it('returns only the public commands in the requested category', () => {
-    const source = manifestOf([
+describe('readCommandsByCategory', () => {
+  let fsSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    fsSpy = vi.spyOn(fs, 'readFileSync');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubManifest(commands: object[]): void {
+    const content = makeManifestJson(commands);
+    fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
+      if (String(filePath).endsWith('commands.json')) {
+        return content;
+      }
+      throw new Error(`ENOENT: ${String(filePath)}`);
+    });
+  }
+
+  it('returns only the public commands in the requested category', async () => {
+    stubManifest([
       { name: 'spawn_entity', category: 'scene', visibility: 'public' },
       { name: 'set_material', category: 'materials', visibility: 'public' },
       { name: '_scene_debug', category: 'scene', visibility: 'internal' },
     ]);
 
-    expect(commandsInCategory(source, 'scene').map((c) => c.name)).toEqual(['spawn_entity']);
+    const { readCommandsByCategory } = await import('../commands.js');
+
+    expect((await readCommandsByCategory('scene')).map((c) => c.name)).toEqual([
+      'spawn_entity',
+    ]);
   });
 
-  it('sorts commands by name so the page order is stable', () => {
-    const source = manifestOf([
+  it('sorts commands by name so the page order is stable', async () => {
+    stubManifest([
       { name: 'zoom_camera', category: 'camera', visibility: 'public' },
       { name: 'aim_camera', category: 'camera', visibility: 'public' },
       { name: 'move_camera', category: 'camera', visibility: 'public' },
     ]);
 
-    expect(commandsInCategory(source, 'camera').map((c) => c.name)).toEqual([
+    const { readCommandsByCategory } = await import('../commands.js');
+
+    expect((await readCommandsByCategory('camera')).map((c) => c.name)).toEqual([
       'aim_camera',
       'move_camera',
       'zoom_camera',
@@ -190,28 +294,34 @@ describe('commandsInCategory', () => {
 
   // The page turns this into notFound(). If it ever returned a non-empty array
   // for an unknown slug, /mcp/anything would render an empty shell with a 200.
-  it('returns an empty array for an unknown category', () => {
-    const source = manifestOf([{ name: 'spawn_entity', category: 'scene', visibility: 'public' }]);
+  it('returns an empty array for an unknown category', async () => {
+    stubManifest([{ name: 'spawn_entity', category: 'scene', visibility: 'public' }]);
 
-    expect(commandsInCategory(source, 'no-such-category')).toEqual([]);
+    const { readCommandsByCategory } = await import('../commands.js');
+
+    expect(await readCommandsByCategory('no-such-category')).toEqual([]);
   });
 
-  it('every category summarizeManifest advertises has at least one command', () => {
-    const source = manifestOf([
+  it('every category readCommandsManifest advertises has at least one command', async () => {
+    stubManifest([
       { name: 'spawn_entity', category: 'scene', visibility: 'public' },
       { name: 'set_material', category: 'materials', visibility: 'public' },
     ]);
-    const { categories } = summarizeManifest(source);
+
+    const { readCommandsManifest, readCommandsByCategory } = await import('../commands.js');
+    const { categories } = await readCommandsManifest();
 
     expect(categories.length).toBeGreaterThan(0);
     for (const category of categories) {
-      expect(commandsInCategory(source, category).length).toBeGreaterThan(0);
+      expect((await readCommandsByCategory(category)).length).toBeGreaterThan(0);
     }
   });
 });
 
 describe('toParameterList', () => {
-  it('flattens the JSON Schema properties map into display rows', () => {
+  it('flattens the JSON Schema properties map into display rows', async () => {
+    const { toParameterList } = await import('../commands.js');
+
     expect(
       toParameterList({
         name: 'spawn_entity',
@@ -225,15 +335,15 @@ describe('toParameterList', () => {
           required: ['entityType'],
         },
       }),
-    ).toStrictEqual([
+    ).toEqual([
       { name: 'entityType', type: 'string', required: true, description: 'Type of entity' },
-      // No `description` key at all — not `description: undefined`. toStrictEqual
-      // is what makes that distinction visible; toEqual would accept either.
-      { name: 'name', type: 'string', required: false },
+      { name: 'name', type: 'string', required: false, description: undefined },
     ]);
   });
 
-  it('puts required parameters first, then alphabetises within each group', () => {
+  it('puts required parameters first, then alphabetises within each group', async () => {
+    const { toParameterList } = await import('../commands.js');
+
     const rows = toParameterList({
       name: 'x',
       category: 'scene',
@@ -251,20 +361,23 @@ describe('toParameterList', () => {
     expect(rows.map((r) => r.name)).toEqual(['beta', 'omega', 'alpha', 'zeta']);
   });
 
-  it('falls back to "unknown" for a property with no declared type', () => {
+  it('falls back to "unknown" for a property with no declared type', async () => {
+    const { toParameterList } = await import('../commands.js');
+
     expect(
       toParameterList({
         name: 'x',
         category: 'scene',
         parameters: { properties: { mystery: {} } },
       }),
-    ).toStrictEqual([{ name: 'mystery', type: 'unknown', required: false }]);
+    ).toEqual([{ name: 'mystery', type: 'unknown', required: false, description: undefined }]);
   });
 
   it.each([
     ['no parameters key', { name: 'x', category: 'scene' }],
     ['parameters with no properties', { name: 'x', category: 'scene', parameters: {} }],
-  ])('returns an empty list for a command with %s', (_label, cmd) => {
+  ])('returns an empty list for a command with %s', async (_label, cmd) => {
+    const { toParameterList } = await import('../commands.js');
     expect(toParameterList(cmd)).toEqual([]);
   });
 });

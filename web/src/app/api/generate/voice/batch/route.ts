@@ -3,7 +3,6 @@ export const maxDuration = 120; // API_MAX_DURATION_BATCH_S
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { panelTierGateResponse } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
@@ -12,8 +11,6 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
 
@@ -36,22 +33,12 @@ const voiceBatchSchema = z.object({
   }),
 });
 
-async function POST_impl(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     validate: voiceBatchSchema,
   });
   if (mid.error) return mid.error;
-
-  // Per-panel tier gate (#7715): the same check `createGenerationHandler`
-  // runs for POST /api/generate/voice (panel 'generate-sound'), BEFORE any
-  // provider key is resolved — this route calls `resolveApiKey` directly.
-  // This is the CREATE (balance-aware) variant, not the poll one: a batch
-  // starts new provider work and deducts `items.length *
-  // voice_batch_cost_per_item` tokens, so a starter with nothing left to
-  // spend is refused here just as `POST /api/generate/voice` refuses it.
-  const tierDenied = panelTierGateResponse('generate-sound', mid.authContext!.user);
-  if (tierDenied) return tierDenied;
 
   // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
   const aggRl = await aggregateGenerationRateLimit(mid.userId!);
@@ -90,10 +77,10 @@ async function POST_impl(request: NextRequest) {
     usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
     }
     captureException(err, { route: '/api/generate/voice/batch', action: 'resolve_api_key' });
-    return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
+    return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
   }
 
   const client = new ElevenLabsClient({ apiKey });
@@ -157,7 +144,3 @@ async function POST_impl(request: NextRequest) {
     totalFailed: errors.length,
   });
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

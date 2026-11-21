@@ -288,17 +288,7 @@ export const publishedGames = pgTable(
     description: text('description'),
     status: publishStatusEnum('status').notNull().default('processing'),
     version: integer('version').notNull().default(1),
-    // The game's PLAY-PAGE path (`/play/{clerkId}/{slug}`), despite the name.
-    // Every consumer (publish/list `url`, the community routes' `cdnUrl`,
-    // GameDetailModal's `href`) treats it as the link to the player. Published
-    // games are served through the gated play API, not from a CDN; the object
-    // that IS in storage is `cdnBundleKey` below. Kept under this name because
-    // it is a public API field. docs/decisions/2026-09-23-published-game-hosting.md
     cdnUrl: text('cdn_url'),
-    // Private immutable R2 snapshot; NULL when optional storage is unavailable.
-    cdnBundleKey: text('cdn_bundle_key'),
-    // Publication-time fallback, independent of later editor saves.
-    publishedSceneData: jsonb('published_scene_data'),
     thumbnail: text('thumbnail'),
     playCount: integer('play_count').notNull().default(0),
     // Distinct reporters SINCE THE LAST MODERATOR REVIEW (one row per reporter
@@ -449,9 +439,6 @@ export const gameForks = pgTable(
   },
   (table) => [
     index('idx_game_forks_original').on(table.originalGameId),
-    // Attribution lookup: "was THIS project created by a fork?" (#7858).
-    // Each fork creates a fresh project row, so the match is effectively unique.
-    index('idx_game_forks_forked_project').on(table.forkedProjectId),
   ]
 );
 
@@ -627,34 +614,6 @@ export const generationJobs = pgTable(
   (table) => [
     index('idx_generation_jobs_user_status').on(table.userId, table.status),
     index('idx_generation_jobs_user_created').on(table.userId, table.createdAt),
-  ]
-);
-
-// --- Provider Job Ownership (#10262) ---
-//
-// Binds a provider job id to the user whose request produced it. Written by
-// `createGenerationHandler` right after the provider returns the job id and
-// BEFORE the response reaches the client (see `lib/generate/jobOwnership.ts`).
-// Every `/api/generate/<type>/status` route resolves a PLATFORM provider key
-// by default, so without this table any signed-in caller could poll ANY
-// job id and read back another user's result. `generation_jobs` cannot serve
-// this purpose on its own: its rows are created by the CLIENT, fire-and-forget,
-// with a client-supplied `providerJobId` — a caller can claim someone else's
-// id, and the row can be missing or late relative to the first poll.
-export const providerJobOwners = pgTable(
-  'provider_job_owners',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    provider: text('provider').notNull(),
-    providerJobId: text('provider_job_id').notNull(),
-    userId: uuid('user_id').notNull().references(() => users.id),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    // First writer wins: a status route's ownership check keys off this pair,
-    // never off `generation_jobs`, so it cannot be spoofed via that client-owned
-    // table.
-    uniqueIndex('uq_provider_job_owners_provider_job').on(table.provider, table.providerJobId),
   ]
 );
 
@@ -885,9 +844,6 @@ export type SellerProfile = typeof sellerProfiles.$inferSelect;
 
 export type GenerationJob = typeof generationJobs.$inferSelect;
 export type NewGenerationJob = typeof generationJobs.$inferInsert;
-
-export type ProviderJobOwner = typeof providerJobOwners.$inferSelect;
-export type NewProviderJobOwner = typeof providerJobOwners.$inferInsert;
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';

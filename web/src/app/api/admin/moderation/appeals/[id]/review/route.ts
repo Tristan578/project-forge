@@ -7,8 +7,6 @@ import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +34,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * takedown state to restore today, so an approved asset appeal deliberately
  * records the decision and mutates nothing.
  */
-async function POST_impl(
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -174,13 +172,9 @@ async function POST_impl(
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation/appeals/[id]/review' });
     console.error('Failed to review appeal:', error);
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to review appeal' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

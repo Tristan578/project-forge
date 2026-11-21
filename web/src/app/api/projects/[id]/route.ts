@@ -4,7 +4,6 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { getProject, updateProject, deleteProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { notFound, internalError } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const updateProjectSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
@@ -17,7 +16,7 @@ const updateProjectSchema = z.object({
  * GET /api/projects/[id]
  * Load a single project by ID.
  */
-async function GET_impl(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -46,7 +45,7 @@ async function GET_impl(req: NextRequest, { params }: { params: Promise<{ id: st
  * Update a project.
  * Body: { name?: string, sceneData?: object, thumbnail?: string, entityCount?: number }
  */
-async function PUT_impl(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -88,7 +87,7 @@ async function PUT_impl(req: NextRequest, { params }: { params: Promise<{ id: st
  * DELETE /api/projects/[id]
  * Delete a project.
  */
-async function DELETE_impl(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -111,9 +110,3 @@ async function DELETE_impl(req: NextRequest, { params }: { params: Promise<{ id:
     return internalError();
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);
-export const PUT = withEgressGuard(PUT_impl);
-export const DELETE = withEgressGuard(DELETE_impl);

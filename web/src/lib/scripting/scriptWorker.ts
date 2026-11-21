@@ -1,13 +1,11 @@
 // Web Worker for sandboxed script execution.
 // Receives: init (scripts + entity states), tick (dt + states), stop
-// Sends: commands, log, error, script_timeout, ui, the forge API's async_request / scene_* / ui_* / camera_* / dialogue_* / game_* messages, and init_done / tick_done (init or a tick finished; the watchdog's liveness signal)
+// Sends: commands (engine commands), log (console output), error (runtime errors), ui (HUD updates)
 
 import { injectLoopGuards } from './loopGuards';
 import { SHADOWED_GLOBALS } from './sandboxGlobals';
 import { revokeNetworkGlobalsIfWorker } from './revokeNetworkGlobals';
 import { MAX_COMMAND_PAYLOAD_CONTAINERS } from '../engine/commandPayloadGuard';
-import type { LocaleBundle } from '@/lib/i18n/gameLocalization';
-import { getCollisionShapeFromLayers, isCollisionShape, TILE_COLLISION_FIELD_MAX } from '@/lib/tilemap/collisionShapes';
 
 // Hard-revoke network/storage globals from this worker's scope BEFORE any user
 // script is compiled or run. Parameter shadowing (SHADOWED_GLOBALS) only hides
@@ -38,20 +36,6 @@ interface EntityInfo {
   name: string;
   type: string;
   colliderRadius: number;
-  /**
-   * How far this entity's 2D collider reaches BELOW its transform origin.
-   *
-   * Unlike `colliderRadius` above — which `useScriptRunner` has always set to
-   * the literal 0.5 for every entity — this is computed from the entity's real
-   * `Physics2dData`. `physics2d.isGrounded` needs it because the ray it casts
-   * has to start at the entity's FEET: the transform position is the collider's
-   * CENTRE, so a ray from there with the default 0.1 length stops 0.4 units
-   * above the bottom of a default 1x1 collider and can never reach the floor.
-   *
-   * 0 for an entity with no 2D physics, which is also the safe reading: the
-   * ray then starts at the transform origin, exactly as before.
-   */
-  collider2dHalfHeight: number;
   currentFrame?: number;
 }
 
@@ -60,16 +44,6 @@ interface InputState {
   justPressed: Record<string, boolean>;
   justReleased: Record<string, boolean>;
   axes: Record<string, number>;
-  // Slots 1+ for local multiplayer (physics.FR-1.OP-04). Player 0 stays the
-  // flat maps above; each extra slot carries its own evaluated state, keyed by
-  // slot number. Absent for a single-player game, so `forge.input.isPressed`
-  // with no player reads exactly what it always did.
-  players?: Record<string, {
-    pressed: Record<string, boolean>;
-    justPressed: Record<string, boolean>;
-    justReleased: Record<string, boolean>;
-    axes: Record<string, number>;
-  }>;
 }
 
 interface EngineCommand {
@@ -91,10 +65,7 @@ interface UIElement {
 interface TilemapState {
   tileSize: [number, number];
   mapSize: [number, number];
-  layers: {
-    tiles: (number | null)[];
-    collisionShapes?: ('none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight')[];
-  }[];
+  layers: { tiles: (number | null)[] }[];
   origin: 'TopLeft' | 'Center';
 }
 
@@ -113,39 +84,11 @@ let pendingCommands: EngineCommand[] = [];
 let entityStates: Record<string, EntityState> = {};
 let entityInfos: Record<string, EntityInfo> = {};
 let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-
-/** The maps forge.input reads for one local-player slot. */
-type InputSlotMaps = {
-  pressed: Record<string, boolean>;
-  justPressed: Record<string, boolean>;
-  justReleased: Record<string, boolean>;
-  axes: Record<string, number>;
-};
-
-/**
- * Resolve the input maps for a local-player slot. 0 or undefined is the primary
- * player — the flat top-level maps — so every existing single-player call reads
- * exactly what it did before. A slot the engine did not report reads as all-off
- * rather than throwing, so a script that names player 2 in a one-player session
- * simply gets no input (physics.FR-1.OP-04).
- */
-function slotInput(player?: number): InputSlotMaps {
-  if (!player) return currentInput;
-  return currentInput.players?.[String(player)] ?? { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-}
 const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
 // Touch capability is sent from the main thread in the 'init' message.
 // Workers cannot safely access navigator.maxTouchPoints (it may not exist).
 let isTouchDeviceFlag = false;
-// Localization bundles sent from the main thread in the 'init' message, keyed
-// by BCP-47 locale code. `forge.i18n` resolves against `activeLocale`, which
-// starts at the project's preview locale (falling back to its source locale)
-// and can be switched at runtime via `forge.i18n.setLocale`. Module-level so
-// setLocale in one script is observed by getLocale/t in every other script and
-// persists for the whole play session.
-let localeBundles: Record<string, LocaleBundle> = {};
-let activeLocale = 'en';
 const audioPlayingState = new Map<string, boolean>();
 let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;
@@ -205,7 +148,6 @@ function processAsyncResponses(responses: Array<{
       pending.resolve(resp.data);
       pendingAsyncRequests.delete(resp.requestId);
     } else if (resp.status === 'error') {
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank async error message falls back to a generic one, same as an absent one
       pending.reject(new Error(resp.error || 'Unknown async error'));
       pendingAsyncRequests.delete(resp.requestId);
     } else if (resp.status === 'progress') {
@@ -253,7 +195,7 @@ export const TILEMAP_FILL_MAX_CELLS =
  * layer earlier, so a script author gets a named error instead of a command the
  * engine silently refuses (PF-1181).
  */
-export const TILE_FIELD_MAX = TILE_COLLISION_FIELD_MAX;
+export const TILE_FIELD_MAX = 0xffff_ffff;
 
 /**
  * Floor a tilemap integer argument, refusing anything the engine would drop.
@@ -353,17 +295,6 @@ function buildForgeApi(scriptEntityId: string) {
     },
     setRotation: (eid: string, x: number, y: number, z: number) => {
       pendingCommands.push({ cmd: 'update_transform', entityId: eid, rotation: [x, y, z] });
-    },
-    // ADDED, not removed, unlike the seven above. `forge.setScale` is the one
-    // name in this file's sweep that was missing rather than imaginary: the
-    // shipped Arena Shooter template calls it to size the projectiles it
-    // spawns, `UpdateTransformPayload` has carried an optional `scale` since it
-    // was written (`engine/src/core/commands/transform.rs`), and the command is
-    // already on the script allowlist because `setPosition` uses it. The only
-    // thing absent was the method — so the template's projectiles have always
-    // spawned at full size, and the script died there rather than continuing.
-    setScale: (eid: string, x: number, y: number, z: number) => {
-      pendingCommands.push({ cmd: 'update_transform', entityId: eid, scale: [x, y, z] });
     },
     translate: (eid: string, dx: number, dy: number, dz: number) => {
       const state = entityStates[eid];
@@ -476,22 +407,6 @@ function buildForgeApi(scriptEntityId: string) {
       },
       getEntityName: (eid: string) => entityInfos[eid]?.name ?? null,
       getEntityType: (eid: string) => entityInfos[eid]?.type ?? null,
-      /**
-       * Every entity whose type matches, case-insensitively.
-       *
-       * The type string the engine reports is a component name such as
-       * `EntityType::Sprite`, so a caller asking for `'Sprite'` is asking about
-       * a substring rather than an equality — matching exactly would answer
-       * with an empty list for every type in the scene, which reads as "none of
-       * those exist" rather than "you spelled it differently".
-       */
-      findByType: (type: string) => {
-        if (typeof type !== 'string' || type === '') return [];
-        const wanted = type.toLowerCase();
-        return Object.entries(entityInfos)
-          .filter(([, info]) => (info?.type ?? '').toLowerCase().includes(wanted))
-          .map(([eid]) => eid);
-      },
       getEntitiesInRadius: (position: [number, number, number], radius: number) => {
         const results: string[] = [];
         for (const [id, state] of Object.entries(entityStates)) {
@@ -520,10 +435,10 @@ function buildForgeApi(scriptEntityId: string) {
     },
 
     input: {
-      isPressed: (action: string, player?: number) => !!slotInput(player).pressed[action],
-      justPressed: (action: string, player?: number) => !!slotInput(player).justPressed[action],
-      justReleased: (action: string, player?: number) => !!slotInput(player).justReleased[action],
-      getAxis: (action: string, player?: number) => slotInput(player).axes[action] ?? 0,
+      isPressed: (action: string) => !!currentInput.pressed[action],
+      justPressed: (action: string) => !!currentInput.justPressed[action],
+      justReleased: (action: string) => !!currentInput.justReleased[action],
+      getAxis: (action: string) => currentInput.axes[action] ?? 0,
       isTouchDevice: () => {
         // Touch capability is derived from the main thread's init message.
         // Workers cannot reliably access navigator.maxTouchPoints — it may be
@@ -540,6 +455,9 @@ function buildForgeApi(scriptEntityId: string) {
       },
       applyImpulse: (eid: string, fx: number, fy: number, fz: number) => {
         pendingCommands.push({ cmd: 'apply_force', entityId: eid, force: [fx, fy, fz], isImpulse: true });
+      },
+      setVelocity: (eid: string, vx: number, vy: number, vz: number) => {
+        pendingCommands.push({ cmd: 'set_velocity', entityId: eid, velocity: [vx, vy, vz] });
       },
       /**
        * Whether the engine's kinematic character controller last reported this
@@ -597,63 +515,16 @@ function buildForgeApi(scriptEntityId: string) {
       applyImpulse: (eid: string, impulseX: number, impulseY: number) => {
         pendingCommands.push({ cmd: 'apply_impulse2d', entityId: eid, impulseX, impulseY });
       },
-      /**
-       * Set both components of a body's linear velocity.
-       *
-       * RESTORED, POINTING AT THE ENGINE'S OWN NAME. PF-1180 deleted this
-       * method because it dispatched `set_velocity2d`, which the engine has
-       * never had; the engine's spelling is `set_linear_velocity_2d`, and at
-       * the time that was a `Not yet implemented` stub, so the rename would
-       * have swapped one silent no-op for another. #9763 implemented the arm.
-       */
       setVelocity: (eid: string, vx: number, vy: number) => {
-        pendingCommands.push({ cmd: 'set_linear_velocity_2d', entityId: eid, x: vx, y: vy });
+        pendingCommands.push({ cmd: 'set_velocity2d', entityId: eid, velocityX: vx, velocityY: vy });
       },
-      /**
-       * Set the horizontal velocity and LEAVE THE VERTICAL ONE ALONE.
-       *
-       * This is the platformer primitive, and the omission is the whole point:
-       * a controller writes horizontal speed every frame, and writing `y` too
-       * would cancel gravity and erase the jump impulse applied a frame
-       * earlier — the entity would hover instead of falling. The engine applies
-       * the partial update against the live component, so this needs no read
-       * back and cannot act on a stale value.
-       */
-      setVelocityX: (eid: string, vx: number) => {
-        pendingCommands.push({ cmd: 'set_linear_velocity_2d', entityId: eid, x: vx });
-      },
-      /** Set the vertical velocity, leaving the horizontal one alone. */
-      setVelocityY: (eid: string, vy: number) => {
-        pendingCommands.push({ cmd: 'set_linear_velocity_2d', entityId: eid, y: vy });
-      },
-      /** Set angular velocity, in radians per second. */
-      setAngularVelocity: (eid: string, omega: number) => {
-        pendingCommands.push({ cmd: 'set_angular_velocity_2d', entityId: eid, omega });
-      },
-      /**
-       * Turn an entity's 2D physics on or off.
-       *
-       * `toggle_physics2d` is the engine's arm and has always been real —
-       * `set_physics_2d_enabled` routes to the same handler. There was simply
-       * no method reaching it.
-       */
-      setEnabled: (eid: string, enabled: boolean) => {
-        pendingCommands.push({ cmd: 'toggle_physics2d', entityId: eid, enabled });
-      },
-      /**
-       * Current linear velocity, or `null` if it is not known.
-       *
-       * READ THE CAVEAT. `physics2dVelocities` is populated from the engine's
-       * per-tick sync, and `useScriptRunner` currently sends an empty map, so
-       * this answers `null` for every entity. The mirror, not this method, is
-       * the missing half; it is tracked separately rather than left looking
-       * like a working read. Prefer `setVelocityX` / `setVelocityY`, which
-       * express a partial change without needing to read first.
-       */
       getVelocity: (eid: string): { x: number; y: number } | null => {
         const state = physics2dVelocities[eid];
         if (!state) return null;
         return { x: state.velocity[0], y: state.velocity[1] };
+      },
+      setAngularVelocity: (eid: string, omega: number) => {
+        pendingCommands.push({ cmd: 'set_angular_velocity2d', entityId: eid, omega });
       },
       getAngularVelocity: (eid: string): number | null => {
         const state = physics2dVelocities[eid];
@@ -663,37 +534,7 @@ function buildForgeApi(scriptEntityId: string) {
         return asyncRequest('physics', 'raycast2d', { originX, originY, dirX, dirY, maxDistance: maxDistance ?? 100 });
       },
       isGrounded: async (eid: string, distance?: number) => {
-        // The ground check is a downward ray FROM THE ENTITY, so the origin has
-        // to come from here — the handler has no entity positions. It used to
-        // send only `{entityId, distance}`, and the engine has no
-        // "cast from this entity" mode, so the cast happened from the world
-        // origin for every entity (#9271).
-        const state = entityStates[eid];
-        if (!state) return false;
-        // FROM THE FEET, NOT THE CENTRE. `state.position` is the transform
-        // origin and every 2D collider is built around it
-        // (`make_collider_2d`), so `distance` measured from there is measured
-        // from inside the entity. With the default 1x1 collider and the default
-        // 0.1 distance the ray ended 0.4 units ABOVE the entity's own bottom
-        // edge — so once the caster was excluded from the cast it hit nothing
-        // and every entity read as airborne. Subtracting the half-height makes
-        // `distance` mean what the caller reads it as: how far below my feet.
-        const halfHeight = entityInfos[eid]?.collider2dHalfHeight ?? 0;
-        // NOTE: `state.position` is the entity's LOCAL transform. The engine's
-        // tick forwards `Transform.translation`, not `GlobalTransform`, so for
-        // a PARENTED entity this origin is in parent space while the collider
-        // rapier placed is in world space — the ray then asks about a point
-        // unrelated to the entity. That predates this method having any origin
-        // at all (it used to send 0,0), and fixing it means sending the global
-        // translation on the tick. Stated here so the correctness argument
-        // above is not read as covering the parented case, which it does not.
-        
-        return asyncRequest('physics', 'isGrounded', {
-          entityId: eid,
-          originX: state.position[0],
-          originY: state.position[1] - halfHeight,
-          distance: distance ?? 0.1,
-        });
+        return asyncRequest('physics', 'isGrounded', { entityId: eid, distance: distance ?? 0.1 });
       },
       setGravity: (x: number, y: number) => {
         pendingCommands.push({ cmd: 'set_gravity2d', gravityX: x, gravityY: y });
@@ -854,34 +695,6 @@ function buildForgeApi(scriptEntityId: string) {
           layer: tileInt(api, 'layer', layer),
           x: tileInt(api, 'x', x),
           y: tileInt(api, 'y', y),
-        });
-      },
-      // Read a cell's authored collision shape from the mirrored tilemap state.
-      // Pure JS, no command: `null` when the tilemap, layer or cell is unknown,
-      // and `'none'` for a layer that has no `collisionShapes` array yet.
-      getCollisionShape: (tilemapId: string, x: number, y: number, layer = 0): string | null => {
-        const tilemap = Object.hasOwn(tilemapStates, tilemapId) ? tilemapStates[tilemapId] : undefined;
-        return tilemap ? getCollisionShapeFromLayers(tilemap.layers, tilemap.mapSize, layer, x, y) : null;
-      },
-      // Queue an authoring request. Reads reflect the next engine-supplied
-      // snapshot; this API does not create runtime colliders (#9814).
-      setCollisionShape: (tilemapId: string, x: number, y: number, shape: string, layer = 0) => {
-        const api = 'forge.tilemap.setCollisionShape';
-        if (!isCollisionShape(shape)) throw new Error(`${api}: unknown collision shape`);
-        const tileLayer = tileInt(api, 'layer', layer);
-        const tileX = tileInt(api, 'x', x);
-        const tileY = tileInt(api, 'y', y);
-        const tilemap = Object.hasOwn(tilemapStates, tilemapId) ? tilemapStates[tilemapId] : undefined;
-        if (!tilemap || getCollisionShapeFromLayers(tilemap.layers, tilemap.mapSize, tileLayer, tileX, tileY) === null) {
-          throw new Error(`${api}: the tilemap, layer, or cell is unavailable`);
-        }
-        pendingCommands.push({
-          cmd: 'set_tile_collision_shape',
-          entityId: tilemapId,
-          layer: tileLayer,
-          x: tileX,
-          y: tileY,
-          shape,
         });
       },
       worldToTile: (tilemapId: string, worldX: number, worldY: number): [number, number] => {
@@ -1116,6 +929,12 @@ function buildForgeApi(scriptEntityId: string) {
       stopFollow: () => {
         pendingCommands.push({ cmd: 'camera_stop_follow' });
       },
+      setPosition: (x: number, y: number, z: number) => {
+        pendingCommands.push({ cmd: 'camera_set_position', position: [x, y, z] });
+      },
+      lookAt: (x: number, y: number, z: number) => {
+        pendingCommands.push({ cmd: 'camera_look_at', target: [x, y, z] });
+      },
       setMode: (mode: string) => {
         (self as unknown as Worker).postMessage({ type: 'camera_set_mode', mode });
       },
@@ -1187,38 +1006,6 @@ function buildForgeApi(scriptEntityId: string) {
       },
     },
 
-    // --- Leaderboard (async — published-game score submission / reads) ---
-    // Routed through the 'leaderboard' async channel. The handler
-    // (leaderboardChannel.ts) rejects with a clear reason when there is no
-    // published-game identity (e.g. in-editor test play), so a script's catch
-    // block sees that message rather than a silent no-op.
-    leaderboard: {
-      submit: (
-        name: string,
-        playerName: string,
-        score: number,
-        metadata?: Record<string, unknown>,
-      ) => asyncRequest('leaderboard', 'submit', { name, playerName, score, metadata }),
-      getTop: (name: string, limit?: number) =>
-        asyncRequest('leaderboard', 'getTop', { name, limit }),
-    },
-
-    // --- Internationalization (synchronous — resolved against locale bundles) ---
-    // No engine command and no worker-boundary round-trip: bundles are shipped
-    // in the 'init' message and resolved in-worker, so `t` is a plain string
-    // lookup usable in tight per-frame code.
-    i18n: {
-      t: (stringId: string, defaultText: string): string => {
-        const translated = localeBundles[activeLocale]?.translations?.[stringId];
-        return typeof translated === 'string' ? translated : defaultText;
-      },
-      setLocale: (locale: string): void => {
-        activeLocale = locale;
-      },
-      getLocale: (): string => activeLocale,
-      getAvailableLocales: (): string[] => Object.keys(localeBundles),
-    },
-
     // --- Sprite animation control ---
     sprite: {
       playAnimation: (eid: string, clipName: string) => {
@@ -1284,12 +1071,24 @@ function buildForgeApi(scriptEntityId: string) {
           crossfade: options?.crossfade ?? 0.0,
         });
       },
+      stopAnimation: (eid: string) => {
+        pendingCommands.push({ cmd: 'stop_skeletal_animation2d', entityId: eid });
+      },
       setSkin: (eid: string, skinName: string) => {
         pendingCommands.push({ cmd: 'set_skeleton2d_skin', entityId: eid, skin_name: skinName });
       },
       getSkin: (eid: string) => {
         const skeleton = skeletonStates[eid];
         return skeleton?.activeSkin ?? null;
+      },
+      setIkTarget: (eid: string, constraintName: string, targetX: number, targetY: number) => {
+        pendingCommands.push({
+          cmd: 'set_ik_target2d',
+          entityId: eid,
+          constraint_name: constraintName,
+          target_x: targetX,
+          target_y: targetY,
+        });
       },
     },
 
@@ -1481,18 +1280,6 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
 
 const MAX_COMMANDS_PER_FRAME = 100;
 
-/**
- * Says that a tick returned. The runner arms a 5 s watchdog on every tick and
- * clears it only when the worker posts something, so a script that never
- * calls forge.* made every tick silent and Play stopped as a "possible
- * infinite loop" (#10286). A tick that never returns still posts nothing,
- * which is exactly what the watchdog is there to catch. The runner ignores
- * the message; it is not a command.
- */
-function postTickDone() {
-  (self as unknown as Worker).postMessage({ type: 'tick_done' });
-}
-
 function flushCommands() {
   if (pendingCommands.length > MAX_COMMANDS_PER_FRAME) {
     (self as unknown as Worker).postMessage({
@@ -1524,25 +1311,16 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       spawnCounter = 0;
       clearPendingAsyncRequests('Script re-initialized');
-      entityStates = msg.entities ?? {};
-      entityInfos = msg.entityInfos ?? {};
-      currentInput = msg.inputState ?? { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-      tilemapStates = msg.tilemapStates ?? {};
-      skeletonStates = msg.skeletonStates ?? {};
-      physics2dVelocities = msg.physics2dVelocities ?? {};
-      groundedStates = msg.groundedStates ?? {};
+      entityStates = msg.entities || {};
+      entityInfos = msg.entityInfos || {};
+      currentInput = msg.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+      tilemapStates = msg.tilemapStates || {};
+      skeletonStates = msg.skeletonStates || {};
+      physics2dVelocities = msg.physics2dVelocities || {};
+      groundedStates = msg.groundedStates || {};
       prevEntityStates = {};
       // Main thread passes touch capability so the worker doesn't need navigator access
       isTouchDeviceFlag = typeof msg.isTouchDevice === 'boolean' ? msg.isTouchDevice : false;
-      // Localization bundles + the locale forge.i18n should resolve against.
-      // previewLocale wins when set (matches the editor's own resolveString),
-      // else the project source locale, else 'en'.
-      localeBundles = (msg.locales as Record<string, LocaleBundle>) || {};
-      {
-        const src = typeof msg.sourceLocale === 'string' && msg.sourceLocale ? msg.sourceLocale : 'en';
-        activeLocale =
-          typeof msg.previewLocale === 'string' && msg.previewLocale ? msg.previewLocale : src;
-      }
       uiElements.clear();
       uiDirty = false;
 
@@ -1581,14 +1359,6 @@ self.onmessage = (e: MessageEvent) => {
       }
 
       flushCommands();
-      // Always say that init finished, even when no script called forge.* and
-      // nothing above posted. In the sandboxed-origin transport the frame
-      // decides whether a later uncaught error is a BOOT failure ("this browser
-      // can't run scripts", Play stops) or a RUNTIME one by whether the worker
-      // has posted anything yet (`started` in SANDBOX_BOOTSTRAP). Without this,
-      // a quiet script that throws from a timer reads as a browser that refused
-      // the worker. The runner ignores the message; it is not a command.
-      (self as unknown as Worker).postMessage({ type: 'init_done' });
       break;
     }
 
@@ -1628,7 +1398,7 @@ self.onmessage = (e: MessageEvent) => {
           }
         }
       } else {
-        newEntities = msg.entities ?? {};
+        newEntities = msg.entities || {};
       }
 
       // Apply entityInfos delta if present
@@ -1647,10 +1417,7 @@ self.onmessage = (e: MessageEvent) => {
           }
           for (const [eid, components] of Object.entries(delta.changed)) {
             if (!updated[eid]) {
-              // 0, not a guess: an entity first seen through a delta has no
-              // collider information here, and 0 makes `isGrounded` cast from
-              // the transform origin rather than from a made-up offset.
-              updated[eid] = { name: '', type: 'unknown', colliderRadius: 0.5, collider2dHalfHeight: 0 };
+              updated[eid] = { name: '', type: 'unknown', colliderRadius: 0.5 };
             }
             updated[eid] = { ...updated[eid], ...components } as EntityInfo;
           }
@@ -1686,7 +1453,7 @@ self.onmessage = (e: MessageEvent) => {
 
       entityStates = newEntities;
       // entityInfos already updated above (delta or full)
-      currentInput = msg.inputState ?? currentInput;
+      currentInput = msg.inputState || currentInput;
       if (msg.tilemapStates) tilemapStates = msg.tilemapStates;
       if (msg.groundedStates) groundedStates = msg.groundedStates;
       if (msg.skeletonStates) skeletonStates = msg.skeletonStates;
@@ -1705,7 +1472,6 @@ self.onmessage = (e: MessageEvent) => {
       if (heapMb >= 0 && heapMb > memoryLimitMb) {
         terminateDueToMemory(heapMb);
         flushCommands();
-        postTickDone();
         break;
       }
 
@@ -1749,7 +1515,6 @@ self.onmessage = (e: MessageEvent) => {
       }
 
       flushCommands();
-      postTickDone();
       break;
     }
 
@@ -1780,13 +1545,6 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       collisionEnterCallbacks.clear();
       collisionExitCallbacks.clear();
-      // The 2D callbacks live on `self` as plain ARRAYS, not per-entity maps,
-      // so nothing overwrites a stale registration the way re-registering an
-      // entity's 3D callback does: they only grow. Left uncleared, one
-      // collision fired every 2D handler N+1 times after N restarts, silently
-      // multiplying whatever the game counts -- score, lives, pickups.
-      (self as unknown as Record<string, unknown>).__collision2dEnterCallbacks = [];
-      (self as unknown as Record<string, unknown>).__collision2dExitCallbacks = [];
       gameWinCallbacks.clear();
       gameScore = 0;
       // Send final UI clear
@@ -1815,43 +1573,6 @@ self.onmessage = (e: MessageEvent) => {
         } catch (err) {
           const msg_ = err instanceof Error ? err.message : String(err);
           (self as unknown as Worker).postMessage({ type: 'error', entityId: entityB, line: 0, message: `Collision callback error: ${msg_}` });
-        }
-      }
-
-      // THE 2D CALLBACKS TOO. `forge.physics2d.onCollisionEnter` /
-      // `onCollisionExit` push into these global arrays, and nothing read them
-      // — registered, never invoked, so every 2D collision handler a creator
-      // wrote silently did nothing (found in review). That is the no-error,
-      // no-effect pair this repo keeps finding: the API exists, the callback
-      // is accepted, and the game just never responds to a collision.
-      //
-      // They are GLOBAL rather than per-entity, which is the shape the 2D API
-      // documents, so each collision fires them once per participant — the
-      // handler sees `entityId` as the entity it is reasoning about and
-      // `otherEntityId` as what it hit, in both directions, exactly as the
-      // per-entity 3D callbacks above behave.
-      const key2d = started ? '__collision2dEnterCallbacks' : '__collision2dExitCallbacks';
-      const cbs2d = ((self as unknown as Record<string, unknown>)[key2d] as
-        Array<(event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void>) || [];
-      if (cbs2d.length > 0) {
-        // A COPY, because a handler may unsubscribe itself: the unsubscribe
-        // splices the live array, which would skip the next callback mid-loop.
-        for (const [selfId, otherId] of [[entityA, entityB], [entityB, entityA]] as const) {
-          for (const cb2d of [...cbs2d]) {
-            try {
-              cb2d({
-                entityId: selfId,
-                otherEntityId: otherId,
-                // Resolved from the worker's own snapshot rather than invented.
-                // An entity the worker has not seen yet yields '', which is
-                // honest — the id is always right, the name is best effort.
-                otherEntityName: entityInfos[otherId]?.name ?? '',
-              });
-            } catch (err) {
-              const msg_ = err instanceof Error ? err.message : String(err);
-              (self as unknown as Worker).postMessage({ type: 'error', entityId: selfId, line: 0, message: `Collision callback error: ${msg_}` });
-            }
-          }
         }
       }
       break;

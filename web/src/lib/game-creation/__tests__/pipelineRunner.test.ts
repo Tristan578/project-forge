@@ -19,8 +19,6 @@ import type {
 } from '@/lib/game-creation/types';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
 import { buildPlan } from '@/lib/game-creation/planBuilder';
-import { entitySetupExecutor } from '@/lib/game-creation/executors/entitySetupExecutor';
-import { worldBuildExecutor } from '@/lib/game-creation/executors/worldBuildExecutor';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -228,36 +226,6 @@ describe('runPipeline', () => {
     await runPipeline(plan, trackingRegistry, ctx, callbacks);
     // After complete callback fires, status should be completed
     expect(statuses).toContain('completed');
-  });
-
-  it.each([
-    {
-      executor: entitySetupExecutor,
-      input: { entity: { name: 'Crate', role: 'decoration' }, entityId: 'crate-1', scene: 'MainScene', projectType: '3d' },
-    },
-    {
-      executor: worldBuildExecutor,
-      input: { entities: [{ entityId: 'ground-1', name: 'Ground', entityType: 'cube', position: [0, 0, 0], scale: [40, 1, 40] }] },
-    },
-  ])('does not replay an accepted $executor.name spawn when confirmation times out', async ({ executor, input }) => {
-    vi.useFakeTimers();
-    try {
-      const plan = makePlan({
-        steps: [makeStep('spawn-step', 'scene_create', { executor: executor.name, input, maxRetries: 2 })],
-      });
-      const ctx = makeContext(controller.signal);
-      // The engine accepted the mutation, but its query answer has not arrived.
-      // A cache miss cannot prove that dispatching the same spawn again is safe.
-      ctx.observeEntity = vi.fn(() => undefined);
-      const pending = runPipeline(plan, makeRegistry(executor), ctx);
-      await vi.advanceTimersByTimeAsync(20_000);
-      const result = await pending;
-      expect(result.status).toBe('failed');
-      expect(result.steps[0].error?.code).toBe('EFFECT_TIMED_OUT');
-      expect(vi.mocked(ctx.dispatchCommand).mock.calls.filter(([command]) => command === 'spawn_entity')).toHaveLength(1);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('retries a failing step up to maxRetries times', async () => {
@@ -664,37 +632,6 @@ describe('runPipeline', () => {
     expect(plan.steps[0].status).toBe('skipped');
     expect(plan.steps[0].output).toEqual({ entityIds: ['half-done'] });
     expect(resolvedAll).toEqual([]);
-  });
-
-  // #9998: `scene_create` reads the brief's completion mode off the context.
-  // The brief must be the PLAN's — the one the steps were built from — even
-  // when the caller hands in a context that already carries some other brief.
-  it('hands every executor the plan\'s own brief as ctx.gdd, replacing any the caller supplied', async () => {
-    const seen: Array<Readonly<OrchestratorGDD> | undefined> = [];
-    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
-      ['scene_create', {
-        name: 'scene_create',
-        inputSchema: z.object({}),
-        execute: async (_input, ctx): Promise<ExecutorResult> => {
-          seen.push(ctx.gdd);
-          return { success: true, output: {} };
-        },
-        userFacingErrorMessage: '',
-      }],
-    ]);
-    const plan = makePlan({ steps: [makeStep('step_0'), makeStep('step_1')] });
-    plan.gdd = { ...plan.gdd, completionMode: 'sandbox' };
-    const callerCtx: ExecutorContext = {
-      ...makeContext(controller.signal),
-      gdd: { ...plan.gdd, completionMode: 'narrative' },
-    };
-
-    await runPipeline(plan, probeRegistry, callerCtx);
-
-    expect(seen).toHaveLength(2);
-    expect(seen[0]).toBe(plan.gdd);
-    expect(seen[1]).toBe(plan.gdd);
-    expect(seen[0]?.completionMode).toBe('sandbox');
   });
 
   it('resolveStepOutputs returns an empty list when no step matches', async () => {

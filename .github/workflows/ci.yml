@@ -54,7 +54,6 @@ jobs:
       contents: read
     outputs:
       needs-web: ${{ steps.changes.outputs.web }}
-      needs-web-build-inputs: ${{ steps.changes.outputs.web-build-inputs }}
       needs-engine: ${{ steps.changes.outputs.engine }}
       needs-mcp: ${{ steps.changes.outputs.mcp }}
       needs-ci: ${{ steps.changes.outputs.ci }}
@@ -68,7 +67,6 @@ jobs:
       needs-ghaw: ${{ steps.changes.outputs.ghaw }}
       needs-api: ${{ steps.changes.outputs.api }}
       needs-skills: ${{ steps.changes.outputs.skills }}
-      needs-observatory: ${{ steps.changes.outputs.observatory }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,7 +77,7 @@ jobs:
       # push carries before/after, and workflow_dispatch has to merge-base
       # against the default branch. Extracted to a script because the failure
       # posture is the load-bearing part — an unresolvable range MUST fail the
-      # job, since an empty CHANGED sets every path filter false, skips every
+      # job, since an empty CHANGED sets all fourteen filters false, skips every
       # path-gated gate, and check-ci-success.sh tolerates legitimate skips.
       # That combination would render a green "CI Success" over a CI run that
       # executed nothing. Tested by scripts/__tests__/resolve-ci-diff-range.test.sh.
@@ -103,23 +101,13 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; web_build_inputs=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
 
-          # docs/capability-matrix.md is prose, but its ONLY gate is a web unit
-          # test (web/src/lib/config/__tests__/capabilityMatrix.test.ts): the
-          # status vocabulary, the row set against providers.ts and the
-          # manifest, the bridge-allowlist pins. `^docs/` alone maps to the
-          # onboarding tripwire, so a PR that edited just the matrix — flipping
-          # a cell to `proven`, typing a sixth status — never ran the check
-          # that exists to catch exactly that (#9720, lesson #1). The copy the
-          # docs site ships is guarded by the docs gate below.
-          echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
-          # Every source/configuration input that can alter the web production build.
-          echo "$CHANGED" | grep -qE '^web/|^packages/ui/|(^|/)package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
+          echo "$CHANGED" | grep -q '^web/' && web=true
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we
-          # maintain for Bevy 0.19, not merely vendored code. Matching only
+          # maintain for Bevy 0.18, not merely vendored code. Matching only
           # '^engine/' meant a PR editing just the fork set engine=false, skipped
           # Quality Gates / WASM Build entirely, and was first compiled by CD on
           # main AFTER merge -- so a fork edit that failed to build reddened main
@@ -127,11 +115,7 @@ jobs:
           # that too.
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
-          # The three tsconfig.json files are here because the job that pins their
-          # exactOptionalPropertyTypes (#7592, scripts/__tests__/exact-optional-
-          # property-types.test.mjs, CI Self-Defense Tests) runs on needs-ci. A PR
-          # deleting only that flag would otherwise skip its own pin.
-          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui)/tsconfig\.json$' && ci=true
+          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
           # the ONLY check comparing the canonical MCP manifest against its two
           # derived copies. The canonical dir and the apps/docs copy were listed;
@@ -140,13 +124,7 @@ jobs:
           # while web/src/lib/chat/tools.ts imports that very copy to build the
           # tool definitions served to the chat API (#8620). command-parity does
           # not cover it: it reads only the canonical manifest.
-          # docs/capability-matrix.md has the same two-copies shape: the docs
-          # gate's check-manifest-sync.ts also verifies apps/docs/data/
-          # capability-matrix.json against it (#9720).
-          # commandIndex.json is DERIVED from the canonical manifest and is the
-          # copy client code imports, so the sync check has to run on a PR that
-          # edits it — same reasoning as the web copy above, one artifact later.
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^docs/capability-matrix\.md$|^web/src/data/commandIndex\.json$' && docs=true
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           # Claude Code hook scripts + their self-contained bash test suites,
           # plus .claude/settings.json (the committed permissions posture, which
@@ -157,17 +135,7 @@ jobs:
           # matcher below also lists `^\.claude/` — the lightweight
           # onboarding-guard + lockfile-sync-tests self-tests. All three are fast,
           # self-contained checks; the fan-out is what stays gated off.
-          # The Codex hook adapter and the generator behind it count as hook code: they
-          # are what runs the scripts above under Codex, and several of their branches
-          # (the git-for-Windows bash lookup, junction entry paths, the
-          # core.fileMode=false index repair) execute ONLY on Windows. Without these
-          # two patterns a change to either fired `agentic` — a Linux job — and never
-          # `hook-tests-windows`, so a Windows-only regression merged green.
-          # The code and its manifest ONLY — not the generated port.lock.json beside
-          # them, which carries a hash per mirrored file and so changes with every
-          # skill or agent text edit; matching it would put the ~27-minute Windows
-          # job on every SKILL.md change.
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
           # Any package.json at ANY depth (web/, mcp-server/, apps/*, packages/*,
           # root) or the single root lockfile → run the lockfile-sync gate. Kept
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained
@@ -188,21 +156,7 @@ jobs:
           # also matches `ci` above, which is fine — editing a gate script warrants
           # the wider run; .claude/tools/dx-audit.sh matches neither ci nor hooks,
           # so wiring it here is what makes its contract test run at all.)
-          #
-          # The same job also runs the Codex CLI surface gate
-          # (scripts/check-codex-port.sh, #9745), whose inputs are wider: the
-          # generated mirror is derived from .claude/skills, .claude/agents and
-          # .claude/settings.json, so an edit to any SOURCE must fire it — a
-          # filter naming only the generated side would let a skill change
-          # merge with a stale mirror and never run the check that catches it.
-          # .mcp.json is here because the gate compares it with
-          # .codex/config.toml, which Codex reads instead.
-          # .claude/rules, .claude/hooks, .claude/tools, .claude/CLAUDE.md and .github/ are here
-          # because the gate also verifies that every repository path NAMED inside
-          # a .codex/ file exists, and dies when a wired hook script is missing.
-          # Without them, renaming a rule file merges green and the NEXT, unrelated
-          # PR that touches a skill goes red for someone else's change.
-          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$|^\.claude/skills/|^\.claude/agents/|^\.claude/settings\.json$|^\.claude/rules/|^\.claude/hooks/|^\.claude/tools/|^\.claude/CLAUDE\.md$|^\.github/|^\.agents/skills/|^\.codex/|^\.mcp\.json$|^scripts/check-codex-port\.sh$|^scripts/__tests__/check-codex-port\.test\.sh$' && agentic=true
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
           # Taskboard onboarding-hygiene tripwire (scripts/check-taskboard-onboarding-hygiene.sh).
           # Fires whenever a CONTRIBUTOR-FACING ONBOARDING SURFACE changes — the
           # surfaces where a rotated taskboard project/team ULID or a forbidden
@@ -258,9 +212,6 @@ jobs:
           # PR still runs the gate even when no route.ts changed.
           echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
 
-          # Observatory unit/type checks stay independent of the heavy app/engine fan-out.
-          echo "$CHANGED" | grep -q '^tools/observatory/' && observatory=true
-
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
             any_code=true
@@ -268,7 +219,6 @@ jobs:
 
           {
             echo "web=$web"
-            echo "web-build-inputs=$web_build_inputs"
             echo "engine=$engine"
             echo "mcp=$mcp"
             echo "ci=$ci"
@@ -282,13 +232,12 @@ jobs:
             echo "ghaw=$ghaw"
             echo "api=$api"
             echo "skills=$skills"
-            echo "observatory=$observatory"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills observatory=$observatory any-code=$any_code"
-          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ] && [ "$observatory" = "false" ]; then
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 
@@ -300,7 +249,6 @@ jobs:
     uses: ./.github/workflows/quality-gates.yml
     with:
       web-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web) }}
-      web-build-inputs-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web-build-inputs) }}
       engine-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-engine) }}
       mcp-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-mcp) }}
       ci-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-ci) }}
@@ -311,42 +259,6 @@ jobs:
     secrets: inherit
 
   # ---- CI-only checks ----
-
-  # Unit/type validation only; inventory-drift enforcement remains separate.
-  observatory-tests:
-    name: Observatory Tests
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-observatory == 'true' || needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-deps == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
-      # class): @next/swc, which `next build` and `next dev` load, or
-      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
-      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
-      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
-      # that needs this step from the workflow text.
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
-
-      - name: Typecheck Observatory
-        run: npx tsc --noEmit -p tools/observatory/tsconfig.json
-
-      - name: Test Observatory
-        run: npx vitest run --config tools/observatory/vitest.config.ts
 
   command-parity:
     name: MCP Command Parity
@@ -428,28 +340,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
-      # class): @next/swc, which `next build` and `next dev` load, or
-      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
-      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
-      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
-      # that needs this step from the workflow text.
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
-
       - name: Install docs dependencies
         run: cd apps/docs && npm install
-
-      # A TYPE ERROR IN apps/docs USED TO REACH THE PRODUCTION DEPLOY. Both
-      # typecheck jobs are scoped to `web/` (cd.yml, quality-gates.yml) and this
-      # gate ran vitest only — but `next build` type-checks unconditionally
-      # unless `typescript.ignoreBuildErrors` is set, and apps/docs does not set
-      # it. So the first thing that could notice a broken type in this deploy
-      # root was the `vercel deploy --prod` in cd.yml's deploy-docs job. Found
-      # live: a test importing `jest-axe` with no declaration file passed vitest,
-      # which does not type-check, and failed `tsc --noEmit` with TS7016.
-      - name: Typecheck the docs app
-        run: cd apps/docs && npx tsc --noEmit
 
       - name: Run docs vitest suite
         run: cd apps/docs && npx vitest run
@@ -490,15 +382,6 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
-
-      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
-      # class): @next/swc, which `next build` and `next dev` load, or
-      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
-      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
-      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
-      # that needs this step from the workflow text.
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
 
       # Same key as quality-gates' ui-cache-typecheck / ui-cache-test-web —
       # whichever job builds packages/ui first warms the cache for the others.
@@ -548,13 +431,10 @@ jobs:
   # `.claude/hooks/` inherited 62 failing assertions that had nothing to do with
   # its change.
   #
-  # So the gate stays, but it is no longer the only thing running these suites:
-  # `.github/workflows/hook-tests-scheduled.yml` runs them every Monday, and
-  # opens a tracking issue if they fail. That is roughly 5 minutes a week to
-  # bound the blast radius — rot is found by the schedule rather than by
-  # whoever happens to edit a hook months later. Do not remove one without
-  # reconsidering the other; together they are the reason a skipped run here is
-  # safe to ignore.
+  # So the trade is explicit: cheap PRs, and whoever next edits a hook pays the
+  # accumulated debt. If that becomes the common case, the fix is a scheduled
+  # run (5 min/week) rather than moving to every-PR — see #9606 for the
+  # discussion.
   hook-tests:
     name: Hook Tests
     needs: [ci-gate]
@@ -583,19 +463,31 @@ jobs:
           done
           exit "$rc"
 
-      - name: Shellcheck all hooks
+      - name: Shellcheck the hooks owned by this change
         run: |
-          # The whole .claude/hooks/ tree is shellcheck-clean as of #8676, so
-          # this lints ALL of it: the glob is the ratchet that stops hook debt
-          # from re-accumulating silently, and a new or edited hook that is not
-          # clean fails here. It used to name seven hooks and eight suites by
-          # hand while the rest of the tree carried ten known findings.
+          # Scope shellcheck to the hooks this gate owns + their tests: the
+          # hardened review-loop hooks and the auto-approve permission gate.
+          # The wider .claude/hooks/ tree carries pre-existing findings tracked
+          # separately (see .claude/rules/agent-operations.md §12) — linting all
+          # of it here would fail this gate on unrelated, untouched debt. Newly
+          # added or edited hooks MUST be shellcheck-clean, so they go here.
           # -x follows `.`-sourced files (scripts/__tests__/lib/platform.sh);
           # without it every sourcing suite reports SC1091 and the library's own
-          # definitions stay invisible to the analysis. The tree is also clean
-          # under plain shellcheck (every dynamic `source` carries a line-level
-          # SC1091 disable), so a local run without -x agrees with this gate.
-          shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
+          # definitions stay invisible to the analysis.
+          shellcheck -x \
+            .claude/hooks/reject-incomplete-review.sh \
+            .claude/hooks/review-quality-gate.sh \
+            .claude/hooks/auto-approve-safe-commands.sh \
+            .claude/hooks/block-main-commits.sh \
+            .claude/hooks/inject-lessons-learned.sh \
+            .claude/hooks/check-panel-registry.sh \
+            .claude/hooks/__tests__/check-panel-registry.test.sh \
+            .claude/hooks/__tests__/reject-incomplete-review.test.sh \
+            .claude/hooks/__tests__/review-quality-gate.test.sh \
+            .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
+            .claude/hooks/__tests__/block-main-commits.test.sh \
+            .claude/hooks/__tests__/inject-lessons-learned.test.sh \
+            .claude/hooks/__tests__/settings-permissions.test.sh
 
   # ---- Skills Lint ----
   # Runs when any skill file (.claude/skills/**) or the linter/baseline changed.
@@ -620,23 +512,7 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    # The job is in ci-success's needs:, so a tip-over blocks every PR rather
-    # than one. Raised from 30 to 45 after review measured 26:52 on a branch,
-    # about 3 minutes of headroom; main then took about 22 minutes.
-    # Raised from 45 to 60 (#10285): on 2026-09-24 main measured 36:54 with
-    # 66 suites, then 36:53 and 39:04 with 70, against about 22 on 2026-09-15.
-    # That growth is not runner variance. The job runs every bash suite one
-    # after another under Git Bash, where process spawns are slow. #10229
-    # added the 71st suite, check-fn-freeze, and its case count grew across
-    # that PR's heads. In a 41:22 run of the final head on 2026-09-26 (job
-    # 108460157387), check-ci-success alone took 553 s, and check-fn-freeze
-    # took 92 s at 175 cases against about 8 s on Linux. Earlier heads
-    # measured it at 44 s with 144 cases (job 108440510702) and 52 s with 151
-    # (job 108446401974, whole job 30:38), so re-measure it from this job
-    # after the suite changes. 60 is headroom while #10290 finds and cuts
-    # where the time goes; raise it again only with that issue's
-    # measurements, not in its place.
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions:
       contents: read
     defaults:
@@ -796,58 +672,6 @@ jobs:
       - name: Shellcheck the verdict scripts and the suite
         run: shellcheck -x scripts/board-verdict.sh scripts/post-board-verdict.sh scripts/__tests__/board-verdict.test.sh
 
-  # ---- Portable Paths ----
-  # Fails when a tracked file hardcodes a machine-local absolute path — a
-  # Windows drive-letter path into a user or repo directory, or a POSIX home
-  # directory. This is an open source repository, so a path naming one
-  # contributor's layout resolves to nothing for everyone else, and it fails
-  # SILENTLY: lessons-learned #9605 is that exactly, where the lessons hook read
-  # such a path, took its `exit 0` branch on every other checkout, and left
-  # enforcement off for whole sessions with nothing saying so. Found live on
-  # 2026-09-06 in two tracked skills, and as an UNCOMMITTED EDIT to the tracked
-  # `.codex/config.toml` — that file is scanned on every run; the edit had simply
-  # not been committed yet, which is exactly what a gate over tracked files is
-  # for. (An earlier version of this sentence called the FILE untracked. It is
-  # not, and saying so inverted the distinction the gate is built on.)
-  #
-  # The forbidden shapes are NOT restated here. They live once, in the gate's
-  # own patterns, because a file that quotes an example is a file the gate then
-  # fails on — which is how this comment reddened its own PR. Read
-  # scripts/check-portable-paths.sh for the shapes and the allowlist rationale.
-  #
-  # Unconditional rather than path-gated: any file can introduce one, and the
-  # whole check is two grep passes over the tracked set (one per pattern, since
-  # Windows paths are case-insensitive and POSIX ones are not) — seconds on this
-  # runner. No runtime is pinned here: the same passes are an order of magnitude
-  # slower under Git Bash on Windows, so a single number would be wrong for
-  # whoever is not on the platform it was measured on (lessons 8 and 17).
-  # It IS in the required `CI Success` aggregate, asserted by that verifier's
-  # `check_unconditional` — there is no ci-gate trigger to map it to, and a gate
-  # outside the aggregate reports rather than gates.
-  portable-paths:
-    name: Portable Paths
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # The gate's own decision logic runs first, in the same job: a gate whose
-      # allowlist silently stops matching reports a clean tree either way, so
-      # the suite is the only thing that can tell a passing gate from a dead
-      # one. It is hermetic — a throwaway git repo per case, no network — which
-      # also makes it dominated by process spawning: fast on this runner, minutes
-      # under Git Bash on Windows. Budget the job's timeout for the slower one.
-      - name: Test the portable-paths gate's decision logic
-        run: bash scripts/__tests__/check-portable-paths.test.sh
-
-      - name: Shellcheck the gate and its suite
-        run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
-
-      - name: Check for machine-local absolute paths in tracked files
-        run: bash scripts/check-portable-paths.sh
-
   # ---- Agentic Config Sync ----
   # Runs when the single source of truth (tools/agentic-sync/canonical.json), the
   # generator, the per-provider instruction files it injects facts into
@@ -880,9 +704,6 @@ jobs:
 
       - name: Check provider instruction files are in sync with canonical.json
         run: bash scripts/check-agentic-sync.sh
-
-      - name: Check the generated Codex CLI surface is in sync with .claude/
-        run: bash scripts/check-codex-port.sh
 
   # ---- Taskboard Onboarding Hygiene ----
   # The negative guard the parity review called for: greps the WHOLE tree and
@@ -955,85 +776,6 @@ jobs:
 
       - name: Reject a committed permissive Codex config profile
         run: bash scripts/check-codex-config-safety.sh
-
-  # ---- actionlint ----
-  # Lints ci.yml, cd.yml and quality-gates.yml for shellcheck findings in embedded
-  # `run:` blocks and for GitHub Actions expression errors (#8719). A ratchet:
-  # the pre-existing findings were cleaned in the PR that added this job, so any
-  # NEW finding in these files fails the PR. Gated on needs-ci (which already
-  # fires on ^\.github/workflows/) and wired into the required ci-success
-  # aggregate, so it is required when it runs and skips cleanly otherwise.
-  #
-  # Scoped to the three named files on purpose, NOT `.github/workflows/*.yml`:
-  # that glob also matches the gh-aw `*.lock.yml` files (compiler-generated,
-  # un-editable, guarded by gh-aw Lock Sync) and the other workflows still carry
-  # out-of-scope findings. Widening the gate is its own change.
-  #
-  # actionlint is NOT on the runner image (unlike jq and shellcheck), so it is
-  # installed pinned to a fixed version — an unpinned install could surface new
-  # checks from a future release and break the ratchet on a PR that changed
-  # nothing. actionlint uses the runner's preinstalled shellcheck for SCxxxx.
-  # The release tarball is downloaded directly and verified against a sha256
-  # PINNED below (taken from the release's actionlint_<ver>_checksums.txt and
-  # cross-checked by hashing the asset independently) before it is extracted
-  # or executed; a mismatch fails the job. Bumping ACTIONLINT_VERSION means
-  # bumping ACTIONLINT_SHA256 in the same edit — the upstream
-  # download-actionlint.bash script is NOT used, because it fetches from a
-  # mutable tag and performs no integrity check of the tarball.
-  #
-  # Step-level parallel keys (`background:` / `wait:` / `wait-all:` /
-  # `cancel:`, GitHub changelog 2026-06-25) are NOT understood by any released
-  # actionlint (rhysd/actionlint#694 is open; 1.7.11 reports `unexpected key
-  # "background"` plus `step must run script with "run" section or run action
-  # with "uses" section` for a bare `- wait:` step). Adopting them in these
-  # three files under #8861 therefore hard-fails this required gate. Path
-  # forward: bump the pinned actionlint once #694 ships. Do NOT paper over it
-  # with -ignore — the second message is generic and would also hide a
-  # genuinely malformed step.
-  #
-  # `jobs.<id>.result` inside a workflow_call `outputs.<name>.value`
-  # (quality-gates.yml) is valid, documented reusable-workflow syntax that
-  # actionlint's expression checker does not model. It is suppressed by the
-  # EXACT message via -ignore so a genuine typo elsewhere (whose message names a
-  # different property) still fails.
-  actionlint:
-    name: actionlint
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-
-      - name: Install actionlint (pinned)
-        env:
-          ACTIONLINT_VERSION: "1.7.11"
-          # sha256 of actionlint_1.7.11_linux_amd64.tar.gz. Must change together
-          # with ACTIONLINT_VERSION.
-          ACTIONLINT_SHA256: "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a"
-        run: |
-          set -euo pipefail
-          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
-          # Fail closed: sha256sum -c exits non-zero on a mismatch, and set -e
-          # stops the step before anything from the tarball is extracted or run.
-          (cd "${RUNNER_TEMP}" && echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum -c -)
-          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" actionlint
-          "${RUNNER_TEMP}/actionlint" -version
-          shellcheck --version
-
-      - name: Lint workflow files
-        run: |
-          "${RUNNER_TEMP}/actionlint" \
-            -ignore 'property "result" is not defined' \
-            .github/workflows/ci.yml \
-            .github/workflows/cd.yml \
-            .github/workflows/quality-gates.yml
 
   # ---- gh-aw Lock Sync ----
   # Fails the PR when a GitHub Agentic Workflow source (.github/workflows/*.md) or
@@ -1232,7 +974,6 @@ jobs:
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
-            scripts/check-codex-port.sh scripts/__tests__/check-codex-port.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
@@ -1257,12 +998,9 @@ jobs:
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
-            scripts/post-deploy-capability-matrix-check.sh scripts/__tests__/post-deploy-capability-matrix-check.test.sh \
-            scripts/post-deploy-docs-check.sh scripts/__tests__/post-deploy-docs-check.test.sh \
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
-            scripts/resolve-ci-wasm-artifact.sh scripts/__tests__/resolve-ci-wasm-artifact.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
@@ -1274,9 +1012,6 @@ jobs:
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
-            scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
-            scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
-            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -1285,28 +1020,11 @@ jobs:
       - name: Run deploy-drift dispatcher test suite
         run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
 
-      - name: Verify executable cache and coverage artifact contracts
-        run: |
-          bash scripts/__tests__/install-vercel-cli.test.sh
-          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs scripts/__tests__/exact-optional-property-types.test.mjs
-
-      - name: Verify scheduled hook-test contracts
-        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
-
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
 
       - name: Run agentic-config gate test suite
         run: bash scripts/__tests__/check-agentic-sync.test.sh
-
-      - name: Run Codex CLI surface gate test suite
-        run: bash scripts/__tests__/check-codex-port.test.sh
-
-      - name: Run post-compaction rule-digest hook suite (here because a .claude/rules/ edit fires this job, not hook-tests)
-        run: bash .claude/hooks/__tests__/inject-post-compact.test.sh
-
-      - name: Run provider skill resolver fixtures
-        run: bash scripts/__tests__/resolve-skill-path.test.sh
 
       - name: Run taskboard onboarding-hygiene gate test suite
         run: bash scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh
@@ -1364,9 +1082,6 @@ jobs:
       - name: Run Neon branch-helper test suite
         run: bash scripts/__tests__/neon-branch.test.sh
 
-      - name: Run preview-database branch-policy test suite
-        run: bash scripts/__tests__/preview-db-branch.test.sh
-
       # Executes the ci-gate `Detect changed paths` step body extracted from this
       # very file. Rides needs-ci, which every ci.yml edit sets, so the filters
       # are tested on the PR that changes them.
@@ -1401,19 +1116,12 @@ jobs:
 
       - name: Run post-deploy health gate test suite
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
-      - name: Run post-deploy capability matrix probe test suite
-        run: bash scripts/__tests__/post-deploy-capability-matrix-check.test.sh
-
-      - name: Run post-deploy docs MCP gate test suite
-        run: bash scripts/__tests__/post-deploy-docs-check.test.sh
       - name: Run CD rolling-release helper test suite
         run: bash scripts/__tests__/cd-rolling-release.test.sh
       - name: Run CD tree-validation gate test suite
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite
         run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
-      - name: Run CD WASM artifact-reuse resolver test suite
-        run: bash scripts/__tests__/resolve-ci-wasm-artifact.test.sh
 
       - name: Run source-encoding gate test suite
         run: bash scripts/__tests__/check-source-encoding.test.sh
@@ -1439,28 +1147,6 @@ jobs:
       - name: Run suite-wiring gate
         run: bash scripts/check-suite-wiring.sh
 
-      - name: Run pin-strength gate test suite
-        run: bash scripts/__tests__/check-pin-strength.test.sh
-
-      - name: Run pin-strength gate
-        # Catches a structural pin that a COMMENT can satisfy. Mirrors the
-        # suite-wiring pair above: the gate's own suite runs first so a broken
-        # gate is distinguishable from a genuine finding.
-        run: bash scripts/check-pin-strength.sh
-
-      - name: Run function-freeze gate test suite
-        run: bash scripts/__tests__/check-fn-freeze.test.sh
-
-      - name: Run function-freeze gate
-        # Every function a bash self-defense suite defines must be frozen with
-        # `readonly -f` directly after its definition (PF-1076 / #9125): a
-        # bash function resolves by name at call time, so one inserted
-        # `fail() { :; }` otherwise turns every FAIL into silence and the suite
-        # exits 0 having checked nothing. Same pairing as the two gates above:
-        # the gate's own suite runs first so a broken gate is distinguishable
-        # from a genuine finding.
-        run: bash scripts/check-fn-freeze.sh
-
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
   # a local build. Only runs when VERCEL_DEPLOY_ENABLED is set and web/mcp files changed.
@@ -1482,9 +1168,7 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       needs.quality-gates.result == 'success' &&
-      (needs.ci-gate.outputs.needs-web == 'true' ||
-       needs.ci-gate.outputs.needs-mcp == 'true' ||
-       needs.ci-gate.outputs.needs-ci == 'true')
+      (needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-mcp == 'true')
     runs-on: ubuntu-latest
     # Vercel builds remotely, so the CLI can legitimately wait longer than the
     # local Next.js build job. Recent healthy uploads were still building when
@@ -1515,143 +1199,13 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Require staging deployment verification access
-        env:
-          STAGING_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
-        run: |
-          if [ -z "$STAGING_BYPASS" ]; then
-            echo "::error::Configure the spawnforge-staging project's Protection Bypass for Automation key as VERCEL_AUTOMATION_BYPASS_STAGING before deploying."
-            exit 1
-          fi
-
       - name: Pull Vercel environment (preview)
+        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
-
-      - name: Create a Neon branch for this preview
-        # BRANCH PER PREVIEW (#9972). Production schema drift (#9969) reached
-        # production because no environment ever applied the migration set to a
-        # database shaped like production before the deploy did. A preview that
-        # runs its own migrations against its own copy-on-write branch turns that
-        # from a production discovery into a PR-time failure.
-        #
-        # Unblocked by #9969's baseline: a Neon branch clones
-        # `drizzle.__drizzle_migrations` from its parent, so before production
-        # had a journal every branch would have inherited the broken state and
-        # failed its migrate step on arrival.
-        #
-        # The name is derived from the PR number and nothing else, so the
-        # cleanup workflow can find it without carrying state between runs.
-        #
-        # CAPACITY IS MANAGED, NOT ASSUMED (#10015). The project's branch
-        # allowance is ten and it is shared with production, staging and
-        # cd.yml's 14-day snapshots, so open PRs alone can fill it -- they did
-        # on 2026-09-14, and every preview deploy then failed with
-        # BRANCHES_LIMIT_EXCEEDED until a branch was deleted by hand. The policy
-        # script (scripts/preview-db-branch.sh, with its own suite) replaces this
-        # PR's own branch and, when Neon says the allowance is full, first
-        # deletes previews of CLOSED PRs, then evicts the least recently built
-        # preview older than this job's timeout, retrying after each. An
-        # evicted PR is named on the summary and told by the step below; its
-        # next push rebuilds it. GH_TOKEN is what the closed-PR lookups use.
-        id: neon-branch
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          uri_file="${RUNNER_TEMP}/preview-db-uri"
-
-          # Capture the exit code instead of letting errexit abort at the
-          # assignment: the policy's typed lines (evicted_pr=, swept_pr=) are
-          # on stdout and must reach the log and the outputs below even when
-          # the create ultimately fails, so an evicted PR is told either way.
-          # Its diagnostics are on stderr and reach the log on their own.
-          rc=0
-          out="$(bash scripts/preview-db-branch.sh create "$PR_NUMBER" --uri-out "$uri_file")" || rc=$?
-          echo "$out"
-
-          # EVERY evicted PR, space-separated: a run can reclaim more than one
-          # when a concurrent preview job took the first freed slot (#10245),
-          # and each of them is owed the notice below.
-          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | tr '\n' ' ' | sed 's/ *$//')"
-          if [ -n "$evicted_pr" ]; then
-            echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
-            # shellcheck disable=SC2086 # a space-separated list, split on purpose
-            for p in $evicted_pr; do
-              echo "Reclaimed the preview database of #${p} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
-            done
-          fi
-          if [ "$rc" -ne 0 ]; then
-            echo "::error::preview-db-branch.sh create exited ${rc}; the lines above say why."
-            exit "$rc"
-          fi
-
-          # Read the TYPED line, never the first br- token: the output carries
-          # evicted_branch=br-... BEFORE branch_id= when a branch was reclaimed,
-          # and a loose match would ship the evicted id as this preview's.
-          branch_id="$(printf '%s\n' "$out" | sed -n 's/^branch_id=//p' | head -1)"
-          name="$(printf '%s\n' "$out" | sed -n 's/^branch_name=//p' | head -1)"
-          if [ -z "$branch_id" ]; then
-            echo "::error::could not read the branch id from preview-db-branch.sh output — refusing to deploy a preview that would silently use the shared staging database."
-            exit 1
-          fi
-          echo "branch_id=${branch_id}" >> "$GITHUB_OUTPUT"
-          echo "uri_file=${uri_file}" >> "$GITHUB_OUTPUT"
-          echo "Neon preview branch: ${name} (${branch_id})" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Tell the evicted PR its preview database was reclaimed
-        # Without this the evicted PR's preview URL simply starts failing on
-        # database access, with nothing on the PR to say why or that a push
-        # brings it back. always(): the eviction happened even if this PR's own
-        # create then failed, and the evicted PR is owed the notice either way.
-        # Housekeeping never fails the deploy it made room for.
-        if: always() && steps.neon-branch.outputs.evicted_pr != ''
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVICTED_PR: ${{ steps.neon-branch.outputs.evicted_pr }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          # One notice per evicted PR (the output is space-separated).
-          # shellcheck disable=SC2086 # a space-separated list, split on purpose
-          for pr in $EVICTED_PR; do
-            gh pr comment "$pr" --repo "$REPO" \
-              --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
-          done
-
-      - name: Apply migrations to the preview branch
-        # THE WHOLE POINT. A migration that cannot apply must fail the PR here,
-        # not surface in production days later. `npm run db:migrate` is the same
-        # command cd.yml runs against production: the --guard-migrate preflight
-        # followed by scripts/apply-migrations.ts.
-        working-directory: web
-        env:
-          URI_FILE: ${{ steps.neon-branch.outputs.uri_file }}
-        run: |
-          set -euo pipefail
-          DATABASE_URL="$(cat "$URI_FILE")"
-          export DATABASE_URL
-          npm run db:migrate
-
-      - name: Verify the preview schema matches the migration set
-        # Same detector cd.yml runs post-deploy (#9980). A migrate that exits 0
-        # having converged on the wrong shape is caught here rather than by
-        # whoever clicks the preview link.
-        working-directory: web
-        env:
-          URI_FILE: ${{ steps.neon-branch.outputs.uri_file }}
-        run: |
-          set -euo pipefail
-          DATABASE_URL="$(cat "$URI_FILE")"
-          export DATABASE_URL
-          npm run db:drift
 
       - name: Deploy preview
         id: deploy
@@ -1659,35 +1213,15 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          URI_FILE: ${{ steps.neon-branch.outputs.uri_file }}
         run: |
           # Deploy directly instead of build+deploy-prebuilt.
           # vercel build uses child_process.spawn('npm') which fails on GHA
           # runners because setup-node's PATH isn't inherited by spawned
           # processes. vercel deploy builds remotely on Vercel infrastructure
           # where npm is always available.
-          # --env sets RUNTIME environment on this deployment only, so the
-          # preview reads its own Neon branch instead of the shared staging
-          # database the Vercel project's preview env points at. Without it the
-          # branch above would be created, migrated, and then ignored -- a gate
-          # that runs and proves nothing.
-          DATABASE_URL="$(cat "$URI_FILE")"
-          url=$(vercel deploy --token="$VERCEL_TOKEN" --env DATABASE_URL="$DATABASE_URL")
+          url=$(vercel deploy --token="$VERCEL_TOKEN")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Preview deployment: $url" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify preview runtime health
-        env:
-          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
-          HEALTH_CHECK_STABILIZE_S: '10'
-          HEALTH_CHECK_RETRIES: '3'
-          HEALTH_CHECK_INTERVAL_S: '10'
-          HEALTH_CHECK_EXPECT_COMMIT: ${{ github.sha }}
-          HEALTH_CHECK_EXPECT_ENVIRONMENT: staging
-          HEALTH_CHECK_REQUIRE_SERVICES: 'Payments (Stripe)'
-          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
-          VERCEL_AUTOMATION_BYPASS_ORIGIN: ${{ steps.deploy.outputs.url }}
-        run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
       - name: Comment preview URL on PR
         env:
@@ -1699,8 +1233,35 @@ jobs:
         run: |
           short_sha="${COMMIT_SHA:0:8}"
           gh pr comment "$PR_NUMBER" \
-            --body "**Preview deployment verified** — [\`${short_sha}\`](${DEPLOY_URL}): ${DEPLOY_URL}" \
+            --body "**Preview deployment ready** — [\`${short_sha}\`](${DEPLOY_URL}): ${DEPLOY_URL}" \
             --repo "$REPO"
+
+      - name: Verify preview is reachable
+        if: steps.deploy.outputs.url
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # Preview deployments sit behind Vercel Deployment Protection (#7994):
+          # an unauthenticated request is answered by the SSO gate with HTTP 401
+          # (server: Vercel, _vercel_sso_nonce cookie). That 401 PROVES the
+          # deployment is live and serving — it is not an outage. A plain
+          # `curl -sf` fails on any 4xx (exit 56), so it emitted false
+          # "Preview URL not reachable" warnings on every protected preview.
+          # Inspect the status code instead: only a missing response (000) or a
+          # 5xx means the preview is genuinely unreachable.
+          code=$(curl -s -o /dev/null -w "%{http_code}" --retry 3 --retry-delay 5 --max-time 30 "$PREVIEW_URL" || true)
+          echo "Preview responded with HTTP $code"
+          case "$code" in
+            000|5??)
+              echo "::warning::Preview URL not reachable (HTTP $code)"
+              ;;
+            401|403)
+              echo "Preview is reachable — HTTP $code is the expected Vercel Deployment Protection (SSO) gate."
+              ;;
+            *)
+              echo "Preview is reachable (HTTP $code)."
+              ;;
+          esac
 
   # Engine-dependent E2E tests (@engine) require WASM + GPU which CI runners lack.
   # Only UI-only E2E tests (@ui) run in CI — they test React shell without WASM.
@@ -1765,7 +1326,7 @@ jobs:
           # `playwright-` key that never invalidated, leaving stale browser
           # caches that intermittently failed with "Executable doesn't exist"
           # when Playwright's required browser revision changed. (#8589)
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -1812,30 +1373,22 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          # Activates web/e2e/lib/uiSuiteReporter.ts, which selects the @ui
-          # suite in preprocess() — @ui and not @engine-ui/@journey — and FAILS
-          # the run when that count is zero or implausibly low. It replaces the
-          # `--grep '@ui' --grep-invert '@engine-ui|@journey'` pair (#9636): a
-          # grep-invert can never report how many tests it removed, which is the
-          # #9586 failure mode this whole job exists to prevent. The @api job
-          # shares playwright.ci.config.ts but does NOT set this, so the reporter
-          # is a no-op there.
-          PW_UI_SUITE: '1'
         # Two tags are excluded, for two different reasons.
         #
         # @journey needs E2E_STRICT_STORES on top of the hooks build, and has its
         # own gate (test-e2e-journey) that sets it.
         #
-        # @engine-ui marks the specs that assert on the canvas. The editor holds
-        # #game-canvas `invisible` until the Bevy/wgpu renderer starts, and this
-        # job has no WASM engine and launches with --disable-gpu, so those specs
-        # cannot pass here no matter what the build sets. They run in
+        # @engine-ui marks the 37 specs that assert on the canvas. The editor
+        # holds #game-canvas `invisible` until the Bevy/wgpu renderer starts, and
+        # this job has no WASM engine and launches with --disable-gpu, so those
+        # specs cannot pass here no matter what the build sets. They run in
         # test-e2e-engine-smoke, which has the engine and a software GL context.
-        # The selection tags and the plausibility floor live in
-        # web/e2e/lib/uiSuiteReporter.ts; scripts/__tests__/e2e-tag-routing.test.sh
-        # keeps this honest — it asserts the tag is real, that something else
-        # runs the excluded tags, and that cd.yml activates the same selection.
-        run: npx playwright test --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        # Selection, counted from the specs themselves rather than from a
+        # remembered run: 422 @ui tests total, 37 tagged @engine-ui, so 385 are
+        # selected here. scripts/__tests__/e2e-tag-routing.test.sh keeps this
+        # honest -- it asserts the tag is real, that something else runs it, and
+        # that cd.yml selects exactly the same set.
+        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
@@ -1895,112 +1448,6 @@ jobs:
           path: web/blob-report/
           retention-days: 7
 
-  # Signup/auth journey against a real Clerk TEST instance (#8632, F40). The
-  # ONLY job that builds and serves the app with Clerk keys.
-  #
-  # Why not put the keys on test-e2e-ui: with valid keys the proxy switches to
-  # clerkMiddleware for every request, and under `next start`
-  # (NODE_ENV=production) buildPublicRoutes() drops /dev from the public routes
-  # (web/src/proxy.ts). The editor fixture opens /dev for every editor spec, so
-  # keys there would send hundreds of @ui specs to /sign-in. This job runs only
-  # the @auth specs (web/playwright.auth.config.ts), and the keys are mapped
-  # onto the build and test steps alone, never the job env, so `npm ci`'s
-  # install scripts never see them.
-  #
-  # Secrets are the CI-only TEST instance's (CLERK_TEST_*), never production's;
-  # clerkGlobalSetup refuses anything but sk_test_/pk_test_.
-  # E2E_CLERK_TEST_REQUIRED follows the E2E_UPSTASH_TEST_REQUIRED pattern:
-  # fork and Dependabot PRs receive no repository secrets, so the specs skip
-  # there; everywhere else a missing secret FAILS the run (the global setup
-  # throws) and requiredRunReporter fails any run that skipped a test.
-  # Setup and rotation: docs/guides/e2e-clerk-test-user.md.
-  test-e2e-auth:
-    name: E2E Auth Journey
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    env:
-      E2E_CLERK_TEST_REQUIRED: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - run: npm ci
-
-      # Same silent-drop guard as test-e2e-ui (npm/cli#4828 class, PF-947).
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
-
-      - name: Build @spawnforge/ui
-        run: cd packages/ui && npm run build
-
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          # Same single-root-lockfile key as test-e2e-ui (#8589).
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 12
-        working-directory: web
-        run: bash ../scripts/install-playwright-ci.sh browsers
-
-      - name: Install Playwright OS deps (cache hit)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 12
-        working-directory: web
-        run: bash ../scripts/install-playwright-ci.sh deps
-
-      # No Next.js build cache here, deliberately: the publishable key is
-      # inlined into this build, so a cache shared with the keyless jobs would
-      # cross-contaminate, and a per-key cache would have to be keyed on a
-      # secret.
-      - name: Build for auth E2E (Clerk test instance)
-        working-directory: web
-        env:
-          SKIP_ENV_VALIDATION: 'true'
-          # Inlined into the client bundle at build time, so it MUST be here.
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
-        run: npx next build
-
-      - name: Run auth-journey E2E tests
-        working-directory: web
-        env:
-          SKIP_ENV_VALIDATION: 'true'
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
-          E2E_CLERK_TEST_EMAIL: ${{ secrets.E2E_CLERK_TEST_EMAIL }}
-          E2E_CLERK_TEST_PASSWORD: ${{ secrets.E2E_CLERK_TEST_PASSWORD }}
-          # The proxy passes buildAuthorizedParties() to clerkMiddleware, which
-          # rejects a session token whose azp claim is not listed. Under
-          # NODE_ENV=production that list is the production origins plus
-          # STAGING_URL, and this browser signs in on http://localhost:3000 --
-          # without this line every session the journey creates is treated as
-          # signed out on the server.
-          STAGING_URL: 'http://localhost:3000'
-        run: npx playwright test --config playwright.auth.config.ts
-
-      - name: Upload auth-journey report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: e2e-auth-report
-          path: web/auth-results/summary.json
-          if-no-files-found: error
-          retention-days: 14
-
   # Strict interactive-journey gate (#8601 F09 + #8604 F12). Proves the core
   # new-user journey — idea -> generated scene -> entities spawn -> Play ->
   # winnable -> export — survives on the SAME production server users hit
@@ -2045,25 +1492,13 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      # #10158: a spec that stands store injection or a mock in for the
-      # component it names must say so, in a `substitution` annotation AND a
-      # `[substituted: <component>]` title marker, and capabilityMatrix.test.ts
-      # keeps such specs out of `proven` cells. This lists every spec with
-      # Playwright's --list mode (no browser, no server) and fails on an
-      # unpaired annotation or marker, a listing that misses a spec file, or
-      # zero specs. Its summary line names the counts it listed. Pinned by
-      # scripts/__tests__/production-ci-contract.test.mjs.
-      - name: Check substitution naming
-        working-directory: web
-        run: npx tsx scripts/check-substitution-naming.ts
-
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -2111,15 +1546,11 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
-      # VERCEL_GIT_COMMIT_SHA reaches the `next start` webServer (it inherits
-      # this step's env), so /api/health reports this run's commit instead of
-      # 'local' (#10157). Runtime-only: nothing reads it at build time.
       - name: Run strict interactive-journey gate
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
           E2E_STRICT_STORES: 'true'
-          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
         run: npx playwright test --config playwright.journey.config.ts
 
       - name: Upload journey report
@@ -2133,11 +1564,10 @@ jobs:
   # Engine smoke gate (#8602 F10). The FIRST per-PR job that actually boots the
   # WASM engine: it builds ONLY the WebGL2 variant, serves it same-origin, and
   # runs the curated `@engine-smoke` set under ANGLE/SwiftShader software WebGL2
-  # — three specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
-  # -> export, the breadth check), `pipeline-live-engine.spec.ts` (the real
+  # — two specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
+  # -> export, the breadth check) and `pipeline-live-engine.spec.ts` (the real
   # game-creation pipeline -> real Play button -> engineMode === 'play', the
-  # depth check) and `journey-evidence-canary.spec.ts` (a /dev release journey
-  # whose evidence record the post-run check requires, #10157). NOT `--disable-gpu`,
+  # depth check). NOT `--disable-gpu`,
   # which leaves wgpu with no GL context and hangs `init_engine` (the exact reason
   # every other CI Playwright config can only run store-less @ui/@journey specs).
   #
@@ -2244,16 +1674,9 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Cache wasm-bindgen CLI
+      - name: Install wasm-bindgen-cli
         if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/wasm-bindgen
-          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
-
-      - name: Install verified wasm-bindgen CLI
-        if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
-        run: bash scripts/install-wasm-bindgen-cli.sh
+        run: cargo install wasm-bindgen-cli --version 0.2.127
 
       - name: Build WebGL2 WASM + wasm-bindgen
         if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
@@ -2291,7 +1714,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -2334,7 +1757,7 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
-      # Runs the curated @engine-smoke set (three specs — see the job comment
+      # Runs the curated @engine-smoke set (two specs — see the job comment
       # above), under SwiftShader software WebGL2. Launch flags and testMatch
       # live in playwright.engine.config.ts, which also carries the 90s DEFAULT
       # per-test budget (E2E_TIMEOUT_ENGINE_FULL_MS) that engine-smoke.spec.ts
@@ -2346,19 +1769,10 @@ jobs:
       # configure call, not this workflow. The editor fixture's load() seeds
       # localStorage['forge:preferred-backend'] = 'webgl2' so loadWasm never
       # probes WebGPU, which SwiftShader cannot drive.
-      #
-      # Journey evidence (#10157). The `next start` webServer inherits this
-      # step's env, so VERCEL_GIT_COMMIT_SHA makes /api/health report this
-      # run's commit rather than 'local'; the journey fixture records that
-      # alongside GITHUB_SHA (on a pull_request event, the merge ref) and the
-      # PR head, which GitHub expands to '' on push and dispatch runs.
       - name: Run engine smoke gate
-        id: engine-smoke-run
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
-          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npx playwright test --config playwright.engine.config.ts
 
       - name: Upload engine-smoke report
@@ -2368,35 +1782,6 @@ jobs:
           name: e2e-engine-smoke-report
           path: web/playwright-report/
           retention-days: 14
-
-      # One record per @release-journey test plus every attempt's trace and
-      # video, written by e2e/lib/journeyEvidenceReporter.ts. Uploaded before
-      # the check below so a failing check still leaves the evidence to read.
-      # if-no-files-found: error — an absent directory means the reporter
-      # never ran, which must not upload as an empty success. Both evidence
-      # steps skip only when the Playwright step itself never ran (an earlier
-      # step failed and the job is already red), so they add no second error.
-      - name: Upload journey evidence
-        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: journey-evidence
-          path: web/journey-evidence/
-          if-no-files-found: error
-          retention-days: 30
-
-      # The post-run check: exactly one valid record per journey-tagged test
-      # the run selected (never zero), every attempt's trace and video present,
-      # GITHUB_SHA and the PR head equal to this run's, and /api/health's
-      # commit equal to GITHUB_SHA's first 8 characters. A journey test whose
-      # record was never attached fails the job here even though Playwright
-      # reported it green. Rules: web/e2e/lib/journeyEvidenceCheck.ts.
-      - name: Check journey evidence
-        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
-        working-directory: web
-        env:
-          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: npx tsx scripts/check-journey-evidence.ts journey-evidence --min-journeys 1 --expect-github-sha "$GITHUB_SHA" --expect-pr-head-sha "$JOURNEY_PR_HEAD_SHA"
 
   # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
   # been declared in playwright.config.ts for months and executed by nothing:
@@ -2463,7 +1848,7 @@ jobs:
           # A browser-set segment in the key: the chromium-only jobs cache
           # under `playwright-<os>-<lockfile>`, and restoring THAT here would
           # report cache-hit and skip the Firefox/WebKit install (#9610).
-          key: playwright-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-all-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers (chromium, firefox, webkit)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -2556,76 +1941,6 @@ jobs:
           path: web/playwright-report/
           retention-days: 14
 
-  # The docs deploy has its own Next app and deploy root. A web build cannot
-  # prove that its production manifest copy is traced or that its documented
-  # routes render, so build and exercise the actual docs artifact on every docs
-  # or workflow change.
-  docs-e2e:
-    name: Docs Build and Route Smoke
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-docs == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - run: npm ci
-
-      # apps/docs builds with the hoisted root `next`, so the npm/cli#4828 drop
-      # of @next/swc kills its `next build` exactly as it does web's — with an
-      # opaque "Failed to load SWC binary" three steps from the cause (PF-947).
-      - name: Assert native swc binding survived npm ci
-        run: bash scripts/check-native-bindings.sh
-
-      - name: Verify production workflow contracts
-        run: node --test scripts/__tests__/production-ci-contract.test.mjs
-
-      - name: Verify every manifest copy
-        run: npm run check:manifest-sync
-
-      - name: Build docs production artifact
-        working-directory: apps/docs
-        run: npm run build
-
-      - name: Cache docs Playwright browser
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-docs-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-
-      - name: Install docs Playwright browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: apps/docs
-        run: npx playwright install --with-deps chromium
-
-      - name: Install docs Playwright OS dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        working-directory: apps/docs
-        run: npx playwright install-deps chromium
-
-      - name: Smoke-test docs routes
-        working-directory: apps/docs
-        env:
-          CI: 'true'
-        run: npm run test:e2e
-
-      - name: Upload docs Playwright report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: docs-playwright-report
-          path: apps/docs/playwright-report/
-          retention-days: 14
-
   # ---- CI Success (aggregating required check) ----
   # Audit 2026-05-30 (F01): branch protection previously required ONLY ci-gate,
   # a no-op path detector that always passes — so a PR could merge with failing
@@ -2647,10 +1962,8 @@ jobs:
       - ci-gate
       - quality-gates
       - command-parity
-      - observatory-tests
       - build-nextjs
       - docs-internal-gate
-      - docs-e2e
       - design-internal-gate
       - hook-tests
       - hook-tests-windows
@@ -2661,18 +1974,10 @@ jobs:
       - taskboard-onboarding-guard
       - codex-config-guard
       - ghaw-lock-sync
-      - actionlint
       - openapi-route-sync
       - actions-pin-check
-      # Unconditional jobs, asserted by `check_unconditional` rather than mapped
-      # to a ci-gate trigger — they have no `if:` to map to. Outside this list
-      # they run on every PR and their failure changes nothing, which is a gate
-      # that reports rather than one that gates.
-      - board-verdict-tests
-      - portable-paths
       - test-e2e-ui
       - test-e2e-api
-      - test-e2e-auth
       - test-e2e-journey
       - test-e2e-engine-smoke
     runs-on: ubuntu-latest

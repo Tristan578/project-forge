@@ -2,21 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
-import { publishedGames, projects } from '@/lib/db/schema';
-import { eq, ne, and, or, isNotNull, inArray } from 'drizzle-orm';
+import { publishedGames, projects, gameTags } from '@/lib/db/schema';
+import { eq, ne, and, or, isNotNull, inArray, sql } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { checkTrademark } from '@/lib/moderation/trademarkFilter';
 import { PUBLISH_LIMITS } from '@/lib/projects/limits';
 import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
-import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
-import {
-  writePublishedGameBundle, deletePublishedGameBundle, isPublishedSceneData,
-} from '@/lib/storage/publishedGameStorage';
-import { commitPublication } from '@/lib/publishing/commitPublication';
 
 const publishSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -34,7 +27,7 @@ const publishSchema = z.object({
 // whether a projectId is safe to compare against a uuid column.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function POST_impl(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
   const requestId = extractRequestId(request.headers);
   const reqLog = logger.child({ requestId, endpoint: 'POST /api/publish' });
@@ -185,7 +178,6 @@ async function POST_impl(request: NextRequest) {
       id: publishedGames.id,
       slug: publishedGames.slug,
       version: publishedGames.version,
-      cdnBundleKey: publishedGames.cdnBundleKey,
       flaggedAt: publishedGames.flaggedAt,
     })
     .from(publishedGames)
@@ -242,27 +234,6 @@ async function POST_impl(request: NextRequest) {
 
   const gameUrl = `/play/${clerkId}/${slug}`;
 
-  if (!isPublishedSceneData(project.sceneData)) {
-    return NextResponse.json({ error: 'Project has invalid scene data' }, { status: 422 });
-  }
-  const previous = existingSlug[0];
-  const expectedVersion = previous?.version ?? 0;
-  let bundle: { key: string } | null = null;
-  if (isPublishToR2Enabled()) {
-    try {
-      bundle = await writePublishedGameBundle(clerkId, slug, project.sceneData, {
-        schemaVersion: 1,
-        version: expectedVersion + 1,
-        publishedAt: new Date().toISOString(),
-        slug,
-        userId: clerkId,
-      });
-    } catch (err) {
-      captureException(err, { route: '/api/publish', stage: 'r2-bundle-write', slug });
-      reqLogAuth.warn('Private snapshot upload failed; retaining Postgres snapshot', { slug });
-    }
-  }
-
   // Validate tags — lenient filter: non-array becomes [], non-string entries dropped
   const validTags: string[] = Array.isArray(body.tags)
     ? (body.tags as unknown[])
@@ -271,49 +242,88 @@ async function POST_impl(request: NextRequest) {
         .slice(0, 5)
     : [];
 
-  let publication;
-  try {
-    publication = await commitPublication({
-      userId: user.id, projectId, slug, title, description, thumbnail, gameUrl,
-      expectedVersion, bundleKey: bundle?.key ?? null, sceneData: project.sceneData,
-      tags: [...new Set(validTags)],
-    });
-  } catch (error) {
-    if (bundle) {
-      // A lost database response does not prove rollback. Confirm the candidate
-      // is unreferenced before deleting it; otherwise leave it for reconciliation.
-      try {
-        const references = await queryWithResilience(() => getDb()
-          .select({ id: publishedGames.id }).from(publishedGames)
-          .where(eq(publishedGames.cdnBundleKey, bundle!.key)).limit(1));
-        if (references.length === 0) await deletePublishedGameBundle(bundle.key, clerkId, slug);
-      } catch (verificationError) {
-        captureException(verificationError, {
-          route: '/api/publish', stage: 'r2-rollback-check', key: bundle.key,
-        });
-      }
+  if (existingSlug.length > 0) {
+    // Update existing publication (republish)
+    const gameDbId = existingSlug[0].id;
+    const newVersion = existingSlug[0].version + 1;
+    await queryWithResilience(() => getDb().update(publishedGames)
+      .set({
+        title: title,
+        description: description ?? null,
+        status: 'published',
+        version: newVersion,
+        cdnUrl: gameUrl,
+        thumbnail,
+        updatedAt: new Date(),
+      })
+      .where(eq(publishedGames.id, gameDbId)));
+
+    // Replace tags
+    await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, gameDbId)));
+    if (validTags.length > 0) {
+      await queryWithResilience(() => getDb().insert(gameTags).values(
+        validTags.map((tag) => ({ gameId: gameDbId, tag }))
+      ));
     }
-    throw error;
+
+    reqLogAuth.info('Game republished', {
+      projectId: projectId,
+      slug: slug,
+      version: newVersion,
+    });
+
+    const [updated] = await queryWithResilience(() => getDb().select().from(publishedGames).where(eq(publishedGames.id, gameDbId)));
+    return NextResponse.json({ publication: { ...updated, url: gameUrl } });
   }
 
-  if (!publication) {
-    await deletePublishedGameBundle(bundle?.key, clerkId, slug);
-    return NextResponse.json(
-      { error: 'The publication changed while saving. Reload and try again.' },
-      { status: 409 },
-    );
+  // Create new publication — use onConflictDoUpdate to handle concurrent
+  // publishes with the same slug atomically (PF-212: TOCTOU fix).
+  // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
+  const [publication] = await queryWithResilience(() => getDb().insert(publishedGames)
+    .values({
+      userId: user.id,
+      projectId: projectId,
+      slug: slug,
+      title: title,
+      description: description ?? null,
+      status: 'published',
+      cdnUrl: gameUrl,
+      thumbnail,
+    })
+    .onConflictDoUpdate({
+      target: [publishedGames.userId, publishedGames.slug],
+      set: {
+        projectId: projectId,
+        title: title,
+        description: description ?? null,
+        status: 'published',
+        cdnUrl: gameUrl,
+        thumbnail,
+        version: sql`${publishedGames.version} + 1`,
+        updatedAt: new Date(),
+      },
+    })
+    .returning());
+
+  // Replace tags atomically — delete old tags first to prevent duplicates
+  // on concurrent publishes hitting the ON CONFLICT DO UPDATE path.
+  await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, publication.id)));
+  if (validTags.length > 0) {
+    await queryWithResilience(() => getDb().insert(gameTags).values(
+      validTags.map((tag) => ({ gameId: publication.id, tag }))
+    ));
   }
 
-  // Only a committed winner can delete the previously referenced object.
-  await deletePublishedGameBundle(previous?.cdnBundleKey, clerkId, slug);
-  reqLogAuth.info('Game published', { projectId, slug, version: publication.version });
+  reqLogAuth.info('Game published', {
+    projectId: projectId,
+    slug: slug,
+    version: 1,
+  });
+
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });
   } catch (err) {
     captureException(err, { route: '/api/publish', method: 'POST' });
-    return redactedJson({ error: 'Failed to publish game' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to publish game' }, { status: 500 });
   }
 }
 
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

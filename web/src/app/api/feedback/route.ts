@@ -7,8 +7,6 @@ import { feedback } from '@/lib/db/schema';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const feedbackSchema = z.object({
   type: z.enum(['bug', 'feature', 'general']),
@@ -16,7 +14,7 @@ const feedbackSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-async function POST_impl(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const session = await authenticateClerkSession();
   if (!session.ok) return session.response;
   const clerkId = session.clerkId;
@@ -39,7 +37,7 @@ async function POST_impl(req: NextRequest) {
     }
     body = result.data;
   } catch {
-    return redactedJson({ error: 'Invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
   try {
@@ -59,13 +57,9 @@ async function POST_impl(req: NextRequest) {
   } catch (err) {
     console.error('Feedback submission error:', err);
     captureException(err, { route: '/api/feedback' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to submit feedback' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

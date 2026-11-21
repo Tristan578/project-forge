@@ -43,7 +43,6 @@ run_decision() {
   [ -z "$dec" ] && dec="none"
   echo "${code}:${dec}"
 }
-readonly -f run_decision
 
 # run_decision_mode <command> <permission_mode> — like run_decision, but the
 # payload carries the session permission_mode exactly as Claude Code sends it.
@@ -55,7 +54,6 @@ run_decision_mode() {
   [ -z "$dec" ] && dec="none"
   echo "${code}:${dec}"
 }
-readonly -f run_decision_mode
 
 # run_decision_raw <raw_stdin> -> same, but pipes bytes verbatim (malformed input).
 run_decision_raw() {
@@ -66,7 +64,6 @@ run_decision_raw() {
   [ -z "$dec" ] && dec="none"
   echo "${code}:${dec}"
 }
-readonly -f run_decision_raw
 
 assert() {
   local desc="$1" expected="$2" actual="$3"
@@ -78,7 +75,6 @@ assert() {
     printf '  FAIL %s (expected %s, got %s)\n' "$desc" "$expected" "$actual"
   fi
 }
-readonly -f assert
 
 echo "auto-approve-safe-commands.sh"
 

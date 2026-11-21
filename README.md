@@ -1,6 +1,6 @@
 # SpawnForge
 
-**SpawnForge is a source-available, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and a 380-command MCP manifest (measured 2026-09-22 — which of those commands work today through which entry point is recorded in the [capability matrix](docs/capability-matrix.md)), enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
+**SpawnForge is an open-source, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and 350 MCP commands, enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
 
 [![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml)
 [![CD](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml)
@@ -12,7 +12,7 @@
 ## Why SpawnForge
 
 - **Browser-native** — No download, no IDE setup. Open a URL and start building 2D or 3D games.
-- **AI-first** — 25+ AI modules; the in-app AI is offered 296 of the 380 manifest commands (every `:write`-scoped command plus the `query` category) to drive the editor. External MCP agents can attach only in local builds, through an allowlist of 322 commands; permitted names can still return unavailable results, and that path is not yet verified end to end (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
+- **AI-first** — 25+ AI modules and 350 MCP commands let LLMs and agents drive the full editor. Describe a scene in plain text and watch it materialize.
 - **Real engine** — Bevy ECS compiled to WebAssembly, WebGPU rendering (WebGL2 fallback), Rapier physics, spatial audio, GPU particles, skeletal animation. Not a toy.
 - **One command interface** — The visual editor, AI chat, and external MCP agents all call the same `handle_command()` JSON API. There is no separate "AI mode."
 - **Publish instantly** — One-click publish to a shareable URL. Export as a standalone ZIP with PWA support.
@@ -21,16 +21,16 @@
 
 | Metric | Value |
 |--------|-------|
-| MCP commands | 380 across 41 categories (304 public), measured 2026-09-22 with `jq '.commands \| length' mcp-server/manifest/commands.json` — per-category status in the [capability matrix](docs/capability-matrix.md) |
+| MCP commands | 350 across 41 categories |
 | Visual scripting nodes | 73 across 10 categories |
 | Material presets | 56 across 9 categories |
 | AI modules | 25+ (chat, generation, asset creation) |
-| Game components | 13 drag-and-drop behaviors |
+| Game components | 12 drag-and-drop behaviors |
 | Test suite | 14,200+ tests |
 | Rendering | WebGPU primary, WebGL2 fallback |
-| Engine | Bevy 0.19, Rust/WASM |
+| Engine | Bevy 0.18, Rust/WASM |
 
-A source-available, AI-native 2D/3D game engine for the browser. Editor operations are JSON commands through `handle_command()`, and 380 of them (304 public) are published in the MCP manifest for the [Model Context Protocol](https://modelcontextprotocol.io/). Registration is not the same as a working feature: which capabilities are proven, implemented but unverified, partial or unavailable through the editor UI, the in-app AI, game scripts and external MCP is recorded per capability in [docs/capability-matrix.md](docs/capability-matrix.md). As of 2026-09-15, external MCP agents can attach only to local builds ([#9722](https://github.com/Tristan578/project-forge/issues/9722)) and platform-key asset generation is unavailable in production ([#9117](https://github.com/Tristan578/project-forge/issues/9117)). Build games by conversation, by code, or by hand — within those limits.
+An open-source, AI-native 2D/3D game engine for the browser. Every capability — scene creation, materials, physics, scripting, audio, particles, tilemaps, animation, export — is exposed as a JSON command, making the entire editor fully controllable by LLMs and autonomous agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Build games by conversation, by code, or by hand.
 
 Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a React-based visual editor.
 
@@ -50,13 +50,13 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
 - **AI Asset Generation** — Generate 3D models, textures, sound effects, and voice lines via provider integrations (Meshy, ElevenLabs, DALL-E, Stable Diffusion). Music generation is not available yet — its move to ElevenLabs is tracked in [#9522](https://github.com/Tristan578/project-forge/issues/9522); platform provisioning status per capability is in [docs/guides/platform-keys.md](docs/guides/platform-keys.md)
-- **MCP Server** — 380 commands across 41 categories (304 public). In a local build, an MCP-compatible agent can attach to the editor (after the in-tab consent prompt) with an allowlist that permits 322 of those command names — scene authoring, materials, physics, animation, inspection. Availability checks can still reject permitted names: linked prefab placement, nested placement, and source propagation are not implemented. Commands for script authoring, export, publishing, generation, security and economy are withheld over the bridge by design (`web/src/lib/mcp/bridgeAllowlist.ts`). That local path is not yet verified end to end, and attaching to production is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722). Per-category status for MCP and the other entry points: [capability matrix](docs/capability-matrix.md). See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
+- **MCP Server** — 350 commands across 41 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required. See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
 
 ### 3D Engine
-- **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 29) with automatic WebGL2 fallback for older browsers
+- **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 27) with automatic WebGL2 fallback for older browsers
 - **PBR Materials** — Physically-based rendering with metallic/roughness workflow, UV transforms, clearcoat, transmission/IOR, parallax mapping, texture support, alpha modes, and 56 material presets across 9 categories
 - **Shader Node Editor** — Visual WGSL shader creation with 30+ node types, live material preview, and save/load
 - **Quality Presets** — Low/Medium/High/Ultra rendering presets that batch-configure MSAA, shadows, bloom, sharpening, and particle density
@@ -83,7 +83,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Tilemap System** — Multi-layer tilemaps, paint/erase/fill/rectangle tools, tile palette, hash-based change detection
 - **2D Physics** — Rapier2D integration with 6 collider shapes, 4 joint types, one-way platforms, surface velocity
 - **Skeletal 2D Animation** — Bone hierarchy, skins, IK constraints, blend trees, vertex skinning, keyframe animation
-- **AI Sprite Generation** — Pixel art characters, tilesets, and sprite sheets via Replicate SDXL (pixel-art style) or DALL-E 3 (other styles). Not usable in production until the platform keys are provisioned ([#9117](https://github.com/Tristan578/project-forge/issues/9117)) — neither provider accepts a user-supplied key; see `generation:sprite` in the [capability matrix](docs/capability-matrix.md)
+- **AI Sprite Generation** — Generate pixel art characters, tilesets, and sprite sheets via DALL-E 3 and SDXL
 
 ### Editor
 - **Dockable Workspace** — Movable, resizable panels with preset layouts and persistent user customization
@@ -100,19 +100,19 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Play Mode** — Test games instantly with play/pause/stop and scene snapshot restore
 - **Input System** — Configurable key bindings with presets (FPS, Platformer, Top-Down, Racing)
 - **Mobile Controls** — Virtual joystick and action buttons overlay, 5 touch presets, auto quality reduction
-- **Prefab System** — Reusable entity templates with 8+ built-in prefabs, import/export, search, and saved-link metadata inspection. Linked scene placement, nesting, and propagation remain unavailable ([#9811](https://github.com/Tristan578/project-forge/issues/9811)).
+- **Prefab System** — Reusable entity templates with 8+ built-in prefabs, import/export, and search
 - **Multi-Scene Management** — Multiple named scenes per project with scene switching, duplication, and import/export
 - **Cloud Publishing** — Publish to shareable URLs with version management, tier-based limits, and analytics
 - **Game Export** — ZIP export with texture compression, custom loading screens, PWA generation
 - **Guided Onboarding** — Welcome wizard, interactive tutorials, context-sensitive tips
 - **In-Editor Documentation** — Browsable docs panel with BM25 search, help buttons on inspectors, F1 shortcut
-- **Pre-Built Game Components** — 13 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
+- **Pre-Built Game Components** — 12 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
 - **Responsive Layout** — Adaptive UI with compact (mobile), condensed (laptop), and full desktop modes
 
 ## Architecture
 
 ```
-MCP Server (380 commands, 41 categories)       AI agents + LLM tool use
+MCP Server (350 commands, 41 categories)       AI agents + LLM tool use
     |  JSON commands
 React Shell (Next.js 16, Zustand, Tailwind)    Visual editor UI
     |  JSON events via wasm-bindgen
@@ -123,7 +123,7 @@ Game Runtime + TypeScript Scripting            In-browser game execution
 
 The MCP server and the visual editor share the same command interface — there is no separate "AI mode." An agent calling `set_material` goes through the exact same code path as a user dragging a color picker.
 
-**Rendering:** WebGPU primary (auto-detected), WebGL2 fallback. Four WASM binaries are built per release — an editor and a runtime variant for each of WebGPU and WebGL2 — and the frontend auto-selects the correct one at runtime.
+**Rendering:** WebGPU primary (auto-detected), WebGL2 fallback. Two WASM binaries are built per release — the frontend auto-selects the correct one at runtime.
 
 ## Prerequisites
 
@@ -223,7 +223,7 @@ project-forge/
 │   ├── public/              # Static assets + WASM binaries (generated)
 │   └── package.json
 ├── mcp-server/              # MCP command manifest + tools
-│   ├── manifest/commands.json  # 380 commands across 41 categories (see docs/capability-matrix.md)
+│   ├── manifest/commands.json  # 350 commands across 41 categories
 │   └── src/
 ├── docs/                    # User-facing documentation (human + AI readable)
 │   ├── getting-started/     # Installation, first scene, editor overview
@@ -242,14 +242,14 @@ project-forge/
 
 | Command | Description |
 |---------|-------------|
-| `./build_wasm.sh` | Build all four editor/runtime WebGPU/WebGL2 WASM variants — macOS / Linux |
-| `.\build_wasm.ps1` | Build all four editor/runtime WebGPU/WebGL2 WASM variants — Windows (PowerShell) |
+| `./build_wasm.sh` | Build both WASM variants — macOS / Linux |
+| `.\build_wasm.ps1` | Build both WASM variants — Windows (PowerShell) |
 | `cd web && npm run dev` | Start the Next.js dev server |
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
 | `cd web && npx vitest run` | Run web tests (~14,200+ tests) |
-| `cd mcp-server && npx tsc --noEmit && npx vitest run` | Run MCP server tests |
+| `cd mcp-server && npx vitest run` | Run MCP server tests |
 
 ### Key conventions
 
@@ -270,9 +270,9 @@ SpawnForge is designed for **AI-assisted development**. Six AI coding tools are 
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `.gemini/` | Automatic | `.agents/skills/` | `gemini-3.1-pro-preview` |
 | [Windsurf](https://windsurf.com) | `.windsurf/` | Automatic | `.windsurf/workflows/` | App-managed |
 | [Google Antigravity](https://antigravity.google) | `.agent/` + `.gemini/` | Manual | `.agent/skills/` | Gemini 3 |
-| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Wired; run only after a one-time `/hooks` approval (not yet confirmed in a live session) | `.agents/skills/` | `gpt-5.3-codex` |
+| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Manual | `.codex/skills/` | `gpt-5.3-codex` |
 
-**First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Codex needs a one-time approval of its hooks in `/hooks` first (see `.codex/AGENTS.md`); Antigravity has no hooks and carries manual workflow instructions in its rules.
+**First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Tools without hooks (Codex, Antigravity) include manual workflow instructions in their `AGENTS.md` files.
 
 ### Quick Start by Tool
 
@@ -299,7 +299,7 @@ Claude Code also has three **subagents** (`.claude/agents/`):
 cd project-forge
 # Copilot reads .github/hooks/hooks.json and .github/copilot-instructions.md
 ```
-Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`; manual sync is the `sync-pull` and `sync-push` skills.
+Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`. Prompts for manual sync in `.github/prompts/`.
 
 </details>
 
@@ -344,10 +344,14 @@ Skills in `.agent/skills/` (singular — Antigravity uses `.agent/`, not `.agent
 <summary><strong>OpenAI Codex CLI</strong></summary>
 
 ```bash
-cd project-forge   # start Codex at the repo root — on Windows the hook commands are relative to it
-codex              # reads AGENTS.md (root), .codex/config.toml, .codex/hooks.json, .codex/agents/ — NOT .codex/AGENTS.md; the root file points it there
+cd project-forge
+codex  # reads .codex/config.toml and .codex/AGENTS.md
+# No auto-hooks — run manually:
+bash .claude/hooks/on-session-start.sh   # start of session
+bash .claude/hooks/on-stop.sh             # after work
+bash .claude/hooks/post-edit-lint.sh      # after editing
 ```
-Hooks run the shared `.claude/hooks/` scripts, but only after a one-time approval: trust the project, then open `/hooks` and approve them (Codex re-asks whenever a hook's command changes). Config in `.codex/config.toml`. Subagents in `.codex/agents/`, skills in `.agents/skills/` — both **generated** from `.claude/` by `node tools/agentic-sync/port.mjs --write`, never hand-edited. What is wired, what Codex cannot express, and what was verified: `docs/guides/codex-cli-support-matrix.md`. Full enforcement rules in `.codex/AGENTS.md`.
+Config in `.codex/config.toml`. Skills in `.codex/skills/`. Full enforcement rules in `.codex/AGENTS.md`.
 
 </details>
 
@@ -392,17 +396,15 @@ The `tb_validate_ticket()` function in `taskboard-state.sh` enforces:
 
 Skills are callable capabilities loaded on-demand. Each tool stores them in its own directory, but all reference the same shared hook scripts.
 
-The project's own skills are authored once, under `.claude/skills/`, and **mirrored** byte-for-byte into `.agents/skills/` by `node tools/agentic-sync/port.mjs --write` — the directory Codex, Gemini CLI and Copilot read. "Mirrored" below means the text is available there; it was written for Claude Code and names Claude's tools. There are no exceptions: `game-engine`, `kanban` and `web-accessibility` once existed on both sides and had drifted apart, and #10131 made `.claude/skills/` canonical for them too (the `.agents/` copies' extra content was merged into the `.claude/` side first), so every tool now reads the same text. `skills.independent` in `tools/agentic-sync/port.json` is the escape hatch for a skill that must stay unmirrored; it is empty.
-
 | Skill | Available In | Purpose |
 |-------|-------------|---------|
 | **kanban** | All 6 tools | View board, create/update/move tickets, validate fields, toggle subtasks. Claude Code uses MCP tools; other tools use REST API (`curl` to `localhost:3010`) |
 | **sync-push** | All 6 tools | Push local ticket changes to GitHub Project. Syncs full body (description, priority, subtask checkboxes, metadata block). Detects changes via content hashing |
 | **sync-pull** | All 6 tools | Pull GitHub Project changes to local taskboard. Reconstructs subtasks from checkboxes, re-links tickets by ULID from metadata, imports new tickets with parsed fields |
-| **planner** | Claude Code; mirrored to `.agents/skills/` | Architect agent — analyzes requests, creates detailed specs in `specs/`, never writes code |
-| **builder** | Claude Code; mirrored to `.agents/skills/` | Implementation agent — reads specs, writes Rust/TypeScript, runs lint/check after coding |
-| **cycle** | Claude Code; mirrored to `.agents/skills/` | Orchestration — runs Plan → Build → Verify loop, updates project context after each cycle |
-| **arch-validator** | Claude Code; mirrored to `.agents/skills/` | Runs `check_arch.py` — 7 structural rules (bridge isolation, file sizes, dispatch chain, store composition) |
+| **planner** | Claude Code | Architect agent — analyzes requests, creates detailed specs in `specs/`, never writes code |
+| **builder** | Claude Code | Implementation agent — reads specs, writes Rust/TypeScript, runs lint/check after coding |
+| **cycle** | Claude Code | Orchestration — runs Plan → Build → Verify loop, updates project context after each cycle |
+| **arch-validator** | Claude Code | Runs `check_arch.py` — 7 structural rules (bridge isolation, file sizes, dispatch chain, store composition) |
 
 ### GitHub Project Sync
 
@@ -506,7 +508,7 @@ project-forge/
 │   │   ├── github-sync-config.json #  GitHub Project metadata
 │   │   └── github-project-map.json #  Ticket ↔ GitHub item mapping
 │   ├── rules/                   #   Architecture & quality rules
-│   │   ├── bevy-api.md          #     Bevy 0.19 API patterns
+│   │   ├── bevy-api.md          #     Bevy 0.18 API patterns
 │   │   ├── entity-snapshot.md   #     ECS snapshot patterns
 │   │   ├── web-quality.md       #     ESLint & React patterns
 │   │   ├── library-apis.md      #     Third-party library APIs
@@ -526,10 +528,11 @@ project-forge/
 │   ├── hooks/hooks.json         #   Hook wiring (sessionStart, promptSubmit, postToolUse)
 │   ├── copilot-instructions.md  #   Copilot guidance (agentic-sync target)
 │   ├── instructions/review.instructions.md  # PR review criteria
-│   └── skills/                  #   kanban, sync-push, sync-pull
+│   ├── skills/                  #   kanban, sync-push, sync-pull
+│   └── prompts/                 #   sync-push.prompt.md, sync-pull.prompt.md
 ├── .gemini/                     # Gemini CLI (+ Antigravity model config)
 │   └── settings.json            #   Hooks + model (gemini-3.1-pro-preview)
-├── .agents/                     # Shared skills (Codex CLI + Copilot + Gemini CLI); the project skills here are GENERATED mirrors of .claude/skills/ — never hand-edit them
+├── .agents/                     # Shared skills (Copilot + Gemini CLI)
 │   ├── rules/taskboard-sync.md  #   Ticket enforcement rules
 │   └── skills/                  #   kanban, sync-push, sync-pull
 ├── .agent/                      # Google Antigravity (singular — NOT .agents/)
@@ -540,12 +543,9 @@ project-forge/
 │   ├── rules/taskboard.md       #   Ticket enforcement rules
 │   └── workflows/               #   sync-push.md, sync-pull.md
 └── .codex/                      # OpenAI Codex CLI
-    ├── config.toml              #   Model (gpt-5.3-codex), approval policy, sandbox (hand-edited)
-    ├── AGENTS.md                #   Full instructions
-    ├── agents/                  #   Subagents — GENERATED from .claude/agents/
-    ├── hooks.json               #   Hook wiring — GENERATED from .claude/settings.json
-    ├── hook-conditions.json     #   `if` conditions of NON-blocking hooks only (a PreToolUse `if` is left out on purpose) — GENERATED
-    └── hooks/run-claude-hook.mjs #  Adapter: Codex hook payload → shared .claude/hooks scripts
+    ├── config.toml              #   Model (gpt-5.3-codex), approval policy, sandbox
+    ├── AGENTS.md                #   Full instructions (no hooks, so rules are inline)
+    └── skills/                  #   kanban, sync-push, sync-pull
 ```
 
 ## Contributing
@@ -582,7 +582,7 @@ Contributions are welcome! Here's how to get involved.
 
    # Run tests
    cd web && npx vitest run
-   cd ../mcp-server && npx tsc --noEmit && npx vitest run
+   cd ../mcp-server && npx vitest run
    ```
 3. Commit your changes with a clear message:
    ```bash
@@ -617,7 +617,7 @@ Contributions are welcome! Here's how to get involved.
 
 | Layer | Technology |
 |-------|-----------|
-| Engine | Bevy 0.19, wgpu 29, bevy_rapier3d/2d 0.35, bevy_hanabi 0.19, bevy_panorbit_camera 0.35, csgrs 0.20, noise 0.9 |
+| Engine | Bevy 0.18, wgpu 27, bevy_rapier3d 0.33, bevy_hanabi 0.18, bevy_panorbit_camera 0.34, csgrs 0.20, noise 0.9 |
 | Frontend | Next.js 16, React 19, Zustand 5, Tailwind CSS, React Flow |
 | Auth | Clerk |
 | Payments | Stripe |

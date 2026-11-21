@@ -6,8 +6,6 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { createMockStore } from './handlerTestUtils';
 import { generationHandlers } from '../generationHandlers';
 import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
-import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
-import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
 
 // ---------------------------------------------------------------------------
 // Mock generationStore
@@ -20,7 +18,6 @@ vi.mock('@/lib/config/providers', async (importOriginal) => {
   return { ...actual, getCapabilityUnavailability: vi.fn(actual.getCapabilityUnavailability) };
 });
 import { getCapabilityUnavailability } from '@/lib/config/providers';
-import { enrichSfxPrompt } from '@/lib/generate/promptEnricher';
 
 const mockAddJob = vi.fn();
 const mockUpdateJob = vi.fn();
@@ -98,12 +95,11 @@ async function invoke(
   storeOverrides: Record<string, unknown> = {},
 ) {
   const store = createMockStore({ ...makeGenStore(), ...storeOverrides });
-  const dispatchCommand = vi.fn();
   const result = await generationHandlers[name](args, {
     store,
-    dispatchCommand,
+    dispatchCommand: vi.fn(),
   });
-  return { result, store, dispatchCommand };
+  return { result, store };
 }
 
 function mockFetchSuccess(data: Record<string, unknown> = {}) {
@@ -438,29 +434,6 @@ describe('generationHandlers', () => {
       expect(body.durationSeconds).toBe(10);
     });
 
-    it('ignores an inherited entity name but retains an own __proto__ entity name', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ audioBase64: 'inherited-audio' }) });
-      const inherited = await invoke('generate_sfx', {
-        prompt: 'boom', entityId: '__proto__',
-      }, {
-        sceneGraph: { nodes: Object.create({ __proto__: { name: 'Inherited name' } }), rootIds: [] },
-      });
-      expect(inherited.result.success).toBe(true);
-      expect(vi.mocked(enrichSfxPrompt)).toHaveBeenCalledWith('boom', undefined, inherited.store);
-      expect(inherited.dispatchCommand).not.toHaveBeenCalled();
-
-      vi.mocked(enrichSfxPrompt).mockClear();
-      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ audioBase64: 'own-audio' }) });
-      const nodes = Object.create(null) as Record<string, { name: string }>;
-      nodes.__proto__ = { name: 'Own prototype name' };
-      const own = await invoke('generate_sfx', {
-        prompt: 'boom', entityId: '__proto__',
-      }, { sceneGraph: { nodes, rootIds: [] } });
-      expect(own.result.success).toBe(true);
-      expect(vi.mocked(enrichSfxPrompt)).toHaveBeenCalledWith('boom', 'Own prototype name', own.store);
-      expect(own.store.setAudio).toHaveBeenCalledWith('__proto__', expect.any(Object));
-    });
-
     it('returns error on API failure', async () => {
       mockFetchFailure('No provider');
       const { result } = await invoke('generate_sfx', { prompt: 'boom' });
@@ -584,9 +557,6 @@ describe('generationHandlers', () => {
   describe('generate_music - handler body with the #9117 gate bypassed', () => {
     beforeEach(() => {
       vi.mocked(getCapabilityUnavailability).mockReturnValue(null);
-      // The chat tool now hands the generated track to the shared arrangement
-      // (#9854), so reset that singleton between cases.
-      useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
     });
     afterEach(() => {
       // Back to the REAL table: vi.fn(impl).mockRestore() reinstates the wrapped
@@ -610,50 +580,6 @@ describe('generationHandlers', () => {
         loopAudio: true,
         autoplay: true,
       }));
-    });
-
-    it('adds the generated track to the Music Arrangement editor (in-app AI parity, #9854)', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ audioBase64: 'base64music', durationSeconds: 42 }),
-      });
-      const { result } = await invoke('generate_music', {
-        prompt: 'epic battle theme',
-        durationSeconds: 55,
-      });
-      expect(result.success).toBe(true);
-      const arrangement = useMusicArrangementStore.getState().arrangement;
-      // One clip landed on a freshly created track, carrying the reported
-      // duration (42), NOT the requested 55 — `Number.isFinite`, not `||`.
-      expect(arrangement.tracks).toHaveLength(1);
-      expect(arrangement.clips).toHaveLength(1);
-      expect(arrangement.clips[0]).toMatchObject({
-        sourceUrl: expect.stringContaining('music-'),
-        sourceDurationSeconds: 42,
-      });
-    });
-
-    it('falls back to the requested duration when the response omits one', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ audioBase64: 'base64music' }),
-      });
-      await invoke('generate_music', { prompt: 'calm', durationSeconds: 25 });
-      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
-      expect(clip.sourceDurationSeconds).toBe(25);
-    });
-
-    it('falls back to the requested duration instead of a reported 0 (#10058)', async () => {
-      // A reported 0 is not a real duration for generated music — buildClip's
-      // clampTrimWindow treats sourceDurationSeconds:0 as "unknown" and floors
-      // trimEnd to 0.05s, leaving trimEnd > sourceDurationSeconds on the clip.
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ audioBase64: 'base64music', durationSeconds: 0 }),
-      });
-      await invoke('generate_music', { prompt: 'calm', durationSeconds: 25 });
-      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
-      expect(clip.sourceDurationSeconds).toBe(25);
     });
 
     it('tracks async job when no audioBase64', async () => {
@@ -726,26 +652,27 @@ describe('generationHandlers', () => {
     });
   });
 
-  describe('generate_music - now offered via ElevenLabs (#9522)', () => {
-    // Music is no longer in UNAVAILABLE_CAPABILITIES, so the tool reaches the
-    // route (which now resolves ElevenLabs audio inline) instead of refusing.
-    it('reaches the route and imports the inline audio, no longer refused', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ audioBase64: 'base64music', provider: 'elevenlabs' }),
-      });
-      const { result, store } = await invoke('generate_music', {
+  describe('generate_music', () => {
+    // #9117: music is declared unavailable in code (UNAVAILABLE_CAPABILITIES),
+    // so the tool answers with the user-facing alternative and never calls the
+    // route. The sync/async import paths below the gate return with #9522.
+    it('returns the unavailable reason without calling the route while music is declared unavailable', async () => {
+      const { result } = await invoke('generate_music', {
         prompt: 'epic battle theme',
         entityId: 'ent-1',
       });
-      expect(result.success).toBe(true);
-      expect(mockFetch).toHaveBeenCalledWith('/api/generate/music', expect.anything());
-      expect(store.importAudio).toHaveBeenCalledWith('base64music', expect.stringContaining('music-'));
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not available yet/i);
+      expect(result.error).not.toMatch(/#\d+|PLATFORM_|Suno/);
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAddJob).not.toHaveBeenCalled();
     });
 
-    it('still rejects malformed arguments with the validation message', async () => {
+    it('still rejects malformed arguments ahead of the gate, with the validation message', async () => {
       const { result } = await invoke('generate_music', { prompt: '' });
       expect(result.success).toBe(false);
+      // The VALIDATION error, not the gate's reason: proves parseArgs runs first.
+      expect(result.error).not.toMatch(/not available yet/i);
       expect(result.error).toMatch(/prompt|argument|invalid/i);
       expect(mockFetch).not.toHaveBeenCalled();
     });
@@ -960,12 +887,18 @@ describe('generationHandlers', () => {
   // Utility commands
   // =========================================================================
   describe('remove_background', () => {
-    it('explains the limitation without generating, charging, or tracking an unrelated image', async () => {
+    it('returns guidance when API fails', async () => {
+      mockFetchFailure('Not supported');
       const { result } = await invoke('remove_background', { assetId: 'asset-1' });
       expect(result.success).toBe(true);
-      expect(result.result).toEqual({ message: expect.stringContaining('existing asset is not available') });
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(mockAddJob).not.toHaveBeenCalled();
+      expect((result.result as Record<string, unknown>).message).toContain('generate_sprite');
+    });
+
+    it('returns jobId when API succeeds', async () => {
+      mockFetchSuccess();
+      const { result } = await invoke('remove_background', { assetId: 'asset-1' });
+      expect(result.success).toBe(true);
+      expect((result.result as Record<string, unknown>).jobId).toBe('job-123');
     });
 
     it('fails without assetId', async () => {
@@ -1004,42 +937,5 @@ describe('generationHandlers', () => {
       const { result } = await invoke('set_project_style', {});
       expect(result.success).toBe(false);
     });
-  });
-});
-
-
-describe('synchronous sprite results', () => {
-  it.each(['generate_sprite', 'generate_character'])('carries completed inline images through %s', async (command) => {
-    const resultUrl = 'data:image/png;base64,dHJhbnNwYXJlbnQtcG5n';
-    mockFetchSuccess({ jobId: 'dalle3-sync:usage-1', status: 'completed', resultUrl, backgroundRemoval: 'removed' });
-    const { result } = await invoke(command, { prompt: 'hero', poses: ['idle'] });
-    expect(result.success).toBe(true);
-    expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
-      jobId: 'dalle3-sync:usage-1', status: 'pending', resultUrl,
-      metadata: { backgroundRemoval: 'removed' },
-    }));
-  });
-
-  it.each(['get_sprite_generation_status', 'get_generation_status'])('answers %s locally for an inline job', async (command) => {
-    mockGenJobs['local'] = { id: 'local', jobId: 'dalle3-sync:usage-1', status: 'pending', type: 'sprite', resultUrl: 'https://example.com/hero.png' };
-    const { result } = await invoke(command, { jobId: 'dalle3-sync:usage-1', type: 'sprite' });
-    expect(result).toEqual({ success: true, result: { jobId: 'dalle3-sync:usage-1', status: 'completed', progress: 100, resultUrl: 'https://example.com/hero.png' } });
-    expect(mockFetch).not.toHaveBeenCalled();
-    expect(mockUpdateJob).not.toHaveBeenCalled(); // Poller still owns the asset import.
-  });
-
-  it('reports a missing synchronous artifact without polling other providers', async () => {
-    const { result } = await invoke('get_generation_status', { jobId: 'dalle3-sync:unknown' });
-    expect(result.success).toBe(false);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-});
-
-
-describe('skipped background removal disclosure', () => {
-  it.each(['generate_sprite', 'generate_character'])('reports retained backgrounds through %s', async (command) => {
-    mockFetchSuccess({ status: 'completed', resultUrl: 'https://example.com/original.png', backgroundRemoval: 'unavailable' });
-    const { result } = await invoke(command, { prompt: 'hero', poses: ['idle'] });
-    expect(result.result).toEqual(expect.objectContaining({ message: expect.stringContaining('keeps its background') }));
   });
 });

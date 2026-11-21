@@ -9,7 +9,7 @@ const EXPECTED_TABLE_NAMES = [
   'gameTags', 'gameForks', 'featuredGames', 'marketplaceAssets',
   'assetPurchases', 'assetReviews', 'sellerProfiles', 'feedback', 'generationJobs',
   'webhookEvents', 'leaderboards', 'leaderboardEntries', 'moderationAppeals',
-  'waitlistSignups', 'graphNodes', 'graphEdges', 'providerJobOwners',
+  'waitlistSignups', 'graphNodes', 'graphEdges',
 ] as const;
 
 describe('database schema', () => {
@@ -46,20 +46,6 @@ describe('database schema', () => {
     }
   });
 
-  // #9522: music moved from Suno to ElevenLabs, but the pg `provider` enum must
-  // KEEP 'suno' — historical tokenUsage/apiKeys/costLog rows still reference it,
-  // and dropping the value would break reads of those rows. No migration drops it.
-  it("pg provider enum retains 'suno' for historical rows (#9522)", () => {
-    expect(schema.providerEnum.enumValues).toContain('suno');
-  });
-
-  // #9522: the TS `Provider` union is the read-path type for provider columns;
-  // it must still admit 'suno' so old rows type-check when read back.
-  it("Provider union still admits 'suno' for read-path typing (#9522)", () => {
-    const historical: schema.Provider = 'suno';
-    expect(historical).toBe('suno');
-  });
-
   it('generationJobs table has expected column structure', () => {
     const { generationJobs } = schema;
     // Drizzle tables expose their columns as object keys
@@ -84,16 +70,5 @@ describe('database schema', () => {
     expect(keys).toContain('id');
     expect(keys).toContain('userId');
     expect(keys).toContain('name');
-  });
-
-  // #10262: the ownership binding jobOwnership.ts writes/reads is keyed on
-  // (provider, providerJobId), scoped to userId.
-  it('providerJobOwners table has expected column structure', () => {
-    const { providerJobOwners } = schema;
-    const keys = Object.keys(providerJobOwners);
-    expect(keys).toContain('id');
-    expect(keys).toContain('provider');
-    expect(keys).toContain('providerJobId');
-    expect(keys).toContain('userId');
   });
 });

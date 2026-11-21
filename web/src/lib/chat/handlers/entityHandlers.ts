@@ -6,7 +6,7 @@
  * are in transformHandlers.ts to avoid double-registration.
  */
 
-import { ownEntry, type ToolHandler, type ExecutionResult } from './types';
+import type { ToolHandler, ExecutionResult } from './types';
 import { validateWinnability, formatWinnabilityMessage } from '@/lib/playMode/winnabilityValidator';
 
 export const entityHandlers: Record<string, ToolHandler> = {
@@ -27,7 +27,7 @@ export const entityHandlers: Record<string, ToolHandler> = {
     if (typeof entityId !== 'string' || !entityId) {
       return { success: false, error: 'Missing required parameter: entityId' };
     }
-    const node = ownEntry(ctx.store.sceneGraph.nodes, entityId);
+    const node = ctx.store.sceneGraph.nodes[entityId];
     if (!node) return { success: false, error: `Entity not found: ${entityId}` };
     return {
       success: true,
@@ -58,13 +58,7 @@ export const entityHandlers: Record<string, ToolHandler> = {
     // surface it to chat on this path — that would duplicate the message into the
     // model. store.play() re-runs the same pure check for the human Play-button
     // path; both call the same function on the same snapshot, so they can't diverge.
-    // Pass the scene's completionMode (absent => 'win') so this AI path and the
-    // human Play button gate identically for sandbox/endless/narrative games (#9901).
-    const report = validateWinnability(
-      ctx.store.sceneGraph,
-      ctx.store.allGameComponents,
-      ctx.store.sceneGraph.completionMode,
-    );
+    const report = validateWinnability(ctx.store.sceneGraph, ctx.store.allGameComponents);
     if (!report.winnable) {
       return { success: false, error: formatWinnabilityMessage(report) };
     }

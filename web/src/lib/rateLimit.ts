@@ -48,7 +48,9 @@ let _initPromise: Promise<UpstashRateLimiter | false> | null = null;
  * Uses a promise lock so concurrent calls share a single init attempt.
  */
 function getUpstashLimiter(): Promise<UpstashRateLimiter | false> {
-  _initPromise ??= doInitUpstash();
+  if (!_initPromise) {
+    _initPromise = doInitUpstash();
+  }
   return _initPromise;
 }
 

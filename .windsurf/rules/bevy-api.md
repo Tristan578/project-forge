@@ -1,7 +1,4 @@
-# Bevy 0.19 API & ECS Patterns
-
-> The engine is on Bevy 0.19 (#8887). The 0.19 migration notes (scene rename, `Skybox`,
-> `shadow_maps_enabled`, `AssetMut`, `RenderStartup` pipelines) live in `.claude/rules/bevy-api.md`.
+# Bevy 0.18 API & ECS Patterns
 
 ## Migration from 0.16 to 0.18
 
@@ -44,12 +41,12 @@
 
 ## Library-Specific
 
-### bevy_rapier3d / bevy_rapier2d v0.35
+### bevy_rapier3d v0.33
 - `RapierConfiguration` is a **Component** (not Resource)
 - `DebugRenderContext` is a **Resource** (not Component)
 - Never enable `parallel` feature (rayon panics on WASM)
 
-### bevy_panorbit_camera v0.35
+### bevy_panorbit_camera v0.34
 - Uses `yaw`/`pitch`/`target_yaw`/`target_pitch` — NO `alpha`/`beta` fields
 - Smoothness range is 0.0-1.0
 
@@ -57,7 +54,7 @@
 - Path dependency: `path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"`
 - Needs default features. Don't set `default-features = false`
 
-### bevy_hanabi 0.19 (GPU Particles)
+### bevy_hanabi 0.18 (GPU Particles)
 - `EffectAsset::new(capacity, spawner, module)` builder pattern
 - Registration gated behind `#[cfg(feature = "webgpu")]`
 

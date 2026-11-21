@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { attachFixtureValidator } from './__tests__/sceneFixture';
 import {
   createInitialProject,
   createScene,
@@ -17,19 +16,12 @@ import {
   importSingleScene,
   loadProjectScenes,
   saveProjectScenes,
-  writePrefabInstances,
-  readPrefabInstances,
-  writePrefabDefinitions,
-  readPrefabDefinitions,
   type SceneFileData,
 } from './sceneManager';
-import type { PrefabInstance } from '../prefabs/prefabInstance';
-import type { Prefab } from '../prefabs/prefabStore';
 
 // Mock localStorage
 let storage: Record<string, string> = {};
 beforeEach(() => {
-  attachFixtureValidator();
   storage = {};
   vi.stubGlobal('localStorage', {
     getItem: vi.fn((key: string) => storage[key] ?? null),
@@ -56,32 +48,6 @@ describe('sceneManager', () => {
       const project = loadProjectScenes();
       expect(project.scenes).toHaveLength(1);
       expect(project.scenes[0].name).toBe('Main');
-    });
-
-    it('keeps project scene buffers isolated across an editor switch (regression for PF-375)', () => {
-      const first = createInitialProject();
-      first.scenes[0].name = 'Project A';
-      const second = createInitialProject();
-      second.scenes[0].name = 'Project B';
-
-      saveProjectScenes(first, 'project/A');
-      saveProjectScenes(second, 'project B');
-
-      expect(loadProjectScenes('project/A').scenes[0].name).toBe('Project A');
-      expect(loadProjectScenes('project B').scenes[0].name).toBe('Project B');
-      expect(storage['forge-project-scenes:v2:project:project%2FA']).toBeDefined();
-      expect(storage['forge-project-scenes:v2:project:project%20B']).toBeDefined();
-    });
-
-    it('migrates browser-global scenes only into the explicit unsaved scope', () => {
-      const legacy = createInitialProject();
-      legacy.scenes[0].name = 'Legacy local work';
-      storage['forge-project-scenes'] = JSON.stringify(legacy);
-
-      expect(loadProjectScenes('cloud-project').scenes[0].name).toBe('Main');
-      expect(storage['forge-project-scenes:v2:project:cloud-project']).toBeUndefined();
-      expect(loadProjectScenes().scenes[0].name).toBe('Legacy local work');
-      expect(storage['forge-project-scenes:v2:unsaved']).toBeDefined();
     });
   });
 
@@ -224,7 +190,7 @@ describe('sceneManager', () => {
       const result = switchScene(withTwo, sceneId);
       if ('error' in result) throw new Error(result.error);
       expect(result.project.activeSceneId).toBe(sceneId);
-      expect(result.sceneToLoad).toEqual(expect.objectContaining({ metadata: expect.objectContaining({ name: 'Level 2' }) }));
+      expect(result.sceneToLoad).toEqual(expect.objectContaining({ sceneName: 'Level 2' }));
     });
 
     it('switch to nonexistent scene returns error', () => {
@@ -314,101 +280,6 @@ describe('sceneManager', () => {
       expect(getSceneCount(project)).toBe(1);
       const { project: withTwo } = createScene(project, 'Level 2');
       expect(getSceneCount(withTwo)).toBe(2);
-    });
-  });
-
-  describe('Prefab-instance persistence (scene.FR-1 N1)', () => {
-    const baseScene: SceneFileData = { formatVersion: 1, sceneName: 'Main', entities: [] };
-    const instances: PrefabInstance[] = [
-      { instanceId: 'pfi_a', prefabId: 'prefab_src', overrides: { name: 'Kept', entityType: 'sphere' } },
-      { instanceId: 'pfi_b', prefabId: 'prefab_src', overrides: {}, entityId: 'ent_2' },
-    ];
-
-    it('writePrefabInstances does not mutate the input scene', () => {
-      const written = writePrefabInstances(baseScene, instances);
-      expect(baseScene.prefabInstances).toBeUndefined();
-      expect(written.prefabInstances).toHaveLength(2);
-    });
-
-    it('save -> reopen preserves stable ids, links and overrides with zero loss', () => {
-      const written = writePrefabInstances(baseScene, instances);
-      // Simulate a full save/reopen: serialize to the project file and parse back.
-      const reopened = JSON.parse(JSON.stringify(written)) as SceneFileData;
-      const restored = readPrefabInstances(reopened);
-
-      expect(restored).toHaveLength(2);
-      expect(restored[0].instanceId).toBe('pfi_a'); // stable id preserved
-      expect(restored[0].prefabId).toBe('prefab_src'); // source link preserved
-      expect(restored[0].overrides).toEqual({ name: 'Kept', entityType: 'sphere' }); // overrides intact
-      expect(restored[1].entityId).toBe('ent_2'); // entity binding preserved
-    });
-
-    it('readPrefabInstances returns [] for a legacy scene without the field', () => {
-      expect(readPrefabInstances(baseScene)).toEqual([]);
-      expect(readPrefabInstances(null)).toEqual([]);
-    });
-
-    it('readPrefabInstances drops a malformed record rather than installing it (SEC)', () => {
-      const crafted = {
-        ...baseScene,
-        prefabInstances: [instances[0], { prefabId: 'missing-instanceId' }, 'garbage'],
-      } as unknown as SceneFileData;
-      const restored = readPrefabInstances(crafted);
-      expect(restored).toHaveLength(1);
-      expect(restored[0].instanceId).toBe('pfi_a');
-    });
-
-    it('readPrefabInstances caps an oversized array rather than installing it whole (SEC)', () => {
-      const many: PrefabInstance[] = Array.from({ length: 5010 }, (_, i) => ({
-        instanceId: `pfi_${i}`,
-        prefabId: 'src',
-        overrides: {},
-      }));
-      const crafted = { ...baseScene, prefabInstances: many };
-      expect(readPrefabInstances(crafted).length).toBe(5000);
-    });
-
-    it('readPrefabInstances returns [] when the field is not an array', () => {
-      // @ts-expect-error — deliberately malformed for the untrusted-input guard
-      expect(readPrefabInstances({ ...baseScene, prefabInstances: 'not-an-array' })).toEqual([]);
-    });
-  });
-
-  describe('Prefab-definition portability (scene.FR-1 N1)', () => {
-    const baseScene: SceneFileData = { formatVersion: 1, sceneName: 'Main', entities: [] };
-    const now = new Date().toISOString();
-    const def: Prefab = {
-      id: 'prefab_src', name: 'Source', category: 'cat', description: '',
-      snapshot: { entityType: 'cube', name: 'Source', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
-      createdAt: now, updatedAt: now,
-    };
-
-    it('writePrefabInstances does not mutate the input, and is a no-op for an empty list', () => {
-      const written = writePrefabDefinitions(baseScene, []);
-      expect(written).toBe(baseScene); // same reference — nothing to embed
-      expect(written.prefabDefinitions).toBeUndefined();
-    });
-
-    it('save -> reopen round-trips an embedded definition intact', () => {
-      const written = writePrefabDefinitions(baseScene, [def]);
-      expect(baseScene.prefabDefinitions).toBeUndefined(); // input untouched
-      const reopened = JSON.parse(JSON.stringify(written)) as SceneFileData;
-      const restored = readPrefabDefinitions(reopened);
-      expect(restored).toEqual([def]);
-    });
-
-    it('readPrefabDefinitions returns [] for a legacy scene without the field', () => {
-      expect(readPrefabDefinitions(baseScene)).toEqual([]);
-      expect(readPrefabDefinitions(null)).toEqual([]);
-    });
-
-    it('readPrefabDefinitions drops an entry missing id/name/snapshot (SEC)', () => {
-      const crafted = {
-        ...baseScene,
-        prefabDefinitions: [def, { name: 'NoId' }, { id: 'no-name-or-snapshot' }],
-      } as unknown as SceneFileData;
-      const restored = readPrefabDefinitions(crafted);
-      expect(restored).toEqual([def]);
     });
   });
 });

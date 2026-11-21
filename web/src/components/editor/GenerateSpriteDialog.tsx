@@ -1,32 +1,25 @@
 'use client';
 
-import { useState, useCallback, useId } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { backgroundRemovalWarning } from '@/lib/generation/backgroundRemoval';
 import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
-import { resolveSpriteProvider, SPRITE_PROVIDER_KEY, spriteTokenCost } from '@/lib/config/providers';
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
-import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 interface GenerateSpriteDialogProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-import type { SpriteStyle } from '@/lib/config/providers';
+type SpriteStyle = 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
 type SpriteSize = '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
 type TabType = 'single' | 'sheet' | 'tileset';
 
 export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogProps) {
-  // useId, not literal ids: the panel can mount more than once, and a
-  // repeated id sends the second <label for> to the first panel's control.
-  const baseId = useId();
-  const fieldId = (key: string) => `${baseId}-${key}`;
   const [activeTab, setActiveTab] = useState<TabType>('single');
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState<SpriteStyle>('pixel-art');
@@ -42,25 +35,10 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
   const addJob = useGenerationStore((s) => s.addJob);
   const dialogRef = useDialogA11y(onClose);
 
-  // Single-sprite price follows the provider the request will resolve to, via
-  // the same helper the route charges from (#9741). It was a flat 15, which is
-  // neither provider's price: a 10-14 balance was refused on a pixel-art
-  // request the server charges 10 for, and a 15-19 balance submitted a DALL-E
-  // request the server then rejected for 20. Sheet and tileset already match
-  // TOKEN_COSTS (15/frame, 50) and are unchanged.
-  const tokenCost =
-    activeTab === 'single'
-      ? spriteTokenCost(style)
-      : activeTab === 'sheet'
-        ? frameCount * TOKEN_COSTS.sprite_sheet_cost_per_frame
-        : TOKEN_COSTS.tileset_generation;
+  const tokenCost = activeTab === 'single' ? 15 : activeTab === 'sheet' ? frameCount * 15 : 50;
   // Capability gate (#9117): blocked only on a positive "unavailable" report.
-  const gate = useGenerationGate('sprite-generation', activeTab === 'single' ? SPRITE_PROVIDER_KEY[resolveSpriteProvider(style)] : 'replicate');
+  const gate = useGenerationGate('sprite-generation');
   const canSubmit =
-    // `blocked` is false until the first /api/capabilities body lands, so
-    // without this a permanently-unavailable capability presented a live
-    // Generate button with no notice beside it (#9725 p8).
-    !gate.loading &&
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
@@ -119,18 +97,6 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
       const data = await response.json();
 
-      // A synchronously completed generation (the DALL-E sprite path) returns
-      // the finished image in the response body as `resultUrl` and a short,
-      // non-pollable jobId (#9734). Carry that `resultUrl` onto the job so the
-      // poller imports it directly instead of round-tripping a (possibly
-      // multi-MB base64) data URL through the status-poll query string. The job
-      // is still queued as `pending` so `useGenerationPolling` picks it up on
-      // the next render; its immediate poll short-circuits on the inline result.
-      const inlineResultUrl =
-        data.status === 'completed' && typeof data.resultUrl === 'string'
-          ? data.resultUrl
-          : undefined;
-
       // Add job to generation store
       addJob({
         id: crypto.randomUUID(),
@@ -143,16 +109,11 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         createdAt: Date.now(),
         usageId: data.usageId,
         durable: data.durable === true,
-        resultUrl: inlineResultUrl,
-        metadata: activeTab === 'single'
-          ? { backgroundRemoval: data.backgroundRemoval }
-          : activeTab === 'sheet'
+        metadata: activeTab === 'sheet'
           ? { frameCount, frameSize: size.split('x')[0] }
           : undefined,
       });
 
-      const warning = backgroundRemovalWarning(data.backgroundRemoval);
-      if (warning) toast.warning(warning);
       return true;
     });
 
@@ -223,7 +184,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
           {/* Prompt (all tabs) */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -250,16 +211,11 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Style (single and sheet) */}
           {(activeTab === 'single' || activeTab === 'sheet') && (
             <div>
-              {/* `htmlFor`/`id`: the label was not associated with the select, so
-                  a screen reader announced an unlabelled combobox and
-                  `getByLabelText` could not find it either (#9741, while
-                  correcting the style-dependent price below). */}
-              <label htmlFor={fieldId('generate-sprite-style')} className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+              <label className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
               <select
-                id={fieldId('generate-sprite-style')}
                 value={style}
                 onChange={(e) => setStyle(e.target.value as SpriteStyle)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="pixel-art">Pixel Art</option>
@@ -273,9 +229,8 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Size (single and sheet) */}
           {(activeTab === 'single' || activeTab === 'sheet') && (
             <div>
-              <label htmlFor={fieldId('size')} className="mb-1 block text-xs font-medium text-zinc-300">Size</label>
+              <label className="mb-1 block text-xs font-medium text-zinc-300">Size</label>
               <select
-                id={fieldId('size')}
                 value={size}
                 onChange={(e) => setSize(e.target.value as SpriteSize)}
                 disabled={isSubmitting || gate.blocked}
@@ -294,11 +249,10 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Frame count (sheet only) */}
           {activeTab === 'sheet' && (
             <div>
-              <label htmlFor={fieldId('frame-count')} className="mb-1 block text-xs font-medium text-zinc-300">
+              <label className="mb-1 block text-xs font-medium text-zinc-300">
                 Frame Count: {frameCount}
               </label>
               <input
-                id={fieldId('frame-count')}
                 type="range"
                 min="2"
                 max="8"
@@ -313,9 +267,8 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Tile size (tileset only) */}
           {activeTab === 'tileset' && (
             <div>
-              <label htmlFor={fieldId('tile-size')} className="mb-1 block text-xs font-medium text-zinc-300">Tile Size</label>
+              <label className="mb-1 block text-xs font-medium text-zinc-300">Tile Size</label>
               <select
-                id={fieldId('tile-size')}
                 value={tileSize}
                 onChange={(e) => setTileSize(Number(e.target.value) as 16 | 32 | 48 | 64)}
                 disabled={isSubmitting || gate.blocked}
@@ -332,9 +285,8 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Grid size (tileset only) */}
           {activeTab === 'tileset' && (
             <div>
-              <label htmlFor={fieldId('grid-size')} className="mb-1 block text-xs font-medium text-zinc-300">Grid Size</label>
+              <label className="mb-1 block text-xs font-medium text-zinc-300">Grid Size</label>
               <select
-                id={fieldId('grid-size')}
                 value={gridSize}
                 onChange={(e) => setGridSize(e.target.value as '4x4' | '8x8' | '16x16')}
                 disabled={isSubmitting || gate.blocked}

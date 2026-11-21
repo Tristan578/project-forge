@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useId } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Mic, Plus, Trash2, Play, Users } from 'lucide-react';
 import {
   useVoiceProfileStore,
@@ -154,7 +154,6 @@ function AddProfileForm({
       {/* Speaker selection */}
       {unmappedSpeakers.length > 0 ? (
         <select
-          aria-label="Speaker"
           value={speaker}
           onChange={(e) => setSpeaker(e.target.value)}
           className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none"
@@ -189,7 +188,6 @@ function AddProfileForm({
 
       {/* Voice selection */}
       <select
-        aria-label="Voice"
         value={voiceIdx}
         onChange={(e) => setVoiceIdx(Number(e.target.value))}
         className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none"
@@ -234,10 +232,6 @@ function ProfileRow({
   onSave: (updated: VoiceProfile) => void;
   onDelete: () => void;
 }) {
-  // useId, not literal ids: one ProfileRow renders per voice profile, so a
-  // literal id would repeat and every <label for> would hit the first row.
-  const baseId = useId();
-  const fieldId = (key: string) => `${baseId}-${key}`;
   const [voiceIdx, setVoiceIdx] = useState(
     () => VOICE_PRESETS.findIndex((v) => v.id === profile.voiceId) ?? 0
   );
@@ -275,9 +269,8 @@ function ProfileRow({
         <div className="space-y-2 bg-zinc-800/50 px-2 py-2">
           {/* Voice select */}
           <div>
-            <label htmlFor={fieldId('voice')} className="mb-0.5 block text-[10px] text-zinc-400">Voice</label>
+            <label className="mb-0.5 block text-[10px] text-zinc-400">Voice</label>
             <select
-              id={fieldId('voice')}
               value={voiceIdx}
               onChange={(e) => setVoiceIdx(Number(e.target.value))}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none"
@@ -293,11 +286,10 @@ function ProfileRow({
           {/* Stability slider */}
           <div>
             <div className="flex items-center justify-between">
-              <label htmlFor={fieldId('stability')} className="text-[10px] text-zinc-400">Stability</label>
+              <label className="text-[10px] text-zinc-400">Stability</label>
               <span className="text-[10px] text-zinc-400">{stability.toFixed(2)}</span>
             </div>
             <input
-              id={fieldId('stability')}
               type="range"
               min={0}
               max={1}
@@ -311,11 +303,10 @@ function ProfileRow({
           {/* Similarity boost slider */}
           <div>
             <div className="flex items-center justify-between">
-              <label htmlFor={fieldId('similarity')} className="text-[10px] text-zinc-400">Similarity</label>
+              <label className="text-[10px] text-zinc-400">Similarity</label>
               <span className="text-[10px] text-zinc-400">{similarityBoost.toFixed(2)}</span>
             </div>
             <input
-              id={fieldId('similarity')}
               type="range"
               min={0}
               max={1}
@@ -329,11 +320,10 @@ function ProfileRow({
           {/* Style slider */}
           <div>
             <div className="flex items-center justify-between">
-              <label htmlFor={fieldId('style')} className="text-[10px] text-zinc-400">Style</label>
+              <label className="text-[10px] text-zinc-400">Style</label>
               <span className="text-[10px] text-zinc-400">{style.toFixed(2)}</span>
             </div>
             <input
-              id={fieldId('style')}
               type="range"
               min={0}
               max={1}

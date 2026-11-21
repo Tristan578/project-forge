@@ -7,8 +7,6 @@ import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const tokenConfigSchema = z.object({
   type: z.literal('token_config'),
@@ -32,7 +30,7 @@ const economicsConfigSchema = z.discriminatedUnion('type', [
   tierConfigSchema,
 ]);
 
-async function PUT_impl(request: NextRequest) {
+export async function PUT(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     validate: economicsConfigSchema,
@@ -85,10 +83,6 @@ async function PUT_impl(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error) {
     captureException(error, { route: '/api/admin/economics/config', method: 'PUT' });
-    return redactedJson({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const PUT = withEgressGuard(PUT_impl);

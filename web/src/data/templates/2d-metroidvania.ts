@@ -19,6 +19,7 @@ export const METROIDVANIA_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'metroidvania', 'exploration', 'abilities'],
 
+  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,
@@ -479,11 +480,10 @@ let grounded = false;
 let canDoubleJump = false;
 let hasDoubleJump = false;
 
-forge.physics2d.onCollisionEnter((event) => {
-  const otherState = forge.getTransform(event.otherEntityId);
-  const myState = forge.getTransform(entityId);
-  // position is [x, y, z]. Anything centred below us is something we landed on.
-  if (otherState && myState && otherState.position[1] < myState.position[1] - 0.3) {
+forge.physics2d.onCollisionEnter((other) => {
+  const otherPos = forge.transform.getPosition(other);
+  const myPos = forge.transform.getPosition();
+  if (otherPos && myPos && otherPos.y < myPos.y - 0.3) {
     grounded = true;
   }
 });
@@ -492,22 +492,20 @@ forge.physics2d.onCollisionExit(() => {
   grounded = false;
 });
 
-function onUpdate(dt) {
+forge.onUpdate((dt) => {
   let vx = 0;
-  if (forge.input.isPressed('move_left')) vx = -SPEED;
-  if (forge.input.isPressed('move_right')) vx = SPEED;
+  if (forge.input.isKeyDown('ArrowLeft') || forge.input.isKeyDown('a')) vx = -SPEED;
+  if (forge.input.isKeyDown('ArrowRight') || forge.input.isKeyDown('d')) vx = SPEED;
 
-  // setVelocityX, not setVelocity: writing the vertical component every frame
-  // would cancel gravity and erase the jump impulse from the frame before.
-  forge.physics2d.setVelocityX(entityId, vx);
+  forge.physics2d.setVelocityX(vx);
 
-  if (forge.input.justPressed('jump')) {
+  if (forge.input.isKeyPressed('Space') || forge.input.isKeyPressed('w')) {
     if (grounded) {
-      forge.physics2d.applyImpulse(entityId, 0, JUMP_FORCE);
+      forge.physics2d.applyImpulse(0, JUMP_FORCE);
       grounded = false;
       if (hasDoubleJump) canDoubleJump = true;
     } else if (canDoubleJump) {
-      forge.physics2d.applyImpulse(entityId, 0, JUMP_FORCE * 0.9);
+      forge.physics2d.applyImpulse(0, JUMP_FORCE * 0.9);
       canDoubleJump = false;
     }
   }
@@ -516,52 +514,48 @@ function onUpdate(dt) {
     hasDoubleJump = true;
   }
 
-  const state = forge.getTransform(entityId);
-  if (state && state.position[1] < -5) {
+  const pos = forge.transform.getPosition();
+  if (pos && pos.y < -5) {
     const savePos = forge.state.get('savePosition') || { x: 0, y: 1 };
-    forge.setPosition(entityId, savePos.x, savePos.y, 0);
-    forge.physics2d.setVelocity(entityId, 0, 0);
+    forge.transform.setPosition(savePos.x, savePos.y, 0);
+    forge.physics2d.setVelocity(0, 0);
   }
-}`,
+});`,
       enabled: true,
     },
     camera: {
       source: `// 2D Camera Follow
 const SMOOTH = 0.1;
 
-function onUpdate(dt) {
+forge.onUpdate((dt) => {
   const players = forge.scene.findByName('Player');
   if (players.length === 0) return;
 
-  const playerState = forge.getTransform(players[0]);
-  const camState = forge.getTransform(entityId);
-  if (!playerState || !camState) return;
+  const playerPos = forge.transform.getPosition(players[0]);
+  const camPos = forge.transform.getPosition();
+  if (!playerPos || !camPos) return;
 
-  const targetX = playerState.position[0];
-  const targetY = Math.max(2, playerState.position[1] + 1);
+  const targetX = playerPos.x;
+  const targetY = Math.max(2, playerPos.y + 1);
 
-  const newX = camState.position[0] + (targetX - camState.position[0]) * SMOOTH;
-  const newY = camState.position[1] + (targetY - camState.position[1]) * SMOOTH;
+  const newX = camPos.x + (targetX - camPos.x) * SMOOTH;
+  const newY = camPos.y + (targetY - camPos.y) * SMOOTH;
 
-  forge.setPosition(entityId, newX, newY, 10);
-}`,
+  forge.transform.setPosition(newX, newY, 10);
+});`,
       enabled: true,
     },
     ability_gate: {
       source: `// Ability Gate Check
-let opened = false;
-
-function onUpdate(dt) {
-  if (opened || !forge.state.get('hasDoubleJump')) return;
-  opened = true;
-
-  forge.setVisibility(entityId, false);
-  // Unconditional. There is no way to read an entity's components from a
-  // script, and none is needed: toggling physics off on an entity that has
-  // none is a no-op in the engine rather than an error. The opened latch is
-  // what keeps this from re-dispatching on every frame after the unlock.
-  forge.physics2d.setEnabled(entityId, false);
-}`,
+forge.onUpdate(() => {
+  if (forge.state.get('hasDoubleJump')) {
+    forge.setVisibility(entityId, false);
+    const phys = forge.scene.getComponent(entityId, 'physics');
+    if (phys) {
+      forge.physics.setEnabled(entityId, false);
+    }
+  }
+});`,
       enabled: true,
     },
     enemy_1: {
@@ -571,19 +565,20 @@ const START_X = 7;
 const RANGE = 3;
 let dir = -1;
 
-function onUpdate(dt) {
-  const state = forge.getTransform(entityId);
-  if (!state) return;
+forge.onUpdate((dt) => {
+  const pos = forge.transform.getPosition();
+  if (!pos) return;
 
-  const newX = state.position[0] + SPEED * dir * dt;
+  const newX = pos.x + SPEED * dir * dt;
   if (newX < START_X - RANGE) dir = 1;
   if (newX > START_X + RANGE) dir = -1;
 
-  forge.setPosition(entityId, newX, state.position[1], state.position[2]);
-}
+  forge.transform.setPosition(newX, pos.y, pos.z);
+});
 
-forge.physics2d.onCollisionEnter((event) => {
-  if (forge.scene.getEntityName(event.otherEntityId) === 'Player') {
+forge.physics2d.onCollisionEnter((other) => {
+  const name = forge.scene.getEntityName(other);
+  if (name === 'Player') {
     forge.state.set('playerHit', true);
   }
 });`,
@@ -596,19 +591,20 @@ const START_X = -8;
 const RANGE = 4;
 let dir = 1;
 
-function onUpdate(dt) {
-  const state = forge.getTransform(entityId);
-  if (!state) return;
+forge.onUpdate((dt) => {
+  const pos = forge.transform.getPosition();
+  if (!pos) return;
 
-  const newX = state.position[0] + SPEED * dir * dt;
+  const newX = pos.x + SPEED * dir * dt;
   if (newX < START_X - RANGE) dir = 1;
   if (newX > START_X + RANGE) dir = -1;
 
-  forge.setPosition(entityId, newX, state.position[1], state.position[2]);
-}
+  forge.transform.setPosition(newX, pos.y, pos.z);
+});
 
-forge.physics2d.onCollisionEnter((event) => {
-  if (forge.scene.getEntityName(event.otherEntityId) === 'Player') {
+forge.physics2d.onCollisionEnter((other) => {
+  const name = forge.scene.getEntityName(other);
+  if (name === 'Player') {
     forge.state.set('playerHit', true);
   }
 });`,
@@ -618,68 +614,53 @@ forge.physics2d.onCollisionEnter((event) => {
       source: `// Metroidvania Game Manager
 let mapProgress = 0;
 
-// Countdowns rather than setTimeout: the sandbox shadows the timer globals,
-// so a scheduled hide would never fire and the banner would stay on screen.
-let unlockTimer = -1;
-let savedTimer = -1;
-
-function onStart() {
+forge.onStart(() => {
   forge.ui.showText('map', 'Map: 0%', 5, 5, { fontSize: 18, color: '#00ffcc' });
   forge.ui.showText('abilities', 'Abilities: None', 5, 10, { fontSize: 16, color: '#ffaa00' });
   forge.ui.showText('hint', 'Explore to unlock double jump!', 5, 92, {
     fontSize: 14, color: '#aaa'
   });
 
-  forge.physics2d.onCollisionEnter((event) => {
-    if (forge.scene.getEntityName(event.entityId) !== 'Player') return;
-    const name = event.otherEntityName;
-    if (!name) return;
+  const players = forge.scene.findByName('Player');
+  if (players.length === 0) return;
 
+  forge.physics2d.onCollisionEnter(players[0], (other) => {
+    const name = forge.scene.getEntityName(other);
     if (name === 'AbilityPickup') {
       forge.state.set('hasDoubleJump', true);
-      forge.setVisibility(event.otherEntityId, false);
+      forge.setVisibility(other, false);
       forge.ui.updateText('abilities', 'Abilities: Double Jump');
       forge.ui.showText('unlock', 'Double Jump Unlocked!', 30, 50, {
         fontSize: 24, color: '#ff9900'
       });
-      unlockTimer = 2;
+      setTimeout(() => forge.ui.removeText('unlock'), 2000);
     }
-
-    if (name.indexOf('SavePoint_') === 0) {
-      const state = forge.getTransform(event.entityId);
-      if (state) {
-        forge.state.set('savePosition', { x: state.position[0], y: state.position[1] });
+    if (name && name.startsWith('SavePoint_')) {
+      const pos = forge.transform.getPosition(players[0]);
+      if (pos) {
+        forge.state.set('savePosition', { x: pos.x, y: pos.y });
         forge.ui.showText('saved', 'Progress Saved', 40, 50, {
           fontSize: 18, color: '#00ffcc'
         });
-        savedTimer = 1.5;
+        setTimeout(() => forge.ui.removeText('saved'), 1500);
         mapProgress = Math.min(100, mapProgress + 25);
         forge.ui.updateText('map', 'Map: ' + mapProgress + '%');
       }
     }
   });
-}
+});
 
-function onUpdate(dt) {
-  if (unlockTimer > 0) {
-    unlockTimer -= dt;
-    if (unlockTimer <= 0) { unlockTimer = -1; forge.ui.removeText('unlock'); }
-  }
-  if (savedTimer > 0) {
-    savedTimer -= dt;
-    if (savedTimer <= 0) { savedTimer = -1; forge.ui.removeText('saved'); }
-  }
-
+forge.onUpdate(() => {
   if (forge.state.get('playerHit')) {
     forge.state.set('playerHit', false);
     const savePos = forge.state.get('savePosition') || { x: 0, y: 1 };
     const players = forge.scene.findByName('Player');
     if (players.length > 0) {
-      forge.setPosition(players[0], savePos.x, savePos.y, 0);
+      forge.transform.setPosition(players[0], savePos.x, savePos.y, 0);
       forge.physics2d.setVelocity(players[0], 0, 0);
     }
   }
-}`,
+});`,
       enabled: true,
     },
   },

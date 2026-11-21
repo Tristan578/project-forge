@@ -79,12 +79,9 @@ yarn-error.log*
 web/.next/
 web/out/
 web/test-results/
-web/auth-results/
 web/playwright-report/
 web/playwright-report-crossbrowser/
 web/blob-report/
-# Journey evidence records + traces/videos (#10157), uploaded as an artifact
-web/journey-evidence/
 # Playwright MCP browser-session scratch output (console-*.log / page-*.yml)
 .playwright-mcp/
 
@@ -154,43 +151,3 @@ apps/docs/content/mcp/*.mdx
 .vercel
 .claude/.env-health-last-check
 .worktrees/
-
-# --- Machine artefacts that must never be committed (#9736 follow-up) ---
-# A literal `%SystemDrive%` directory appeared at the repo root: a Windows
-# environment variable written into a path by a tool running under a POSIX
-# shell, which does not expand it. It contained copies of Windows cache
-# databases. Ignored so a recurrence cannot be swept in by `git add -A`, and
-# named here so the next person to see one knows what it is.
-# ANCHORED TO THE REPO ROOT. Unanchored, git matches these at EVERY depth —
-# verified with `git check-ignore -v`, which reported a nested
-# `web/src/%USERPROFILE%/deep/file.txt` as ignored by this rule (found in
-# review). Nobody creates such a directory on purpose, so the practical risk is
-# small, but the incident this guards against happened at the root: a tool run
-# from the repo root wrote an unexpanded environment variable as a path.
-#
-# The narrower rule also fails in the safer direction. A tool run from a
-# SUBDIRECTORY now creates its `%VAR%` directory somewhere these patterns do not
-# cover, where it shows up in `git status` as an untracked oddity rather than
-# being silently ignored — visible is better than hidden for something that
-# should not exist at all.
-/%SystemDrive%/
-/%USERPROFILE%/
-/%LOCALAPPDATA%/
-
-# --- Codex CLI surface (#9745) -------------------------------------------------
-# `.codex/agents/*.toml`, `.codex/hooks.json` and the project skills under
-# `.agents/skills/` are GENERATED from `.claude/` by tools/agentic-sync/port.mjs
-# and are tracked; scripts/check-codex-port.sh fails a PR on any drift. They were
-# ignored here while a hand-copied port was unfinished (143 dead `.Codex/...`
-# references, 26 of 39 hooks wired); that quarantine is lifted by the change that
-# replaced the copies with the generator.
-#
-# `.codex/hooks/` holds ONE tracked file, the adapter that runs the shared
-# `.claude/hooks/*.sh` scripts under Codex. Everything else in it stays ignored:
-# the first port copied all of `.claude/hooks/` there, including a log, two lock
-# files, a `__pycache__` and a 400 KB `.bak`, and a checkout that still carries
-# those copies must not have them swept in by a `git add -A`. The scripts are
-# NOT duplicated any more — a second copy is a second thing to keep patched, and
-# three of the old copies had already fallen behind their originals (#9955).
-.codex/hooks/*
-!.codex/hooks/run-claude-hook.mjs

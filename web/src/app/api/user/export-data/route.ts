@@ -26,15 +26,13 @@ import {
   sellerProfiles,
   moderationAppeals,
 } from '@/lib/db/schema';
-import { redactedJson } from '@/lib/api/errors';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * GET /api/user/export-data
  * GDPR data export endpoint. Returns all user data as a JSON download.
  * Requires authentication. Sensitive fields (encrypted keys, hashes) are excluded.
  */
-async function GET_impl(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -302,13 +300,9 @@ async function GET_impl(req: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/user/export-data' });
-    return redactedJson(
+    return NextResponse.json(
       { error: 'Failed to export user data' },
       { status: 500 }
     );
   }
 }
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const GET = withEgressGuard(GET_impl);

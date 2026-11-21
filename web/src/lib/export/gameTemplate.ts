@@ -4,8 +4,6 @@ import type { MobileTouchConfig } from './touchControls';
 import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
 import { generateGameLoopFragment } from './gameLoopFragment';
 import { generateEventCallbackFragment } from './eventCallbackFragment';
-import { generateSceneLoadFragment } from './sceneLoadFragment';
-import { generatePerfHarnessBootstrap } from './perfHarnessFragment';
 
 export interface EmbeddedWasmData {
   jsBase64: string;     // JS glue code, base64-encoded
@@ -25,12 +23,6 @@ export interface GameTemplateOptions {
   orientationLock?: 'landscape' | 'portrait' | 'none';  // Screen orientation lock for mobile
   creatorTier?: string;    // User subscription tier — branding non-removable on starter/hobbyist
   hideBranding?: boolean;  // Only honored on creator/pro tiers
-  /**
-   * Project dimension. A scene file does not carry it, and sprites render only
-   * through the engine's 2D camera, which `set_project_type` creates — so a 2D
-   * game exported without it showed an empty viewport (#10013).
-   */
-  projectType?: '2d' | '3d';
 }
 
 /** Tiers where "Made with SpawnForge" branding cannot be removed. */
@@ -56,7 +48,7 @@ function generateBrandingHTML(): string {
 }
 
 export function generateGameHTML(options: GameTemplateOptions): string {
-  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig, embeddedWasm, orientationLock, creatorTier, hideBranding, projectType } = options;
+  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig, embeddedWasm, orientationLock, creatorTier, hideBranding } = options;
 
   const canvasStyle = resolution === 'responsive'
     ? 'width: 100vw; height: 100vh;'
@@ -115,30 +107,18 @@ export function generateGameHTML(options: GameTemplateOptions): string {
 
   ${embeddedWasm ? generateEmbeddedWasmScripts(embeddedWasm) : ''}
 
-  <script>
-    // Performance-capture harness: dormant unless the page is opened with
-    // ?forgePerf=1 (see perfHarnessFragment.ts, #10013).
-    ${generatePerfHarnessBootstrap()}
-  </script>
-
   <script type="module">
-    // Scene load helper shared with the ZIP exporter (sceneLoadFragment.ts).
-${generateSceneLoadFragment({ indent: '    ' })}
-
     // Detect WebGPU and load appropriate runtime
     async function init() {
-      if (window.__forgePerfHooks) window.__forgePerfHooks.initStart();
       try {
         const hasWebGPU = !!navigator.gpu;
-        let variant = hasWebGPU ? 'webgpu' : 'webgl2';
+        const variant = hasWebGPU ? 'webgpu' : 'webgl2';
         ${includeDebug ? "console.log('[Forge] Using ' + variant + ' renderer');" : ''}
 
         ${embeddedWasm ? generateEmbeddedWasmLoader(includeDebug) : generateExternalWasmLoader()}
-        if (window.__forgePerfHooks) window.__forgePerfHooks.backend(variant);
 
         // Initialize WASM — pass binary directly when embedded, otherwise auto-fetches
-        const wasmExports = await init_wasm(${embeddedWasm ? 'wasmBytes.buffer' : ''});
-        if (window.__forgePerfHooks) window.__forgePerfHooks.wasm(wasmExports);
+        await init_wasm(${embeddedWasm ? 'wasmBytes.buffer' : ''});
 
         // Set up event callback for script integration (shared with the ZIP
         // exporter — see eventCallbackFragment.ts).
@@ -147,18 +127,10 @@ ${generateSceneLoadFragment({ indent: '    ' })}
         // Initialize engine
         init_engine('game-canvas');
 
-        // Load scene. The engine reads payload.json and refuses commands until
-        // its first update, so this waits (bounded) and sends { json } —
-        // a bare JSON string was refused and the game started empty (#10013).
-        const sceneLoad = await __forgeLoadScene(handle_command, window.__forgeSceneData);
-        if (window.__forgePerfHooks) window.__forgePerfHooks.sceneLoad(sceneLoad);
-        // Project dimension: 2D games need the engine's 2D camera, the only one sprites render through.
-        ${projectType === '2d' ? "handle_command('set_project_type', { projectType: '2d' });" : ''}
-
-        // Auto-reduce quality on mobile (object payload, after the engine is ready)
+        // Auto-reduce quality on mobile
         var _isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         if (_isMobile && ${touchConfig?.autoReduceQuality ? 'true' : 'false'}) {
-          handle_command('set_quality', { preset: 'low' });
+          handle_command('set_quality', JSON.stringify({ preset: 'low' }));
         }
 
         // Orientation lock
@@ -166,6 +138,9 @@ ${generateSceneLoadFragment({ indent: '    ' })}
           ? `if (screen.orientation && screen.orientation.lock) { screen.orientation.lock('${orientationLock}').catch(function() {}); }`
           : '// No orientation lock requested'
         }
+
+        // Load scene
+        handle_command('load_scene', JSON.stringify(window.__forgeSceneData));
 
         // Auto-play
         setTimeout(function() {
@@ -180,7 +155,6 @@ ${generateGameLoopFragment({ handleCommand: 'handle_command', indent: '         
         }, 500);
 
       } catch (err) {
-        if (window.__forgePerfHooks) window.__forgePerfHooks.fail(err);
         console.error('[Forge] Failed to initialize:', err);
         document.querySelector('#loading p').textContent = 'Failed to load game. ' + err.message;
       }
@@ -230,9 +204,7 @@ function generateEmbeddedWasmLoader(includeDebug: boolean): string {
         var jsEl = document.getElementById('forge-wasm-' + variant + '-js');
         var wasmEl = document.getElementById('forge-wasm-' + variant + '-wasm');
         if (!jsEl && variant === 'webgpu') {
-          // Fall back to webgl2 if webgpu data not embedded — and say so, so
-          // the reported backend is the one that actually runs.
-          variant = 'webgl2';
+          // Fall back to webgl2 if webgpu data not embedded
           jsEl = document.getElementById('forge-wasm-webgl2-js');
           wasmEl = document.getElementById('forge-wasm-webgl2-wasm');
         }

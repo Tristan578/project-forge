@@ -8,14 +8,12 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
-const POST_impl = createGenerationHandler<
+export const POST = createGenerationHandler<
   { prompt: string; style: string },
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/skybox',
-  panel: 'generate-skybox',
   provider: DB_PROVIDER.texture,
   operation: 'skybox_generation',
   rateLimitKey: 'gen-skybox',
@@ -58,7 +56,3 @@ const POST_impl = createGenerationHandler<
     estimatedSeconds: 90,
   },
 });
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

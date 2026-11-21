@@ -4,12 +4,11 @@ import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { DB_PROVIDER } from '@/lib/config/providers';
-import { withEgressGuard } from '@/lib/security/egressGuard';
 
 type SpriteStyle = 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
 type SpriteSize = '32x32' | '64x64' | '128x128' | '256x256';
 
-const POST_impl = createGenerationHandler<
+export const POST = createGenerationHandler<
   {
     prompt: string;
     frameCount: number;
@@ -19,7 +18,6 @@ const POST_impl = createGenerationHandler<
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/sprite-sheet',
-  panel: 'generate-sprite',
   provider: DB_PROVIDER.sprite,
   operation: 'sprite_sheet_generation',
   rateLimitKey: 'gen-spritesheet',
@@ -86,7 +84,3 @@ const POST_impl = createGenerationHandler<
     estimatedSeconds: 40,
   },
 });
-
-// Egress guard (#9736): every response this route returns leaves through the
-// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
-export const POST = withEgressGuard(POST_impl);

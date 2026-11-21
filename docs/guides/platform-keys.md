@@ -1,17 +1,15 @@
 # Platform generation keys — provisioning and verification runbook (#9117)
 
 SpawnForge serves AI generation on two paths. **BYOK** users supply their own
-provider key in Settings for Anthropic, Meshy, Hyper3D or ElevenLabs and are
-never charged tokens. OpenAI, Replicate and remove.bg have no Settings key option. **Platform** users
+provider key in Settings and are never charged tokens. **Platform** users
 (Pro, or a paid tier with add-on tokens) are served by SpawnForge's own key
 for the provider and charged tokens per call. This runbook is about the
 second path: which keys exist, how to mint and set each one, and how to prove
 a key works before anyone is charged against it.
 
 Production status as of 2026-09-05: **no `PLATFORM_*` key is set**. Chat works
-because editor chat routes through the Vercel AI Gateway (`AI_GATEWAY_API_KEY`).
-That observation is historical and does not verify current deployment credentials
-or generation output. Existing direct-provider generation needs its own keys. The owner has
+because it routes through the Vercel AI Gateway (`AI_GATEWAY_API_KEY`). Every
+other platform-path generation request fails before charging. The owner has
 deliberately deferred provisioning until the rest of the launch checklist is
 green (#9117 comment, 2026-09-03), so this document is the ready-to-run
 procedure for that day, not a request to act now.
@@ -21,61 +19,23 @@ procedure for that day, not a request to act now.
 Every generate route runs through `createGenerationHandler`, which resolves
 the key **before** deducting tokens (`web/src/lib/keys/resolver.ts`,
 `getPlatformKey`). A missing key throws server-side, the user gets a generic
-500, and nothing is charged. Every status poller that resolves a key
-(`/api/generate/*/status`, except `music/status`, which never calls the
-resolver and returns a static terminal `failed` response) and the QStash
-`generation-complete` callback call the resolver directly as a zero-cost
-`STATUS_CHECK_OPERATION`. That call skips the tier and balance checks (the job
-was paid for at creation, and the route's `panelTierGateResponseForPoll` is its
-tier control: it admits a `starter` at `hobbyist` only when the account has
-held tokens, `monthlyTokens > 0 || addonTokens > 0`). The tier gate is not an
-ownership check. That decision is `verifyProviderJobOwner` in
-`web/src/lib/generate/jobOwnership.ts` (#10262): every status route that
-resolves a key calls it after `panelTierGateResponseForPoll` and before
-`resolveApiKey`, and answers 404 for a `jobId` not bound to the caller, so the
-platform key is never resolved for another user's job (`music/status` is the
-exception noted above — it resolves nothing). A missing platform key still
-throws at that resolver call too. For a capability that can never be provisioned,
+500, and nothing is charged. For a capability that can never be provisioned,
 three more layers keep it from reaching that point:
 
 | Layer | Where | Effect |
 |---|---|---|
-| Declared unavailable | `UNAVAILABLE_CAPABILITIES` in `web/src/lib/config/providers.ts` | The capability is refused everywhere regardless of keys. Today: none — the map is empty. `music` was the last entry until #9522 moved it to ElevenLabs; the machinery stays wired for the next unprovisionable capability. |
+| Declared unavailable | `UNAVAILABLE_CAPABILITIES` in `web/src/lib/config/providers.ts` | The capability is refused everywhere regardless of keys. Today: `music` (#9522). |
 | `/api/capabilities` | `web/src/app/api/capabilities/route.ts` | Reports `available:false` per capability; `unprovisionable:true`, a user-facing `hint` and the tracking `issue` for declared ones. A signed-in user's BYOK key counts. Always `Cache-Control: private`. |
-| Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; a declared capability's chat tool and its `forge.ai` wrapper (until #9522 this was `music`'s `generate_music` / `forge.ai.generateMusic`) | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
-| Route gate | `capability:` option on `createGenerationHandler` (step 1b, right after the panel tier gate) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
+| Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; the `generate_music` chat tool; `forge.ai.generateMusic` | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
+| Route gate | `capability:` option on `createGenerationHandler` (step 1a) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
 
-The health probe (`/api/health` → AI Providers) grades the same table this
-document decides from: since #9719 it and `/api/capabilities` both read
-`isCapabilityConfigured` in `web/src/lib/config/providers.ts`, so the two
-cannot disagree about what "configured" means. It grades the PLATFORM path
-only — a user's own key never makes it green, and its public `summary` says
-so.
-
-Deliberately unprovisioned capabilities can be listed explicitly in the server-only
-`HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES` deployment setting (comma-separated
-capability IDs). With no setting, missing keys are incident signals. Invalid IDs
-also disable suppression. Only when every missing capability appears in this
-list does the degraded entry carry `configurationOnly: true`, keeping that
-expected state out of overall health and the synthetic health monitor's
-alerting (there is no paging service — see
-`docs/operations/incident-response.md`).
-
-For the currently deferred asset providers, an operator may declare
-`model3d,texture,sfx,voice,music,sprite,bg_removal`. Music shares the ElevenLabs
-key after #9522 and must be included while that key is intentionally absent.
-This repository does not set the
-deployment value automatically. When provisioning a capability, remove its ID
-from the declaration in the same deployment. For example, provisioning Meshy
-requires removing both `model3d` and `texture`. A later missing Meshy key then
-changes overall health and is treated as an incident signal instead of being
-silently treated as intentional.
-An actual `down` verdict is never suppressed.
+The health probe (`/api/health` → AI Providers) is the subject of #9719 and
+is not evidence for anything in this document.
 
 ## Decision per capability
 
 Decided from `DIRECT_CAPABILITY_PROVIDER`, `PLATFORM_KEY_ENV`,
-`GATEWAY_CAPABILITIES` and `CAPABILITY_PROVIDER_OPTIONS` in
+`GATEWAY_CAPABILITIES` and `CAPABILITY_REQUIRED_PROVIDERS` in
 `web/src/lib/config/providers.ts` — the same tables
 `web/scripts/verify-platform-generation.ts` reads, so its `provider` and
 `route` columns match the "Provider" and "Route" columns here (the env var is
@@ -84,29 +44,18 @@ to mint" columns are this runbook's; keep them in step when the tables change.
 
 | Capability | Provider | Route | Env var | Decision | Where to mint |
 |---|---|---|---|---|---|
-| `chat`, `embedding`, `image` | Vercel AI Gateway | gateway | `AI_GATEWAY_API_KEY` | **Gateway credentials** — recorded in production on 2026-09-05; image/embedding consumer transport is not verified | Vercel dashboard → AI Gateway |
+| `chat`, `embedding`, `image` | Vercel AI Gateway | gateway | `AI_GATEWAY_API_KEY` | **Gateway** — already set in production | Vercel dashboard → AI Gateway |
 | `model3d`, `texture` (also skybox) | Meshy | platform-key | `PLATFORM_MESHY_KEY` | **Platform key** (owner) | https://www.meshy.ai/settings/api — shown once, prefix `msy_` |
-| `sfx`, `voice`, `music` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key; the one key covers all three | https://elevenlabs.io/app/settings/api-keys |
-| `sprite` (and pixel art) | Replicate or OpenAI, per operation | platform-key | `PLATFORM_REPLICATE_KEY` or `PLATFORM_OPENAI_KEY` | Pixel-art sprites, sprite sheets and tilesets use Replicate. Other single-sprite styles use OpenAI. The aggregate capability requires both; the dialog gates each selected operation independently. Provision both to support every operation. OpenAI and Replicate are not currently supported by user key setup; unavailable operations do not offer a Settings link. | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
+| `sfx`, `voice` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key | https://elevenlabs.io/app/settings/api-keys |
+| `music` | (Suno → ElevenLabs) | unavailable | — | **Unavailable** until #9522 lands; then covered by `PLATFORM_ELEVENLABS_KEY` | n/a — Suno has no public API |
+| `sprite` (and pixel art) | Replicate **and** OpenAI | platform-key x2 | `PLATFORM_REPLICATE_KEY` + `PLATFORM_OPENAI_KEY` | **Two platform keys** (owner): `/api/generate/sprite` resolves DALL-E 3 on OpenAI for every style except pixel-art (the dialog's and the chat tool's default) and Replicate SDXL for pixel-art. A Replicate-only environment still fails the default path. #9523 may later fold the OpenAI half into the gateway | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
 | `bg_removal` | remove.bg | platform-key | `PLATFORM_REMOVEBG_KEY` | **Platform key** (owner) | https://www.remove.bg/dashboard#api-key |
 
-The table describes the operator verification script, which grades advertised
-`GATEWAY_CAPABILITIES`. The resolver forces only image/embedding credentials
-through its narrower `RESOLVER_GATEWAY_CAPABILITIES`. This is credential
-preparation: no production image/embedding consumer uses the new resolver path
-yet. A future consumer must pair the key with a gateway endpoint/model adapter
-and use an OIDC-aware SDK for the empty-key sentinel; image integration remains
-tracked in #9818. A configured gate does not establish successful generation.
-
-`ANTHROPIC_API_KEY` serves a direct editor-chat backend and ALWAYS serves
-localization/pacing, even when a gateway key is present
-(https://console.anthropic.com/settings/keys); `PLATFORM_HYPER3D_KEY`
+Not in the table: `ANTHROPIC_API_KEY` is only a chat fallback when the gateway
+is bypassed (https://console.anthropic.com/settings/keys); `PLATFORM_HYPER3D_KEY`
 is BYOK-only and never read on the platform path.
 
-The local operator script grades gateway rows on an explicit `AI_GATEWAY_API_KEY`.
-Unlike the Vercel runtime capability gate, its credit-free account probe does not
-use OIDC authentication: an OIDC-only deployment can have credential readiness
-while this explicit-key probe reports `missing`. If the explicit key were
+The gateway rows are graded on `AI_GATEWAY_API_KEY` alone: if that key were
 ever removed from production the script reports them `missing` and never
 substitutes a direct Anthropic/OpenAI key, because the decision above is the
 gateway and a silent fallback would hide its absence.
@@ -178,7 +127,7 @@ The script prints one row per provider key a capability needs (`sprite` therefor
 | `missing` | the env var is not set; `detail` names where to mint it |
 | `unavailable` | declared in `UNAVAILABLE_CAPABILITIES`; never probed |
 
-Exit code is 1 when an offered capability has no verified path. Sprite is verified when either provider passes; both provider rows remain visible so a missing or failed alternative is not mistaken for a verified operation. The probes
+Exit code is 1 when any row is `missing` or `fail`; the summary line counts capabilities, and a multi-key capability is verified only when every one of its rows passed. The probes
 are `GET` calls to each vendor's account/balance endpoint (URLs and doc links
 in `PROVIDER_PROBES`); they cost nothing and prove authentication, not output.
 
@@ -198,7 +147,7 @@ Record each as a comment on #9117 with the deployment SHA.
 
 ## Related
 
-- #9522 — replaced Suno with ElevenLabs Music (landed; `music` now served by `PLATFORM_ELEVENLABS_KEY`)
+- #9522 — replace Suno with ElevenLabs Music (unblocks `music`)
 - #9523 — route more capabilities through `AI_GATEWAY_API_KEY`
 - #9719 — health probe must stop reporting green on key presence alone
 - `docs/features/ai-asset-generation.md` — user-facing feature reference

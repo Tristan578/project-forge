@@ -93,20 +93,18 @@ echo ""
 for rule in "${RULES[@]}"; do
   rel="${rule#"$REPO_ROOT"/}"
   case "$(basename "$rule")" in
-    bevy-api.md)        hint="Bevy 0.19 API, 0.16->0.19 migration, ECS limits, library APIs" ;;
+    bevy-api.md)        hint="Bevy 0.18 API, 0.16->0.18 migration, ECS limits, library APIs" ;;
     entity-snapshot.md) hint="EntityType, EntitySnapshot, history, selection events" ;;
     web-quality.md)     hint="ESLint rules, React patterns, Next.js constraints" ;;
     library-apis.md)    hint="csgrs, noise, terrain, texture pipeline, particles" ;;
     file-map.md)        hint="Engine + web structure, communication pattern" ;;
-    gotchas.md)         hint="Index of the five path-gated gotchas files" ;;
+    gotchas.md)         hint="Index of the four path-gated gotchas files" ;;
     gotchas-build-ci.md) hint="Build/CI, lockfiles, self-defense gates, npm audit, RSC boundary" ;;
     gotchas-web.md)     hint="Database, API & security, WASM/CDN, UI & frontend" ;;
     gotchas-engine.md)  hint="Engine & game loop: command wire, component carry, physics" ;;
     gotchas-ops.md)     hint="Claude Code config, infrastructure, enforcement hooks" ;;
-    gotchas-codex-port.md) hint="Generated Codex CLI surface: port.mjs --write, the drift gate, adding a hook" ;;
     agent-operations.md) hint="Agent SOPs: testing, committing, PR creation, dispatch" ;;
     hook-testing.md)    hint="Bash test conventions for .claude/hooks/__tests__" ;;
-    lessons-learned.md) hint="MANDATORY: anti-patterns from real bugs here (gates that check the wrong property, vacuous tests, unverified claims)" ;;
     *)                  hint="(no summary)" ;;
   esac
   echo "- ${rel} — ${hint}"

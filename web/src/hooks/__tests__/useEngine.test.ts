@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import {
   useEngine,
-  getActiveEngineBackend,
   resetEngine,
   recoverEngine,
   fetchWasmManifest,
@@ -124,23 +123,6 @@ describe('useEngine', () => {
     const { result } = renderHook(() => useEngine('forge-canvas'));
     expect(result.current.isReady).toBe(false);
     expect(result.current.error).toBeNull();
-  });
-
-  it('does not report the default backend when no engine is ready', () => {
-    expect(getActiveEngineBackend()).toBe('unknown');
-    resetEngine();
-    expect(getActiveEngineBackend()).toBe('unknown');
-  });
-
-  it('does not report a backend after loading fails', async () => {
-    window.__SKIP_ENGINE = true;
-    try {
-      const { result } = renderHook(() => useEngine('forge-canvas'));
-      await waitFor(() => expect(result.current.error).not.toBeNull());
-      expect(getActiveEngineBackend()).toBe('unknown');
-    } finally {
-      delete window.__SKIP_ENGINE;
-    }
   });
 
   it('returns a cleanup function from the loading useEffect', () => {
@@ -471,16 +453,5 @@ describe('guarded dispatch', () => {
 
     expect(engine.handle_command_batch).toHaveBeenCalledWith(commands);
     expect(result).toEqual({ success: true, results: [{ success: true }] });
-  });
-
-  it('marks a batch whose engine call threw, which a refused batch is not', () => {
-    // `handle_command_batch` runs the whole batch before serializing the
-    // answers, so a throw says nothing about which commands took effect.
-    // `threw` is the only thing separating that from a batch never sent.
-    const engine = fakeModule();
-    engine.handle_command_batch.mockImplementation(() => { throw new Error('serialize failed'); });
-
-    expect(dispatchGuardedBatch(engine, [{ command: 'new_scene' }]))
-      .toEqual({ success: false, results: [], threw: true });
   });
 });

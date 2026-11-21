@@ -47,19 +47,21 @@ export function usePointerLock(canvasId: string): void {
       if (document.pointerLockElement !== canvas) return;
       pendingDx += e.movementX;
       pendingDy += e.movementY;
-      rafId ??= requestAnimationFrame(() => {
-        rafId = null;
-        const wasm = getWasmModule();
-        if (wasm && (pendingDx !== 0 || pendingDy !== 0)) {
-          try {
-            wasm.handle_command('mouse_delta', { dx: pendingDx, dy: pendingDy });
-          } catch {
-            // Silently ignore command errors during mouse movement
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          const wasm = getWasmModule();
+          if (wasm && (pendingDx !== 0 || pendingDy !== 0)) {
+            try {
+              wasm.handle_command('mouse_delta', { dx: pendingDx, dy: pendingDy });
+            } catch {
+              // Silently ignore command errors during mouse movement
+            }
+            pendingDx = 0;
+            pendingDy = 0;
           }
-          pendingDx = 0;
-          pendingDy = 0;
-        }
-      });
+        });
+      }
     };
 
     canvas.addEventListener('click', requestLock);

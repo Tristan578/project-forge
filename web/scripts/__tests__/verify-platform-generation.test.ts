@@ -27,10 +27,6 @@ import {
   type PlanRow,
   type ProbeResult,
 } from '../verify-platform-generation.ts';
-import {
-  PROVIDER_CAPABILITIES,
-  isGatewayRoutedCapability,
-} from '../../src/lib/config/providers.ts';
 
 /** First row per capability (sprite has two - see the dedicated test). */
 function rows(env: Record<string, string | undefined>): Record<string, PlanRow> {
@@ -51,10 +47,11 @@ describe('buildPlan', () => {
     );
   });
 
-  it('routes music through the platform ElevenLabs key (#9522)', () => {
-    const r = rows({ PLATFORM_ELEVENLABS_KEY: 'x' });
-    expect(r.music.route).toBe('platform-key');
-    expect(r.music.configured).toBe(true);
+  it('routes music as unavailable regardless of keys', () => {
+    const r = rows({ PLATFORM_SUNO_KEY: 'x' });
+    expect(r.music.route).toBe('unavailable');
+    expect(r.music.configured).toBe(false);
+    expect(r.music.detail).toContain('#9522');
   });
 
   it('routes chat through the gateway when AI_GATEWAY_API_KEY is set', () => {
@@ -75,22 +72,6 @@ describe('buildPlan', () => {
       expect(r[cap].route, cap).toBe('platform-key');
       expect(r[cap].configured, cap).toBe(false);
     }
-  });
-
-  it('grades exactly the advertised gateway capabilities on the gateway key (#9523)', () => {
-    // The route the script assigns each capability must match the routing table
-    // the gateway backend advertises (isGatewayRoutedCapability → GATEWAY_CAPABILITIES), so
-    // AI_GATEWAY_API_KEY is evidence for image and embedding — not chat alone —
-    // The resolver uses a narrower list that excludes direct localization/pacing.
-    const r = rows({ AI_GATEWAY_API_KEY: 'gw' });
-    for (const cap of PROVIDER_CAPABILITIES) {
-      const expected = isGatewayRoutedCapability(cap) ? 'gateway' : 'platform-key';
-      expect(r[cap].route, cap).toBe(expected);
-    }
-    // Concretely: image and embedding are gateway-routed alongside chat.
-    expect(isGatewayRoutedCapability('image')).toBe(true);
-    expect(isGatewayRoutedCapability('embedding')).toBe(true);
-    expect(isGatewayRoutedCapability('sprite')).toBe(false);
   });
 
   it('reports a gateway-served capability as missing AI_GATEWAY_API_KEY rather than falling back to a direct key', () => {
@@ -145,9 +126,8 @@ describe('PROVIDER_PROBES', () => {
   });
 
   it('has no probe for providers that can never be served by a platform key', () => {
-    // Suno was removed entirely (#9522); hyper3d has no credit-free probe.
+    expect(PROVIDER_PROBES.suno).toBeNull();
     expect(PROVIDER_PROBES.hyper3d).toBeNull();
-    expect(Object.keys(PROVIDER_PROBES)).not.toContain('suno');
   });
 
   it('probes the gateway credits endpoint with Bearer auth', () => {
@@ -234,14 +214,12 @@ describe('runVerification', () => {
     expect(model3d?.detail).toContain('401');
   });
 
-  it('reports missing without a request when the key is absent, music included (#9522)', async () => {
+  it('reports missing without a request when the key is absent, and unavailable for music', async () => {
     const fetchImpl = okFetch();
     const results = await runVerification(buildPlan({}), { fetchImpl, env: {} });
     const byCap = Object.fromEntries(results.map((r) => [r.capability, r]));
     expect(byCap.model3d.status).toBe('missing');
-    // #9522: music now shares the ElevenLabs platform key, so with no key it is
-    // 'missing' like the other platform capabilities, not 'unavailable'.
-    expect(byCap.music.status).toBe('missing');
+    expect(byCap.music.status).toBe('unavailable');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -291,7 +269,7 @@ describe('summarize', () => {
     detail: '',
   });
 
-  it('counts a two-row capability (sprite) once, with both providers verified', () => {
+  it('counts a two-row capability (sprite) once, verified only when both rows pass', () => {
     const summary = summarize([
       row('sprite', 'replicate', 'pass'),
       row('sprite', 'openai', 'pass'),
@@ -300,13 +278,13 @@ describe('summarize', () => {
     expect(summary).toEqual({ offered: 2, verified: 2, unavailable: 0, failing: 0 });
   });
 
-  it('verifies sprite when one alternative passes and leaves the missing row visible', () => {
+  it('does not count a capability with one missing row as verified, and fails the run', () => {
     const summary = summarize([
       row('sprite', 'replicate', 'pass'),
       row('sprite', 'openai', 'missing'),
       row('model3d', 'meshy', 'pass'),
     ]);
-    expect(summary).toEqual({ offered: 2, verified: 2, unavailable: 0, failing: 0 });
+    expect(summary).toEqual({ offered: 2, verified: 1, unavailable: 0, failing: 1 });
   });
 
   it('keeps an unavailable capability out of offered, and counts fail and missing as failing', () => {

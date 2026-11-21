@@ -21,7 +21,7 @@ SpawnForge is a game engine. Game engines have exponential state spaces — enti
 | Functions | see `web/vitest.config.ts` | 100% | No untested exported functions |
 | Lines | see `web/vitest.config.ts` | 100% | Full line coverage |
 
-Aggregate thresholds live only in `web/vitest.config.ts` and ratchet upward automatically. Node and jsdom project configs choose environments; read the root config for enforced values.
+Thresholds live in `web/vitest.config.ts` and ratchet upward automatically (coverage-ratchet workflow), with `web/vitest.config.node.ts` kept in lockstep by the same ratchet (PF-996) — read the config for the current values rather than trusting any doc snapshot.
 
 **100% coverage does not mean 100% bug-free.** It means every line of code has been proven to execute without crashing. Edge cases, race conditions, and integration failures need additional targeted tests beyond coverage.
 
@@ -36,7 +36,7 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 
 ### Vitest Configuration
 - Workspace split: `web/vitest.config.node.ts` (environment: node — lib, stores, API routes) and `web/vitest.config.jsdom.ts` (environment: jsdom — components, hooks)
-- Root `web/vitest.config.ts` aggregates Node and jsdom projects and enforces coverage thresholds.
+- Standalone `web/vitest.config.ts` is what CI uses for coverage thresholds (workspace configs drop thresholds)
 - Coverage: from the repository root, run `cd web && npm run test:coverage` (bounded, 600s timeout — see `scripts/run-vitest-coverage.sh`) or `cd web && npm run test:coverage:changed` (fast, changed-files only, for local/nightly iteration). The full command enforces coverage thresholds locally; CI runs the same threshold checks in `.github/workflows/quality-gates.yml` (`test-web`).
 - Run specific: `npx vitest run myTestFile`
 
@@ -264,10 +264,10 @@ cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 | Suite | Command |
 |-------|---------|
 | `lint` | `cd web && npx eslint --max-warnings 0 .` |
-| `tsc` | `cd web && npx tsc --noEmit` (also run in `mcp-server`, `packages/ui` and `apps/docs` when you touch them — CI type-checks all four) |
+| `tsc` | `cd web && npx tsc --noEmit` |
 | `vitest` | `cd web && npx vitest run` |
 | `playwright` | `cd web && npx playwright test` (requires WASM build) |
-| `mcp` | `cd mcp-server && npx tsc --noEmit && npx vitest run` (vitest does not type-check) |
+| `mcp` | `cd mcp-server && npx vitest run` |
 | `coverage` | `cd web && npm run test:coverage` (bounded, 600s timeout) |
 
 ### Targeted (preferred during development — avoid full suite when only a few files changed)
@@ -318,5 +318,5 @@ Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX 
 - Workspace config: `web/vitest.workspace.ts` — splits into two environments:
   - `web/vitest.config.node.ts` (environment: node) — lib, stores, API routes
   - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
-- Root config: `web/vitest.config.ts` — aggregates projects and is the only auto-ratcheted coverage threshold authority.
+- Standalone config: `web/vitest.config.ts` — used by CI for coverage thresholds (auto-ratcheted, read the config for live values; `vitest.config.node.ts` thresholds are kept in lockstep by the ratchet)
 - Coverage report outputs to `web/coverage/`

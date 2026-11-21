@@ -12,9 +12,7 @@ TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
 pass() { echo "  PASS: $1"; }
-readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
-readonly -f fail
 
 make_stubs() {
   local dir="$1"
@@ -34,7 +32,6 @@ exit "${COVERAGE_EXIT:-0}"
 EOF
   chmod +x "$dir/timeout" "$dir/npx"
 }
-readonly -f make_stubs
 
 run_fixture() {
   local name="$1" output="$2" code="$3"
@@ -49,7 +46,6 @@ run_fixture() {
       COVERAGE_EXIT="$code" PATH="$fixture/bin:$PATH" bash "$RUNNER"
   ) 2>&1
 }
-readonly -f run_fixture
 
 echo "=== run-vitest-coverage.sh tests ==="
 
