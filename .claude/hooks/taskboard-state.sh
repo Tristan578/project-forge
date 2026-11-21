@@ -10,17 +10,22 @@
 _TB_HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 
-# Use the OS default database path — NOT .claude/taskboard.db (which creates an empty local copy)
-TB_DB="$HOME/Library/Application Support/taskboard/taskboard.db"
-# Try Portless URL first, fall back to direct port
-if curl -s --connect-timeout 1 "http://taskboard.localhost:1355/api/board" > /dev/null 2>&1; then
-    TB_API="http://taskboard.localhost:1355/api"
-else
-    TB_API="http://localhost:3010/api"
-fi
+# All clients share the verified taskboard runtime; IDs are machine-local.
+TB_PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
+TB_API="${TASKBOARD_API:-http://localhost:3010/api}"
+TB_DB=""
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
-export PROJECT_ID="01KMM9ZA6SBZ7RKJZJTZS9VR4R"
-export TEAM_ENGINEERING_ID="01KMR5E36TP59PRQA8GQEWJVM1"
+export PROJECT_ID=""
+export TEAM_ENGINEERING_ID=""
+
+tb_refresh_identity() {
+    [ -n "$TB_PYTHON" ] || return 1
+    local identity
+    identity=$("$TB_PYTHON" "$_TB_HOOKS_DIR/taskboard_runtime.py" identity) || return 1
+    PROJECT_ID=$(printf '%s' "$identity" | "$TB_PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["projectId"])') || return 1
+    TEAM_ENGINEERING_ID=$(printf '%s' "$identity" | "$TB_PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["teamId"])') || return 1
+    export PROJECT_ID TEAM_ENGINEERING_ID
+}
 
 # Known locations for the taskboard binary
 TB_BIN=""
@@ -50,40 +55,14 @@ tb_check_installed() {
 
 # Check if taskboard API is reachable
 tb_api_available() {
-    curl -s --connect-timeout 2 "$TB_API/board" > /dev/null 2>&1
+    curl -fsS --connect-timeout 2 "$TB_API/board" > /dev/null 2>&1
 }
 
 # Auto-start taskboard if binary exists but server is not running
 tb_auto_start() {
-    if tb_api_available; then
-        return 0  # already running
-    fi
-    if [ -z "$TB_BIN" ]; then
-        return 1  # no binary
-    fi
-    # Note: don't check for DB file existence — the binary creates it on first start.
-    # The OS default path is used (no --db flag), so the binary manages the DB location.
-
-    # Start in background — the binary daemonizes by default
-    # Start WITHOUT --db flag to use the OS default path (~/Library/Application Support/taskboard/)
-    # Do NOT use --db .claude/taskboard.db — that creates an empty local copy
-    (cd "$_TB_PROJECT_ROOT" && "$TB_BIN" start --port 3010) >/dev/null 2>&1
-
-    # Wait up to 5 seconds for it to come up
-    for i in 1 2 3 4 5; do
-        sleep 1
-        if tb_api_available; then
-            # HEALTH CHECK: verify the board actually has data.
-            # If ticket count is 0, the DB path is wrong (lesson #56).
-            TICKET_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(len(c.get('tickets',[])) for c in d.get('columns',[])) or len(d.get('tickets',[])))" 2>/dev/null || echo "0")
-            if [ "$TICKET_COUNT" = "0" ]; then
-                echo "[TASKBOARD WARNING] Board has 0 tickets — possible wrong DB path or sync needed." >&2
-                echo "[TASKBOARD WARNING] Try: python3 .claude/hooks/github_project_sync.py pull" >&2
-            fi
-            return 0
-        fi
-    done
-    return 1
+    [ -n "$TB_PYTHON" ] || return 1
+    "$TB_PYTHON" "$_TB_HOOKS_DIR/taskboard_runtime.py" start >/dev/null || return 1
+    tb_refresh_identity
 }
 
 # ---------------------------------------------------------------------------
@@ -92,11 +71,13 @@ tb_auto_start() {
 
 # Get the full board as JSON
 tb_get_board() {
-    curl -s --connect-timeout 3 "$TB_API/board" 2>/dev/null
+    [ -n "$PROJECT_ID" ] || tb_refresh_identity || return 1
+    curl -fsS --connect-timeout 3 "$TB_API/board" | "$TB_PYTHON" -c 'import json,sys; b=json.load(sys.stdin); [c.update(tickets=[t for t in c.get("tickets", []) if t.get("projectId")==sys.argv[1]]) for c in b.get("columns", [])]; print(json.dumps(b))' "$PROJECT_ID"
 }
 
 # Get tickets by status
 tb_get_tickets() {
+    [ -n "$PROJECT_ID" ] || tb_refresh_identity || return 1
     local status="${1:-}"
     local url="$TB_API/tickets?project=$PROJECT_ID"
     if [ -n "$status" ]; then
@@ -108,14 +89,17 @@ tb_get_tickets() {
 # Get a single ticket
 tb_get_ticket() {
     local ticket_id="$1"
-    curl -s --connect-timeout 3 "$TB_API/tickets/$ticket_id" 2>/dev/null
+    [ -n "$PROJECT_ID" ] || tb_refresh_identity || return 1
+    curl -fsS --connect-timeout 3 "$TB_API/tickets/$ticket_id" | "$TB_PYTHON" -c 'import json,sys; t=json.load(sys.stdin); sys.exit(1) if t.get("projectId") != sys.argv[1] else print(json.dumps(t))' "$PROJECT_ID"
 }
 
 # Move a ticket to a new status
 tb_move_ticket() {
     local ticket_id="$1"
     local status="$2"
-    curl -s -X POST "$TB_API/tickets/$ticket_id/move" \
+    tb_get_ticket "$ticket_id" >/dev/null || return 1
+    case "$status" in todo|in_progress|done) ;; *) return 1 ;; esac
+    curl -fsS -X POST "$TB_API/tickets/$ticket_id/move" \
         -H "Content-Type: application/json" \
         -d "{\"status\": \"$status\"}" 2>/dev/null
 }
@@ -161,7 +145,7 @@ tb_board_summary() {
         return 1
     fi
 
-    echo "$board" | python3 -c "
+    echo "$board" | "$TB_PYTHON" -c "
 import sys, json, os
 try:
     project_id = os.environ.get('PROJECT_ID', '')
@@ -193,7 +177,7 @@ tb_check_stale() {
         return 1
     fi
 
-    echo "$board" | python3 -c "
+    echo "$board" | "$TB_PYTHON" -c "
 import sys, json, os
 from datetime import datetime, timezone
 
@@ -243,7 +227,7 @@ tb_validate_ticket() {
         return 1
     fi
 
-    echo "$ticket" | python3 -c "
+    echo "$ticket" | "$TB_PYTHON" -c "
 import sys, json, re
 
 t = json.load(sys.stdin)
@@ -319,7 +303,7 @@ tb_check_consistency() {
         return 1
     fi
 
-    echo "$tickets" | python3 -c "
+    echo "$tickets" | "$TB_PYTHON" -c "
 import sys, json
 
 tickets = json.load(sys.stdin)
@@ -369,7 +353,7 @@ tb_suggest_work() {
         return 1
     fi
 
-    echo "$board" | python3 -c "
+    echo "$board" | "$TB_PYTHON" -c "
 import sys, json, os
 
 project_id = os.environ.get('PROJECT_ID', '')

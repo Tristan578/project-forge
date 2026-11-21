@@ -1,0 +1,187 @@
+#!/bin/bash
+# Pre-push quality gate — runs lint, TypeScript, and targeted tests
+# for files changed in the current branch before allowing a push.
+#
+# This hook is triggered by Claude Code's PreToolUse hook on Bash
+# commands that contain "git push". It catches the most common
+# agent-produced regressions before they reach CI.
+#
+# Exit 0 = allow push, Exit 2 = block push with reason
+
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+
+# Only gate git push commands
+if ! echo "$COMMAND" | grep -qE 'git push'; then
+  exit 0
+fi
+
+# Skip quality gate for force-pushes of non-current branches (e.g. rebased PR branches).
+# The tsc check runs against current node_modules which may not match the pushed branch's deps.
+if echo "$COMMAND" | grep -qE '\-\-force|\-\-force-with-lease'; then
+  exit 0
+fi
+
+PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$PROJECT_DIR" ]; then
+  exit 0
+fi
+
+WEB_DIR="$PROJECT_DIR/web"
+if [ ! -d "$WEB_DIR" ]; then
+  exit 0
+fi
+
+cd "$WEB_DIR"
+
+# Determine which files changed vs main
+CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null || echo "")
+
+if [ -z "$CHANGED_FILES" ]; then
+  exit 0
+fi
+
+ERRORS=""
+
+# 1. TypeScript check (fast, catches type errors from merge conflicts)
+# Retries once on Node 25.x JIT segfaults (exit codes 139/134/136 or
+# 'libnode' appearing in output, which indicates a V8 JIT crash).
+if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
+  TSC_BIN="$WEB_DIR/node_modules/.bin/tsc"
+  if [ ! -x "$TSC_BIN" ]; then exit 0; fi
+
+  run_tsc() {
+    TSC_OUTPUT=$(set +e; "$TSC_BIN" --noEmit 2>&1; echo "___TSC_RC___:$?") || true
+    TSC_EXIT=$(echo "$TSC_OUTPUT" | grep -o '___TSC_RC___:[0-9]*' | cut -d: -f2)
+    TSC_OUTPUT=$(echo "$TSC_OUTPUT" | grep -v '___TSC_RC___:')
+  }
+
+  is_jit_segfault() {
+    local exit_code="$1"
+    local output="$2"
+    # Signal exits: 139=SIGSEGV, 134=SIGABRT, 136=SIGFPE
+    if [ "$exit_code" = "139" ] || [ "$exit_code" = "134" ] || [ "$exit_code" = "136" ]; then
+      return 0
+    fi
+    # libnode in the output indicates a Node runtime crash (V8 JIT)
+    if echo "$output" | grep -q 'libnode'; then
+      return 0
+    fi
+    return 1
+  }
+
+  # Scope tsc errors to files changed in this branch only.
+  # A full `tsc --noEmit` reports ALL project errors including pre-existing ones
+  # from main (847+ as of 2026-04-04). We only want to block on NEW errors
+  # introduced by the current branch's changes.
+  CHANGED_TS=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
+  if [ -z "$CHANGED_TS" ]; then
+    true  # No TS files changed, skip tsc
+  else
+    run_tsc
+    if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+      echo "[pre-push] WARNING: tsc crashed (Node JIT segfault, likely Node 25.x V8 bug). Retrying once..." >&2
+      run_tsc
+    fi
+
+    if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+      echo "[pre-push] WARNING: tsc crashed twice (signal exit / libnode). Allowing push — CI (Node 20) will catch real errors." >&2
+    elif [ "$TSC_EXIT" != "0" ] && [ -n "$TSC_EXIT" ]; then
+      # Filter tsc output to only show errors in files changed by this branch.
+      # This avoids blocking on pre-existing errors from main.
+      BRANCH_ERRORS=""
+      while IFS= read -r changed_file; do
+        [ -z "$changed_file" ] && continue
+        ESCAPED_FILE=$(printf '%s' "$changed_file" | sed 's/[.[\*^$()+?{}|]/\\&/g')
+        FILE_ERRORS=$(echo "$TSC_OUTPUT" | grep "^${ESCAPED_FILE}(" || true)
+        if [ -n "$FILE_ERRORS" ]; then
+          BRANCH_ERRORS="${BRANCH_ERRORS}${FILE_ERRORS}
+"
+        fi
+      done <<< "$CHANGED_TS"
+
+      if [ -n "$BRANCH_ERRORS" ]; then
+        echo "$BRANCH_ERRORS" | tail -10 >&2
+        ERRORS="${ERRORS}TypeScript errors found in changed files. "
+      fi
+    fi
+  fi
+fi
+
+# 2. ESLint on changed files only (fast, ~2-3s per file)
+# Filter to files that actually exist on disk (excludes deleted files in the diff)
+TS_FILES_RAW=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
+TS_FILES=""
+while IFS= read -r f; do
+  [ -n "$f" ] && [ -f "$WEB_DIR/$f" ] && TS_FILES="${TS_FILES} ${f}"
+done <<< "$TS_FILES_RAW"
+TS_FILES=$(echo "$TS_FILES" | xargs)
+if [ -n "$TS_FILES" ]; then
+  # shellcheck disable=SC2086
+  ESLINT_BIN="$WEB_DIR/node_modules/.bin/eslint"
+  if [ ! -x "$ESLINT_BIN" ]; then exit 0; fi
+  LINT_OUTPUT=$("$ESLINT_BIN" --max-warnings 0 $TS_FILES 2>&1) || {
+    echo "$LINT_OUTPUT" | tail -10 >&2
+    ERRORS="${ERRORS}ESLint warnings/errors found. "
+  }
+fi
+
+# 3. Run panelRegistry structural test (catches #1 agent bug)
+if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
+  VITEST_BIN="$WEB_DIR/node_modules/.bin/vitest"
+  if [ ! -x "$VITEST_BIN" ]; then exit 0; fi
+  TEST_OUTPUT=$("$VITEST_BIN" run src/lib/workspace/__tests__/panelRegistry.test.ts 2>&1) || {
+    echo "$TEST_OUTPUT" | tail -10 >&2
+    ERRORS="${ERRORS}panelRegistry structural test failed. "
+  }
+fi
+
+# 4. Lockfile sync check (catches workspace/dep changes that break npm ci in CI)
+if echo "$CHANGED_FILES" | grep -qE 'package\.json|package-lock\.json'; then
+  cd "$PROJECT_DIR"
+  LOCKFILE_OUTPUT=$(npm ci --dry-run 2>&1) || {
+    # Only block on actual lockfile mismatch — registry outages or auth errors
+    # should not prevent pushes with a misleading "out of sync" message.
+    if echo "$LOCKFILE_OUTPUT" | grep -qiE 'package-lock\.json|Missing:|Invalid:|out of sync|EUSAGE'; then
+      echo "[pre-push] BLOCKED: package-lock.json is out of sync with package.json." >&2
+      echo "$LOCKFILE_OUTPUT" | grep -iE "Missing:|EUSAGE|out of sync|Invalid:" | head -5 >&2
+      echo "[pre-push] Fix: rm -rf node_modules package-lock.json && npm install" >&2
+      ERRORS="${ERRORS}Lockfile out of sync — npm ci will fail in CI. "
+    else
+      echo "[pre-push] WARNING: npm ci --dry-run failed (possibly registry/network issue). Allowing push." >&2
+    fi
+  }
+  cd "$WEB_DIR"
+fi
+
+# 5. Magic constants check (warnings only — does not block push)
+MAGIC_CHECK="$PROJECT_DIR/web/scripts/check-magic-constants.sh"
+if [ -x "$MAGIC_CHECK" ]; then
+  bash "$MAGIC_CHECK" 2>&1 || true
+fi
+
+# 6. Warn if no changeset exists for this branch (non-blocking)
+# Run from project root so the .changeset/ path resolves correctly
+cd "$PROJECT_DIR"
+# Determine base ref — origin/main may not exist in forks or shallow clones
+CHANGESET_BASE=""
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+  CHANGESET_BASE="origin/main"
+elif git rev-parse --verify main >/dev/null 2>&1; then
+  CHANGESET_BASE="main"
+fi
+if [ -n "$CHANGESET_BASE" ]; then
+  CHANGESET_FILES=$(git diff --name-only --diff-filter=A "${CHANGESET_BASE}...HEAD" -- '.changeset/*.md' 2>/dev/null | grep -v 'README.md' || true)
+  if [ -z "$CHANGESET_FILES" ]; then
+    echo "[pre-push] WARNING: No changeset found for this branch. Run 'npx changeset' to add one before creating a PR." >&2
+  fi
+fi
+
+if [ -n "$ERRORS" ]; then
+  echo "${ERRORS}" >&2
+  exit 2
+fi
+
+exit 0
