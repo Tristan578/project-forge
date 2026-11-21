@@ -115,8 +115,99 @@ const ENGINE_AMBIENT_DEFAULTS = { color: [1.0, 1.0, 1.0], brightness: 300.0 } as
 
 /** The `InputMap` shape the engine deserialises from a scene file. */
 interface EngineInputBindings {
-  actions: Record<string, unknown>;
+  actions: Record<string, EngineActionDef>;
   preset: string | null;
+}
+
+/**
+ * `ActionDef` as `engine/src/core/input.rs` deserialises it.
+ *
+ * THIS IS NOT THE SHAPE A TEMPLATE WRITES, and conflating the two is a silent
+ * total failure rather than a partial one. `InputBinding` — what
+ * `GameTemplate.sceneData.inputBindings` is typed as, and what the editor's
+ * store holds — is `{ actionName, actionType: 'digital', sources: ['KeyG'] }`.
+ * The engine wants `{ name, actionType: { type: 'Digital' }, sources: [{ type:
+ * 'Key', value: 'KeyG' }], deadZone }`: different key for the name, an
+ * internally-tagged enum for the type, and tagged enums for the sources.
+ *
+ * Passing the web shape through unconverted fails `SceneFile` deserialisation,
+ * and `apply_scene_load` logs and returns on a payload it cannot read — so the
+ * ENTIRE template loads nothing, silently, because one binding was declared.
+ * The engine's own converter is `handle_set_input_binding`
+ * (`core/commands/transform.rs`); this mirrors it, and
+ * `templateSceneFile.test.ts` pins the output against the Rust field names
+ * rather than against what this file happens to emit.
+ */
+interface EngineActionDef {
+  name: string;
+  actionType: { type: 'Digital' } | { type: 'Axis'; positive: EngineSource[]; negative: EngineSource[] };
+  sources: EngineSource[];
+  deadZone: number;
+}
+
+type EngineSource = { type: 'Key'; value: string } | { type: 'MouseButton'; value: string };
+
+/** The three names `handle_set_input_binding` treats as mouse buttons. */
+const MOUSE_BUTTONS = new Set(['Left', 'Right', 'Middle']);
+
+/**
+ * One key code as the engine's tagged `InputSource`.
+ *
+ * The engine decides mouse-vs-key by NAME, not by a separate field
+ * (`transform.rs`: `if s == "Left" || s == "Right" || s == "Middle"`), so this
+ * has to make the same call or a template binding the left mouse button gets a
+ * key named "Left" that no keyboard has.
+ */
+function toEngineSource(code: string): EngineSource {
+  return MOUSE_BUTTONS.has(code)
+    ? { type: 'MouseButton', value: code }
+    : { type: 'Key', value: code };
+}
+
+/** One `InputBinding` from a template or the store, as the engine's `ActionDef`. */
+function toEngineActionDef(name: string, binding: Record<string, unknown>): EngineActionDef | null {
+  const actionName = typeof binding.actionName === 'string' && binding.actionName !== ''
+    ? binding.actionName
+    : name;
+  const sources = Array.isArray(binding.sources)
+    ? binding.sources.filter((v): v is string => typeof v === 'string')
+    : [];
+  const positive = Array.isArray(binding.positiveKeys)
+    ? binding.positiveKeys.filter((v): v is string => typeof v === 'string')
+    : [];
+  const negative = Array.isArray(binding.negativeKeys)
+    ? binding.negativeKeys.filter((v): v is string => typeof v === 'string')
+    : [];
+  const deadZone = typeof binding.deadZone === 'number' && Number.isFinite(binding.deadZone)
+    ? binding.deadZone
+    : 0.1;
+
+  if (binding.actionType === 'axis') {
+    // An axis with neither direction bound is an action that can never fire.
+    // Refusing it here names the template in the failure; letting it through
+    // ships a control the creator will find dead in play.
+    if (positive.length === 0 && negative.length === 0) return null;
+    return {
+      name: actionName,
+      actionType: {
+        type: 'Axis',
+        positive: positive.map(toEngineSource),
+        negative: negative.map(toEngineSource),
+      },
+      // Ignored for an axis by the engine, and sent empty rather than
+      // duplicated so nothing suggests a second binding that does nothing.
+      sources: [],
+      deadZone,
+    };
+  }
+
+  if (sources.length === 0) return null;
+  return {
+    name: actionName,
+    actionType: { type: 'Digital' },
+    sources: sources.map(toEngineSource),
+    deadZone,
+  };
 }
 
 /**
@@ -156,8 +247,23 @@ function buildInputBindings(declared: unknown): EngineInputBindings | undefined 
 
   if (Object.keys(actions).length === 0) return undefined;
 
+  // CONVERTED, not forwarded. See `EngineActionDef` above: the shape a template
+  // writes and the shape the engine reads share no field names, and sending the
+  // wrong one fails the whole scene file rather than one binding.
+  const converted: Record<string, EngineActionDef> = {};
+  for (const [name, binding] of Object.entries(actions)) {
+    if (binding === null || typeof binding !== 'object') continue;
+    const def = toEngineActionDef(name, binding as Record<string, unknown>);
+    if (def !== null) converted[name] = def;
+  }
+
+  // Every declared binding was unusable. That is "no opinion" again rather than
+  // "bind nothing": shipping an empty map here would silence the keyboard on the
+  // strength of a typo.
+  if (Object.keys(converted).length === 0) return undefined;
+
   const preset = typeof source.preset === 'string' ? source.preset : null;
-  return { actions, preset };
+  return { actions: converted, preset };
 }
 
 export interface TemplateSceneFile {

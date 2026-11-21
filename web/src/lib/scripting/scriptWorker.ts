@@ -39,11 +39,25 @@ interface EntityInfo {
   currentFrame?: number;
 }
 
+interface PointerState {
+  /** Cursor position in viewport pixels, or null when it is off-window. */
+  screen: [number, number] | null;
+  /** World position of viewport pixel (0, 0). */
+  worldOrigin: [number, number];
+  /**
+   * World units per viewport pixel. `y` is normally NEGATIVE, and a `[0, 0]`
+   * scale means no conversion is available — there is no 2D camera, or its
+   * viewport is not ready — rather than that every point maps to the origin.
+   */
+  worldScale: [number, number];
+}
+
 interface InputState {
   pressed: Record<string, boolean>;
   justPressed: Record<string, boolean>;
   justReleased: Record<string, boolean>;
   axes: Record<string, number>;
+  pointer?: PointerState;
 }
 
 interface EngineCommand {
@@ -83,7 +97,11 @@ interface Physics2dVelocityState {
 let pendingCommands: EngineCommand[] = [];
 let entityStates: Record<string, EntityState> = {};
 let entityInfos: Record<string, EntityInfo> = {};
-let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+const NO_POINTER: PointerState = { screen: null, worldOrigin: [0, 0], worldScale: [0, 0] };
+
+let currentInput: InputState = {
+  pressed: {}, justPressed: {}, justReleased: {}, axes: {}, pointer: NO_POINTER,
+};
 const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
 // Touch capability is sent from the main thread in the 'init' message.
@@ -439,6 +457,35 @@ function buildForgeApi(scriptEntityId: string) {
       justPressed: (action: string) => !!currentInput.justPressed[action],
       justReleased: (action: string) => !!currentInput.justReleased[action],
       getAxis: (action: string) => currentInput.axes[action] ?? 0,
+      /**
+       * Cursor position in viewport pixels, or null when it is off-window.
+       *
+       * NULL IS A REAL ANSWER, not a failure. A script that treats it as
+       * `{x: 0, y: 0}` puts every off-window frame at the top-left corner,
+       * which reads as a click there.
+       */
+      getMousePosition: (): { x: number; y: number } | null => {
+        const screen = currentInput.pointer?.screen;
+        if (!screen) return null;
+        return { x: screen[0], y: screen[1] };
+      },
+      /**
+       * Is a mouse button held?
+       *
+       * A THIN NAME OVER THE ACTION SYSTEM, deliberately. The buttons are bound
+       * to `action_primary` and `action_secondary` in the default map, so a
+       * creator can rebind them — to a key, to a gamepad face button, to
+       * nothing — and a script written against this keeps working. Reading the
+       * raw button instead would be the one input path a creator could not
+       * remap, in an engine whose whole input model is that they can.
+       *
+       * 0 is the primary button and 1 the secondary, matching the browser's own
+       * numbering so a script author does not have to learn a second one.
+       */
+      isMousePressed: (button?: number): boolean => {
+        const action = button === 1 ? 'action_secondary' : 'action_primary';
+        return !!currentInput.pressed[action];
+      },
       isTouchDevice: () => {
         // Touch capability is derived from the main thread's init message.
         // Workers cannot reliably access navigator.maxTouchPoints — it may be
@@ -941,6 +988,29 @@ function buildForgeApi(scriptEntityId: string) {
       setTarget: (eid: string) => {
         (self as unknown as Worker).postMessage({ type: 'camera_set_target', entityId: eid });
       },
+      /**
+       * Convert a point in viewport pixels to 2D world space.
+       *
+       * The engine sends the affine every tick rather than answering one point,
+       * so this works for any screen position — a click, a drag corner, a
+       * minimap hit test — and not just wherever the cursor happens to be.
+       *
+       * Returns null when there is no conversion to make: no 2D camera, or its
+       * viewport is not ready this frame. Answering `{x: 0, y: 0}` there would
+       * put every click at the world origin, which is the kind of plausible
+       * wrong answer that is worse than none.
+       */
+      screenToWorld: (screenX: number, screenY: number): { x: number; y: number } | null => {
+        const pointer = currentInput.pointer;
+        if (!pointer) return null;
+        const [sx, sy] = pointer.worldScale;
+        if (sx === 0 && sy === 0) return null;
+        if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return null;
+        return {
+          x: pointer.worldOrigin[0] + screenX * sx,
+          y: pointer.worldOrigin[1] + screenY * sy,
+        };
+      },
       shake: (intensity: number, duration: number) => {
         (self as unknown as Worker).postMessage({ type: 'camera_shake', intensity, duration });
       },
@@ -1313,7 +1383,9 @@ self.onmessage = (e: MessageEvent) => {
       clearPendingAsyncRequests('Script re-initialized');
       entityStates = msg.entities || {};
       entityInfos = msg.entityInfos || {};
-      currentInput = msg.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+      currentInput = msg.inputState || {
+        pressed: {}, justPressed: {}, justReleased: {}, axes: {}, pointer: NO_POINTER,
+      };
       tilemapStates = msg.tilemapStates || {};
       skeletonStates = msg.skeletonStates || {};
       physics2dVelocities = msg.physics2dVelocities || {};

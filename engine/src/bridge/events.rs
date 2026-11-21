@@ -564,6 +564,11 @@ pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String,
         just_pressed: std::collections::HashMap<String, bool>,
         just_released: std::collections::HashMap<String, bool>,
         axes: std::collections::HashMap<String, f32>,
+        /// Cursor position and the screen-to-world affine. Sent every tick
+        /// because it changes every tick — the camera can move, and a script
+        /// converting a click against last frame's camera lands in the wrong
+        /// place.
+        pointer: crate::core::input::PointerState,
     }
 
     let mut entity_states = std::collections::HashMap::new();
@@ -587,6 +592,7 @@ pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String,
         just_pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_pressed)).collect(),
         just_released: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_released)).collect(),
         axes: input_state.actions.iter().map(|(k, v)| (k.clone(), v.axis_value)).collect(),
+        pointer: input_state.pointer.clone(),
     };
 
     emit_event("PLAY_TICK", &PlayTickPayload {
@@ -644,6 +650,11 @@ pub fn emit_play_tick_delta(
         just_pressed: std::collections::HashMap<String, bool>,
         just_released: std::collections::HashMap<String, bool>,
         axes: std::collections::HashMap<String, f32>,
+        /// Cursor position and the screen-to-world affine. Sent every tick
+        /// because it changes every tick — the camera can move, and a script
+        /// converting a click against last frame's camera lands in the wrong
+        /// place.
+        pointer: crate::core::input::PointerState,
     }
 
     let mut changed_entities = std::collections::HashMap::new();
@@ -667,6 +678,7 @@ pub fn emit_play_tick_delta(
         just_pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_pressed)).collect(),
         just_released: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_released)).collect(),
         axes: input_state.actions.iter().map(|(k, v)| (k.clone(), v.axis_value)).collect(),
+        pointer: input_state.pointer.clone(),
     };
 
     emit_event("PLAY_TICK_DELTA", &PlayTickDeltaPayload {

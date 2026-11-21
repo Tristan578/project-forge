@@ -160,10 +160,43 @@ impl Default for InputMap {
     }
 }
 
+/// Where the pointer is, and how to turn ANY screen point into a world one.
+///
+/// THE CONVERSION IS SENT AS AN AFFINE MAP, NOT AS ONE ANSWER. A script asking
+/// where the cursor is in world space is the common case, but one asking about
+/// an arbitrary screen point — a UI hit test, a drag rectangle, a minimap click
+/// — is the same question and deserves the same answer. Sending `origin` and
+/// `scale` lets the browser convert any point; answering a single point per
+/// frame would make every other query impossible.
+///
+/// Both are derived from Bevy's OWN projection rather than reimplemented:
+/// `viewport_to_world_2d` is called on three viewport points and the affine is
+/// read off the differences. An orthographic 2D camera is exactly affine, so
+/// this is not an approximation — and deriving it means a change to Bevy's
+/// projection cannot leave a hand-rolled copy quietly disagreeing with it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PointerState {
+    /// Cursor position in viewport pixels, or `None` when it is off-window.
+    pub screen: Option<[f32; 2]>,
+    /// World position of viewport pixel (0, 0).
+    pub world_origin: [f32; 2],
+    /// World units per viewport pixel. `y` is normally NEGATIVE: screen space
+    /// grows downward and world space grows upward.
+    pub world_scale: [f32; 2],
+}
+
 /// Per-frame evaluated input state. Updated by `capture_input` in PlaySystemSet.
 #[derive(Resource, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InputState {
     pub actions: HashMap<String, ActionValue>,
+    /// Pointer position and the screen-to-world map.
+    ///
+    /// Stays `Default` until a 2D camera exists, and a `world_scale` of
+    /// `[0, 0]` is how a consumer tells "no conversion available" from "every
+    /// point maps to the origin".
+    #[serde(default)]
+    pub pointer: PointerState,
 }
 
 impl InputState {
@@ -479,6 +512,61 @@ fn is_source_just_released(
 
 /// Bevy system that reads keyboard/mouse state and evaluates InputMap → InputState.
 /// Runs in PlaySystemSet (only during active Play mode).
+/// Capture where the pointer is, and how to map any screen point to a world one.
+///
+/// SEPARATE FROM `capture_input` BECAUSE IT NEEDS DIFFERENT THINGS. Actions are
+/// evaluated from `ButtonInput` alone; the pointer needs the window and the 2D
+/// camera, and a system that fails to find either must still leave the actions
+/// working. Splitting them means a scene with no 2D camera loses screen-to-world
+/// and keeps its keyboard, rather than one failing query taking both.
+///
+/// The affine is READ OFF BEVY'S OWN PROJECTION rather than reconstructed from
+/// the camera's zoom and transform. Three `viewport_to_world_2d` calls give the
+/// origin and one world unit per pixel on each axis, and an orthographic camera
+/// is exactly affine, so nothing is approximated. Reconstructing it by hand
+/// would be a second copy of Bevy's projection maths, free to drift the moment
+/// the projection changes — the class of defect this repository keeps finding.
+pub fn capture_pointer(
+    mut input_state: ResMut<InputState>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
+) {
+    let Ok(window) = windows.single() else {
+        input_state.pointer = PointerState::default();
+        return;
+    };
+    let Ok((camera, camera_transform)) = cameras.single() else {
+        // No 2D camera: the cursor still has a screen position, but there is
+        // nothing to convert it against. `world_scale` stays [0, 0], which is
+        // how a consumer tells "no conversion" from "everything is at the
+        // origin".
+        input_state.pointer = PointerState {
+            screen: window.cursor_position().map(|p| [p.x, p.y]),
+            ..PointerState::default()
+        };
+        return;
+    };
+
+    let at = |x: f32, y: f32| camera.viewport_to_world_2d(camera_transform, Vec2::new(x, y)).ok();
+
+    let (world_origin, world_scale) = match (at(0.0, 0.0), at(1.0, 0.0), at(0.0, 1.0)) {
+        (Some(origin), Some(px), Some(py)) => (
+            [origin.x, origin.y],
+            [px.x - origin.x, py.y - origin.y],
+        ),
+        // A camera whose viewport is not ready yet answers Err. Reporting a
+        // zero scale is correct here: it says the map is unavailable this
+        // frame, rather than inventing an identity nobody asked for.
+        _ => ([0.0, 0.0], [0.0, 0.0]),
+    };
+
+    input_state.pointer = PointerState {
+        screen: window.cursor_position().map(|p| [p.x, p.y]),
+        world_origin,
+        world_scale,
+    };
+}
+
 pub fn capture_input(
     input_map: Res<InputMap>,
     mut input_state: ResMut<InputState>,
@@ -534,7 +622,7 @@ impl Plugin for InputPlugin {
         app.init_resource::<InputMap>()
             .init_resource::<InputState>()
             .configure_sets(Update, PlaySystemSet.run_if(in_play_mode))
-            .add_systems(Update, capture_input.in_set(PlaySystemSet));
+            .add_systems(Update, (capture_input, capture_pointer).in_set(PlaySystemSet));
     }
 }
 

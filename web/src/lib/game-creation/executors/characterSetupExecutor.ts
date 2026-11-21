@@ -2,7 +2,6 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { sendCommands } from './engineDispatch';
-import { resolveInputPreset } from '../inputPresetResolution';
 import { PHYSICS_PRESETS } from '@/lib/ai/physicsFeel';
 import {
   characterControllerFromProfile,
@@ -145,12 +144,22 @@ export const characterSetupExecutor: ExecutorDefinition = {
       characterController: { ...controller, canDoubleJump: false },
     });
 
-    // A controller with no bindings is still an immovable player: the engine
-    // ships an EMPTY `InputMap` and `capture_input` has no fallback to
-    // `default_bindings()`, so nothing drives the controller until
-    // `set_input_preset` is dispatched — which nothing on the generation
-    // pipeline ever did. See `inputPresetResolution.ts`.
-    ctx.getStore().setInputPreset(resolveInputPreset(projectType, movementType));
+    // NO INPUT PRESET. This used to dispatch one chosen by
+    // `resolveInputPreset`, which fell through to `fps` for every 3D project —
+    // and the fps preset defines `move_forward` and `move_right` as AXES under
+    // the same names the defaults bind as DIGITAL actions. Since a preset
+    // merges with the preset winning, applying it turned `move_forward` into an
+    // axis that reports pressed for W OR S, while digital `move_backward` still
+    // answered for S alone — so a generated script doing
+    // `dz -= SPEED` / `dz += SPEED` cancelled to zero and the player could not
+    // walk backwards or left.
+    //
+    // The module that chose the preset existed because `InputMap` used to
+    // derive an EMPTY `Default`, so a generated game that never dispatched
+    // `set_input_preset` ran its character controller against an empty
+    // `InputState`. That premise is gone: the default binds thirteen actions
+    // and `load_scene` normalises an empty map to them, so there is nothing
+    // left for this call to fix and a real cost to making it (#9764).
 
     if (projectType === '2d') {
       // 2D also gets the skeleton for skeletal animation. `skeletonData` is

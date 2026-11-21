@@ -76,6 +76,10 @@ declare namespace forge {
     function justReleased(action: string): boolean;
     /** Get axis value (-1 to 1) */
     function getAxis(action: string): number;
+    /** Cursor position in viewport pixels, or null when it is off-window */
+    function getMousePosition(): { x: number; y: number } | null;
+    /** Is a mouse button held? 0 is action_primary, 1 is action_secondary. Both are rebindable like any other action. */
+    function isMousePressed(button?: number): boolean;
     /** Check if the current device supports touch input */
     function isTouchDevice(): boolean;
     /** Trigger haptic feedback (vibration pattern in ms) */
@@ -381,6 +385,8 @@ declare namespace forge {
     function setMode(mode: 'thirdPersonFollow' | 'firstPerson' | 'sideScroller' | 'topDown' | 'fixed' | 'orbital'): void;
     /** Set camera follow target by entity ID */
     function setTarget(entityId: string): void;
+    /** Convert viewport pixels to 2D world space. Null when there is no 2D camera to convert against. */
+    function screenToWorld(screenX: number, screenY: number): { x: number; y: number } | null;
     /** Trigger camera shake */
     function shake(intensity: number, duration: number): void;
     /** Get the current camera mode */

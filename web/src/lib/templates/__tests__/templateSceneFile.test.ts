@@ -141,7 +141,24 @@ describe('buildTemplateSceneFile', () => {
     expect('inputBindings' in JSON.parse(sceneJson)).toBe(false);
   });
 
-  it('passes through the actions a template declares', () => {
+  /**
+   * THE ENGINE'S SHAPE, NOT THE ONE A TEMPLATE WRITES.
+   *
+   * These two shapes share no field names. `InputBinding` — what
+   * `GameTemplate.sceneData.inputBindings` is typed as — is
+   * `{ actionName, actionType: 'digital', sources: ['KeyG'] }`. `ActionDef` in
+   * `engine/src/core/input.rs` is `{ name, actionType: { type: 'Digital' },
+   * sources: [{ type: 'Key', value: 'KeyG' }], deadZone }`.
+   *
+   * An earlier version of this test asserted the WEB shape came out unchanged
+   * and called a web-shaped object "the full InputMap shape". Both passed, and
+   * both were wrong: `apply_scene_load` logs and returns on a payload it cannot
+   * deserialise, so a template declaring one binding would have loaded NOTHING
+   * — no entities, no scripts — silently. That is lessons-learned #14 written
+   * by hand: a unit test cannot disagree with you about a contract the other
+   * side enforces. The expectations below are the Rust field names.
+   */
+  it('converts a declared binding into the ActionDef the engine deserialises', () => {
     const template = makeTemplate([makeEntity()]);
     template.sceneData.inputBindings = {
       grapple: { actionName: 'grapple', actionType: 'digital', sources: ['KeyG'] },
@@ -149,13 +166,62 @@ describe('buildTemplateSceneFile', () => {
 
     const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
     expect(parsed.inputBindings.actions.grapple).toEqual({
-      actionName: 'grapple',
-      actionType: 'digital',
-      sources: ['KeyG'],
+      name: 'grapple',
+      actionType: { type: 'Digital' },
+      sources: [{ type: 'Key', value: 'KeyG' }],
+      deadZone: 0.1,
     });
   });
 
-  it('accepts a template that already writes the full InputMap shape', () => {
+  /**
+   * The engine decides mouse-vs-key by NAME (`handle_set_input_binding`:
+   * `if s == "Left" || s == "Right" || s == "Middle"`), so the converter has to
+   * make the same call — otherwise binding the left mouse button produces a key
+   * named "Left" that no keyboard has.
+   */
+  it('tags Left, Right and Middle as mouse buttons rather than keys', () => {
+    const template = makeTemplate([makeEntity()]);
+    template.sceneData.inputBindings = {
+      shoot: { actionName: 'shoot', actionType: 'digital', sources: ['Left', 'KeyJ'] },
+    };
+
+    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
+    expect(parsed.inputBindings.actions.shoot.sources).toEqual([
+      { type: 'MouseButton', value: 'Left' },
+      { type: 'Key', value: 'KeyJ' },
+    ]);
+  });
+
+  it('converts an axis binding into the tagged Axis variant', () => {
+    const template = makeTemplate([makeEntity()]);
+    template.sceneData.inputBindings = {
+      steer: {
+        actionName: 'steer',
+        actionType: 'axis',
+        sources: [],
+        positiveKeys: ['KeyD'],
+        negativeKeys: ['KeyA'],
+        deadZone: 0.25,
+      },
+    };
+
+    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
+    expect(parsed.inputBindings.actions.steer).toEqual({
+      name: 'steer',
+      actionType: {
+        type: 'Axis',
+        positive: [{ type: 'Key', value: 'KeyD' }],
+        negative: [{ type: 'Key', value: 'KeyA' }],
+      },
+      // Empty on purpose: the engine ignores `sources` for an axis, and
+      // duplicating the keys there would suggest a second binding that does
+      // nothing.
+      sources: [],
+      deadZone: 0.25,
+    });
+  });
+
+  it('accepts a template that wraps its bindings in the actions key', () => {
     const template = makeTemplate([makeEntity()]);
     template.sceneData.inputBindings = {
       actions: { p2_attack: { actionName: 'p2_attack', actionType: 'digital', sources: ['Enter'] } },
@@ -164,6 +230,22 @@ describe('buildTemplateSceneFile', () => {
 
     const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
     expect(Object.keys(parsed.inputBindings.actions)).toEqual(['p2_attack']);
+    expect(parsed.inputBindings.actions.p2_attack.name).toBe('p2_attack');
+  });
+
+  /**
+   * A binding with nothing bound is an action that can never fire. Dropping it
+   * rather than emitting it keeps a typo from shipping a dead control — and if
+   * dropping leaves nothing, that is "no opinion" again rather than a scene
+   * with a silent keyboard.
+   */
+  it('drops an unusable binding, and falls back to the defaults if none survive', () => {
+    const template = makeTemplate([makeEntity()]);
+    template.sceneData.inputBindings = {
+      broken: { actionName: 'broken', actionType: 'digital', sources: [] },
+    };
+
+    expect('inputBindings' in JSON.parse(buildTemplateSceneFile(template).sceneJson)).toBe(false);
   });
 
   it('splits physics into physicsData and physicsEnabled and fills every field', () => {
