@@ -265,10 +265,11 @@ describe('sceneCreateExecutor', () => {
   // #10380: the registry entry is written BEFORE `newScene()`, so a refusal or an
   // engine throw left a scene in the list that the engine never created.
   describe('registry after a failed newScene() (#10380)', () => {
-    it.each([
+    const cases: Array<[string, () => boolean]> = [
       ['refused', () => false],
       ['threw', () => { throw new EngineDispatchThrewError('new_scene', 'RuntimeError: unreachable executed'); }],
-    ] as const)('leaves the scene registry unchanged when newScene() %s', async (_label, newSceneImpl) => {
+    ];
+    it.each(cases)('leaves the scene registry unchanged when newScene() %s', async (_label, newSceneImpl) => {
       const before = createInitialProject();
       saveProjectScenes(before, 'project-x');
       const beforeJson = JSON.stringify(loadProjectScenes('project-x'));
