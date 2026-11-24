@@ -219,6 +219,37 @@ res="$(run_gate "$R")"
 expect "11d. a missing link whose path holds an apostrophe is reported missing" "$res" 1 "missing from the working tree"
 remedy_arg_roundtrips "11e. the missing-link remedy quotes an apostrophe path as one literal argument" "$res" "links/$EVIL"
 
+# ---- 12. control bytes in a path never reach the output raw -----------------
+# A tracked path can hold ESC or a newline (Linux only: Windows file names cannot,
+# which is why this suite runs on the Linux portable-paths job). Display copies
+# must show "?" instead, so the terminal and the session-start hook cannot be
+# driven by a path or a line forged with a newline. The remedy stays printf %q text.
+ESC=$'\033'
+CTRL_NAME="esc${ESC}[31mred"$'\n'"forged"
+readonly ESC CTRL_NAME
+
+R="$(repo ctrlstub)"
+printf '../shared/file.md' > "$R/links/$CTRL_NAME"
+commit_all "$R"
+blob="$(git -C "$R" hash-object -w "$R/links/$CTRL_NAME")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/$CTRL_NAME"
+git -C "$R" config core.symlinks false
+expect "12a. a stub path with control bytes is printed escaped" "$(run_gate "$R")" 1 \
+  "links/esc?[31mred?forged" "~$ESC" "~  forged"
+
+R="$(repo ctrlmissing)"
+ln -s ../shared/file.md "$R/links/$CTRL_NAME"
+commit_all "$R"
+rm "$R/links/$CTRL_NAME"
+expect "12b. a missing-link path with control bytes is printed escaped" "$(run_gate "$R")" 1 \
+  "links/esc?[31mred?forged: missing from the working tree" "~$ESC"
+
+R="$(repo ctrldangling)"
+ln -s "../shared/miss${ESC}ing.md" "$R/links/$CTRL_NAME"
+commit_all "$R"
+expect "12c. a path and target with control bytes are printed escaped in a problem line" "$(run_gate "$R")" 1 \
+  "links/esc?[31mred?forged -> ../shared/miss?ing.md: does not resolve" "~$ESC"
+
 echo ""
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

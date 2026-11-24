@@ -25,6 +25,13 @@ command -v realpath >/dev/null 2>&1 || {
   exit 2
 }
 
+# disp <text> — text for display with every control byte (ESC, newline, ...)
+# replaced by "?". Paths and link targets come from the repository, and this
+# output reaches a terminal and the session-start hook, so a tracked path must
+# not be able to drive either. Display only: the remedy commands below already
+# quote with printf %q, which renders control bytes as $'\033'-style text.
+disp() { local t="$1"; printf '%s' "${t//[[:cntrl:]]/?}"; }
+
 total=0
 stubs=()
 problems=()
@@ -38,7 +45,7 @@ while IFS= read -r -d '' rec; do
   if [ ! -L "$path" ] && [ ! -e "$path" ]; then
     # Paths come from the repository and the remedy is text people paste, so
     # every path in a printed command goes through printf %q (never hand quoting).
-    problems+=("$path: missing from the working tree (restore it: git checkout -- $(printf '%q' "$path"))")
+    problems+=("$(disp "$path"): missing from the working tree (restore it: git checkout -- $(printf '%q' "$path"))")
     continue
   fi
   if [ ! -L "$path" ]; then
@@ -48,20 +55,20 @@ while IFS= read -r -d '' rec; do
 
   target="$(readlink "$path")"
   case "$target" in
-    /*|[A-Za-z]:*) problems+=("$path -> $target: absolute target"); continue ;;
+    /*|[A-Za-z]:*) problems+=("$(disp "$path") -> $(disp "$target"): absolute target"); continue ;;
   esac
   if [ ! -e "$path" ]; then
-    problems+=("$path -> $target: does not resolve")
+    problems+=("$(disp "$path") -> $(disp "$target"): does not resolve")
     continue
   fi
   resolved="$(realpath "$path")"
   case "$resolved" in
     "$real_root"/*) ;;
-    *) problems+=("$path -> $target: resolves outside the repository"); continue ;;
+    *) problems+=("$(disp "$path") -> $(disp "$target"): resolves outside the repository"); continue ;;
   esac
   rel="${resolved#"$real_root"/}"
   if ! git ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
-    problems+=("$path -> $target: target is not tracked by git, so it is missing from a fresh clone")
+    problems+=("$(disp "$path") -> $(disp "$target"): target is not tracked by git, so it is missing from a fresh clone")
   fi
 done < <(git ls-files -s -z)
 
@@ -79,7 +86,7 @@ fi
 
 if [ "${#stubs[@]}" -gt 0 ]; then
   echo "check-symlinks: ${#stubs[@]} of $total symlinks are checked out as plain text files:"
-  printf '  %s\n' "${stubs[@]}"
+  for p in "${stubs[@]}"; do printf '  %s\n' "$(disp "$p")"; done
   echo ""
   echo "Skills behind these links do not load. Fix this clone once (in Git Bash on Windows):"
   echo "  git config core.symlinks true"
