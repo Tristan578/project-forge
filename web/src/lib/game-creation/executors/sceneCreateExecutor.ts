@@ -116,6 +116,21 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // store's mirror may still be at its 3D default this early in the
     // pipeline, which is why the plan's value is the right one here.
     const { project: withScene, sceneId } = createScene(project, name, ctx.projectType);
+    // The registry as it was before this step wrote to it, so a `newScene()` that
+    // throws or is refused can put it back (#10380): the engine never created the
+    // scene, so the registry must not keep an entry for it.
+    const rollbackRegistry = (): void => {
+      try {
+        saveProjectScenes(project, projectId);
+        ctx.getStore().setScenes(
+          project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+          project.activeSceneId,
+        );
+      } catch {
+        // Best effort: the step is already failing, and its own error is the one
+        // the user needs. A refused restore must not replace it.
+      }
+    };
     saveProjectScenes({ ...withScene, activeSceneId: sceneId }, projectId);
     ctx.getStore().setScenes(
       withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
@@ -171,6 +186,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     try {
       cleared = store.newScene({ completionMode: ctx.gdd?.completionMode });
     } catch (error) {
+      rollbackRegistry();
       if (!(error instanceof EngineDispatchThrewError)) throw error;
       return failResult(
         makeStepError(
@@ -182,6 +198,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       );
     }
     if (cleared === false) {
+      rollbackRegistry();
       return failResult(
         makeStepError(
           'COMMAND_FAILED',

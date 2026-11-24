@@ -262,6 +262,34 @@ describe('sceneCreateExecutor', () => {
     expect(ctx.getStore().newScene).toHaveBeenCalled();
   });
 
+  // #10380: the registry entry is written BEFORE `newScene()`, so a refusal or an
+  // engine throw left a scene in the list that the engine never created.
+  describe('registry after a failed newScene() (#10380)', () => {
+    it.each([
+      ['refused', () => false],
+      ['threw', () => { throw new EngineDispatchThrewError('new_scene', 'RuntimeError: unreachable executed'); }],
+    ] as const)('leaves the scene registry unchanged when newScene() %s', async (_label, newSceneImpl) => {
+      const before = createInitialProject();
+      saveProjectScenes(before, 'project-x');
+      const beforeJson = JSON.stringify(loadProjectScenes('project-x'));
+      const setScenes = vi.fn();
+      const ctx = makeCtx({ store: {
+        projectId: 'project-x', setScenes, newScene: vi.fn(newSceneImpl), newSceneRefusal: vi.fn(() => 'engine_refused'), sceneGraph: { nodes: {} },
+      } });
+
+      const result = await sceneCreateExecutor.execute({ name: 'Ghost Scene' }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(loadProjectScenes('project-x'))).toBe(beforeJson);
+      expect(loadProjectScenes('project-x').scenes.some((scene) => scene.name === 'Ghost Scene')).toBe(false);
+      // The store's list is restored last, to the original scenes and active scene.
+      expect(setScenes).toHaveBeenLastCalledWith(
+        before.scenes.map((scene) => ({ id: scene.id, name: scene.name, isStartScene: scene.isStartScene })),
+        before.activeSceneId,
+      );
+    });
+  });
+
   // #10202 review, round 2: `newScene()` is also `false` when the store
   // refused on its own — browser storage would not clear the prefab-instance
   // registry before the dispatch — and when no engine is attached. The step
