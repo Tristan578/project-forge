@@ -1,0 +1,10 @@
+# /kanban — thin wrapper over the kanban skill; it adds no logic of its own.
+# Format: docs/cli/custom-commands.md in google-gemini/gemini-cli (v0.61.0).
+# Taskboard project and team IDs are deliberately NOT written here: the skill
+# and the Canonical Project Facts block in AGENTS.md are their only sources.
+description = "Manage SpawnForge taskboard tickets by following the kanban skill."
+prompt = """
+Follow the taskboard protocol in the `kanban` skill, `.agents/skills/kanban/SKILL.md`, for this request: {{args}}
+
+Take the taskboard URL and the project and team IDs from that skill and from the Canonical Project Facts block in `AGENTS.md`. Do not reuse an ID remembered from elsewhere.
+"""

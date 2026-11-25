@@ -146,6 +146,18 @@
     ".codex/agents/ux-reviewer.toml": "69ba068e0ca8d7039d43af3b428e6c7bcbfab5de322dba3eb0faea5a04cf6df1",
     ".codex/agents/validator.toml": "723c306887f26c486dc6d41890f86c9c6514d0713936512714a23d4a1d6934fa",
     ".codex/hook-conditions.json": "cb505996d50de4425ef499adf0c3e6be65b67ac080009edf253893aa7cbe98ec",
-    ".codex/hooks.json": "54a1e4f1a60dee4b24b885d608455e9fa29703634d5f7e07e5bdc194470819d7"
+    ".codex/hooks.json": "54a1e4f1a60dee4b24b885d608455e9fa29703634d5f7e07e5bdc194470819d7",
+    ".gemini/agents/builder.md": "bc2f87f0567d284c7645b7476cb0b63b854b84d1748b2c44a0a7aed6ca2791a4",
+    ".gemini/agents/docs-guardian.md": "3c63ec0af545cb995c722acf43c7d08a86f11b0974878918a4822a6fc6638dac",
+    ".gemini/agents/docs-maintainer.md": "b81038d161747dd04349b61bd9970a6ebf963f8a501b2cadd6a77caa4de3a7a2",
+    ".gemini/agents/dx-guardian.md": "cf5881da318a993fa05dce38e777b81ffea2410813a5970856b79b889ef1842a",
+    ".gemini/agents/infra-devops.md": "ae4c37132230d2befb6772c35bceded624034d48368a4f13fceba666a0769afe",
+    ".gemini/agents/planner.md": "9ef53843651bb661b8b3213c0c40c84c119fd792020abb714a0252cacfbb3f72",
+    ".gemini/agents/rust-engine.md": "c078d7dea15403f5c25de121e942411109193ab8c1df551ec038dda1b40ffde9",
+    ".gemini/agents/security-reviewer.md": "aa12a2aa3e843ef96c73e5b8a7a86508f86b0d8c1873337f99a8ab46e0359dcd",
+    ".gemini/agents/test-reviewer.md": "8348f23b0533cfb0027e565b22b71a7ad5122c0504b6f99ceee26b789092b035",
+    ".gemini/agents/test-writer.md": "fba5dd01076fd3d9000849b39af90413b65bb383c69680b386c3bcf167aa59ac",
+    ".gemini/agents/ux-reviewer.md": "5e19ac5db64d927c56b64cfb663eea17cbdfa49ec67e9c9abe40ec78aa4cb639",
+    ".gemini/agents/validator.md": "18053b57ed284218016fdd84dd21ef787979c97aaaaa87571ba8b3c45b16ef22"
   }
 }
