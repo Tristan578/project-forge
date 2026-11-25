@@ -13,7 +13,14 @@
  * 2D project to 3D on every legacy load (review board round 1 on #10358).
  */
 import { describe, expect, it } from 'vitest';
-import { readProjectTypeFromSceneData, SCENE_PROJECT_TYPE_KEY } from '../sceneProjectType';
+import {
+  FRESH_ENGINE_PROJECT_TYPE,
+  readProjectTypeFromSceneData,
+  sceneForProjectOpen,
+  SCENE_PROJECT_TYPE_KEY,
+} from '../sceneProjectType';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { sceneFixture } from './sceneFixture';
 
 function withProjectType(projectType: unknown) {
@@ -55,5 +62,45 @@ describe('readProjectTypeFromSceneData', () => {
     for (const bad of ['2D', '3D', 'TwoD', '', 2, true, {}]) {
       expect(readProjectTypeFromSceneData(withProjectType(bad))).toBeNull();
     }
+  });
+});
+
+describe('sceneForProjectOpen (#10374)', () => {
+  it('opens a scene with no key as the fresh-engine type', () => {
+    const legacy = sceneFixture('Legacy');
+    expect(Object.keys(legacy.metadata ?? {})).not.toContain(SCENE_PROJECT_TYPE_KEY);
+    const opened = sceneForProjectOpen(legacy) as typeof legacy;
+    expect(readProjectTypeFromSceneData(opened)).toBe('3d');
+    // Nothing else about the scene changes, and the stored copy is untouched.
+    expect(opened).toEqual({ ...legacy, metadata: { ...legacy.metadata, projectType: '3d' } });
+    expect(Object.keys(legacy.metadata ?? {})).not.toContain(SCENE_PROJECT_TYPE_KEY);
+  });
+
+  it('treats an explicit null as no key, like the engine', () => {
+    expect(readProjectTypeFromSceneData(sceneForProjectOpen(withProjectType(null)))).toBe('3d');
+  });
+
+  it.each(['2d', '3d'] as const)('returns a scene that states %s as the same object', (projectType) => {
+    const scene = withProjectType(projectType);
+    expect(sceneForProjectOpen(scene)).toBe(scene);
+  });
+
+  it('leaves a spelling outside the vocabulary for the engine to refuse, as before', () => {
+    const scene = withProjectType('2D');
+    expect(sceneForProjectOpen(scene)).toBe(scene);
+  });
+
+  it.each([null, 'scene', [], { entities: [] }, { metadata: [] }])(
+    'passes a value that is not a scene with metadata through untouched: %j',
+    (value) => {
+      expect(sceneForProjectOpen(value)).toBe(value);
+    },
+  );
+
+  it('names the engine default, read from the Rust source', () => {
+    const source = readFileSync(resolve(__dirname, '../../../../../engine/src/core/project_type.rs'), 'utf8');
+    const body = /impl Default for ProjectType \{\s*fn default\(\) -> Self \{\s*Self::(\w+)/.exec(source);
+    expect(body, 'ProjectType::default() not found in project_type.rs').not.toBeNull();
+    expect({ ThreeD: '3d', TwoD: '2d' }[body![1]]).toBe(FRESH_ENGINE_PROJECT_TYPE);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { DashboardLayout } from '../DashboardLayout';
+import { emptySceneFile } from '@/lib/scenes/sceneValidation';
 
 vi.mock('lucide-react', () => ({
   Settings: (props: Record<string, unknown>) => <span data-testid="settings-icon" {...props} />,
@@ -20,8 +21,12 @@ vi.mock('../ProjectCard', () => ({
 }));
 
 vi.mock('../NewProjectDialog', () => ({
-  NewProjectDialog: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="new-project-dialog" /> : null,
+  NewProjectDialog: ({ isOpen, onCreate }: { isOpen: boolean; onCreate: (name: string) => Promise<string | null> }) =>
+    isOpen ? (
+      <div data-testid="new-project-dialog">
+        <button type="button" onClick={() => { void onCreate('Star Run'); }}>mock-create</button>
+      </div>
+    ) : null,
 }));
 
 const mockPush = vi.fn();
@@ -89,5 +94,31 @@ describe('DashboardLayout', () => {
     const newProjectBtn = screen.getByRole('button', { name: /New Project/i });
     fireEvent.click(newProjectBtn);
     expect(screen.getByTestId('new-project-dialog')).toBeDefined();
+  });
+
+  /**
+   * #10374: a new project's scene states its dimension. The engine survives a
+   * client-side hop between projects, so a scene with no
+   * `metadata.projectType` inherits whatever the tab was in last. It is also
+   * the engine's own empty scene, which carries the `metadata` the engine's
+   * scene parser requires: the hand-written shape sent before had none.
+   */
+  it('creates a project whose scene is the engine empty scene stating 3D', async () => {
+    render(<DashboardLayout />);
+    await screen.findByText('No projects yet. Create your first game!');
+    mockFetch.mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: true, json: () => Promise.resolve({ id: 'new-id' }) }
+        : { ok: true, json: () => Promise.resolve([]) });
+
+    fireEvent.click(screen.getByRole('button', { name: /New Project/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'mock-create' }));
+
+    await vi.waitFor(() => expect(mockPush).toHaveBeenCalledWith('/editor/new-id'));
+    const post = mockFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
+    expect(post?.[0]).toBe('/api/projects');
+    const body = JSON.parse(String((post?.[1] as RequestInit).body)) as { name: string; sceneData: unknown };
+    expect(body).toEqual({ name: 'Star Run', sceneData: emptySceneFile('Star Run', '3d') });
+    expect((body.sceneData as { metadata: { projectType: string } }).metadata.projectType).toBe('3d');
   });
 });
