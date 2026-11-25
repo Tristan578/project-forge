@@ -30,7 +30,15 @@ command -v realpath >/dev/null 2>&1 || {
 # output reaches a terminal and the session-start hook, so a tracked path must
 # not be able to drive either. Display only: the remedy commands below already
 # quote with printf %q, which renders control bytes as $'\033'-style text.
-disp() { local t="$1"; printf '%s' "${t//[[:cntrl:]]/?}"; }
+# Byte-wise (LC_ALL=C) so the result does not depend on the caller's locale:
+# C0 controls and DEL via [[:cntrl:]], and C1 controls (U+0080-U+009F, which a
+# UTF-8 terminal can act on, e.g. U+009B as CSI) by their exact UTF-8 encoding
+# 0xC2 0x80-0x9F. Other multi-byte characters pass through untouched.
+disp() {
+  local LC_ALL=C t="$1"
+  t="${t//$'\xc2'[$'\x80'-$'\x9f']/?}"
+  printf '%s' "${t//[[:cntrl:]]/?}"
+}
 
 total=0
 stubs=()

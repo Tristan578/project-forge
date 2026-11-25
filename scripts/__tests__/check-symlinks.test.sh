@@ -261,6 +261,19 @@ ln -s "../shared/miss${ESC}ing.md" "$R/links/$CTRL_NAME"
 commit_all "$R"
 expect "12c. a path and target with control bytes are printed escaped in a problem line" "$(run_gate "$R")" 1 \
   "links/esc?[31mred?forged -> ../shared/miss?ing.md: does not resolve" "~$ESC"
+
+# U+009B is a one-character CSI on terminals that honour C1 controls; it is
+# UTF-8 0xC2 0x9B, which [[:cntrl:]] does not match byte-wise. A non-control
+# character beside it must come through unchanged.
+C1_NAME="c1"$'\xc2\x9b'"31mred-é"
+R="$(repo ctrlc1)"
+printf '../shared/file.md' > "$R/links/$C1_NAME"
+commit_all "$R"
+blob="$(git -C "$R" hash-object -w "$R/links/$C1_NAME")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/$C1_NAME"
+git -C "$R" config core.symlinks false
+expect "12d. a C1 control in a stub path is printed escaped, other characters intact" "$(run_gate "$R")" 1 \
+  "links/c1?31mred-é" "~"$'\xc2\x9b'
 fi
 
 echo ""
