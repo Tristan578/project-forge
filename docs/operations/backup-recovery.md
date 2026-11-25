@@ -87,6 +87,7 @@ Neon branching allows restoring to any point within the retention window by crea
 | WASM rebuild from source | Quarterly | Run `build_wasm.ps1`, verify all 4 variants build successfully |
 | Vercel rollback | Quarterly | Instant Rollback (`vercel rollback <previous-url> --yes`) to a previous deployment, verify `/api/health` reports its commit, then undo the rollback with `vercel promote <current-url>`. A promote is NOT a rollback under Rolling Releases, and Instant Rollback turns domain auto-assignment off until undone |
 | Full DR drill | Annually | Simulate complete DB failure, execute PITR, verify RTO < 4 hours |
+| Stripe orphaned-subscription reconciliation | Weekly | Cancel active subscriptions whose customer no longer has a `users` row. Account deletion does not cancel them. Steps: `docs/database-backup-restore.md` § Data Retention and Deletion → Stripe |
 
 ## Monitoring Backup Health
 
@@ -102,14 +103,17 @@ Neon branching allows restoring to any point within the retention window by crea
 - See the endpoint implementation for the complete list of exported tables
 
 ### Data Retention
-- User data: Retained until account deletion or explicit request
-- Token usage logs: Retained for billing audit purposes (7 years recommended)
-- Generation job records: Retained indefinitely (anonymized after account deletion)
+- User data: Retained until account deletion. The full table is in `docs/database-backup-restore.md` § Data Retention and Deletion
+- Billing records (token usage, token purchases, cost log, credit transactions): Retained until account deletion, then deleted with the account. There is no billing-audit exception.
+- Generation job records: Retained until account deletion, then deleted with the account
 - Webhook idempotency records: Auto-expire (TTL set at creation)
 
 ### Right to Erasure
-- Account deletion endpoint: `DELETE /api/user/delete`
-- Cascading deletes configured via foreign key constraints
+- Account deletion endpoint: `POST /api/user/delete`
+- `deleteUserAccount` deletes the user's rows explicitly; only `graph_nodes` and `graph_edges` cascade from `users`. The full list is in `docs/database-backup-restore.md` § Data Retention and Deletion
+- Backups keep deleted rows until they expire (35 days at most): after promoting a restored branch, resend the Clerk `user.deleted` webhooks sent since the restore point, and delete any Clerk user that a failed self-service deletion left behind
+- Stripe is not touched: a deleted user's subscription stays active until someone cancels it. Run the weekly reconciliation
+- Both steps are spelled out in `docs/database-backup-restore.md` § Data Retention and Deletion
 - Published games are unpublished and removed on account deletion
 
 #### Object storage (Cloudflare R2)
