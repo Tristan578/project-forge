@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Sign In — SpawnForge',
+  alternates: { canonical: '/sign-in' },
 };
 
 export default function SignInPage() {
