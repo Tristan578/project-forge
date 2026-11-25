@@ -6,6 +6,7 @@ import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
+import { describeSceneLoadRefusal, showSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { showError } from '@/lib/toast';
 import {
   loadAutoSaveEntry,
@@ -25,6 +26,7 @@ export function AutoSaveRecovery() {
   const projectId = useEditorStore((s) => s.projectId);
   const lastCloudSave = useEditorStore((s) => s.lastCloudSave);
   const loadScene = useEditorStore((s) => s.loadScene);
+  const sceneLoadRefusal = useEditorStore((s) => s.sceneLoadRefusal);
   const setSceneName = useEditorStore((s) => s.setSceneName);
 
   const [entry, setEntry] = useState<AutoSaveEntry | null>(null);
@@ -113,7 +115,14 @@ export function AutoSaveRecovery() {
       return;
     }
     if (accepted === false) {
-      showError('The saved scene could not be restored. Its data may be invalid or the engine is not ready — try again.');
+      // No `sceneLoadError` was set (`rejectionStrandsEditor: false`), so the
+      // cause comes from `sceneLoadRefusal()`: it names the field the engine
+      // refused, already bounded, instead of guessing.
+      const refusal = sceneLoadRefusal();
+      showSceneLoadRefusal(
+        `The saved scene could not be restored. ${describeSceneLoadRefusal(refusal)} Your backup is kept, and the current scene is unchanged.`,
+        refusal,
+      );
       return;
     }
     setSceneName(entry.sceneName);
@@ -121,7 +130,7 @@ export function AutoSaveRecovery() {
     // Only delete the auto-save entry after successfully dispatching the load.
     void deleteAutoSaveEntry(entry.projectId);
     setEntry(null);
-  }, [entry, engineReady, loadScene, setSceneName]);
+  }, [entry, engineReady, loadScene, sceneLoadRefusal, setSceneName]);
 
   const handleDismiss = useCallback(() => {
     if (entry) {

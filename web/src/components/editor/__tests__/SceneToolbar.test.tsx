@@ -30,6 +30,8 @@ vi.mock('@/lib/sceneFile', () => ({
 
 vi.mock('@/lib/toast', () => ({
   showError: vi.fn(),
+  showPersistentError: vi.fn(),
+  dismissToast: vi.fn(),
 }));
 
 // scene.FR-1 N1: the prefab-instance fold itself now happens upstream (the
@@ -55,7 +57,7 @@ vi.mock('@/lib/projects/cloudSave', () => ({
 
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
-import { showError } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
 import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
@@ -72,6 +74,7 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
     // as the engine refusing — what every pre-existing `newScene: () => false`
     // here means; the deferral and storage cases override it.
     newSceneRefusal: vi.fn(() => null),
+    sceneLoadRefusal: vi.fn(() => null),
     setSceneName: vi.fn(),
     engineMode: 'edit',
     undo: vi.fn(),
@@ -297,7 +300,36 @@ describe('SceneToolbar', () => {
       });
 
       expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
-      expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+      // No refusal recorded (engine not attached): an ordinary, self-closing toast.
+      expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith(
+        'The scene was not loaded. The engine is not ready yet — try again in a moment. The current scene is unchanged.',
+      );
+      expect(vi.mocked(showPersistentError)).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ kind: 'engine_refused', details: 'Invalid type: null, expected f32.' }, 'The engine refused it: Invalid type: null, expected f32.'],
+      [{ kind: 'engine_refused', details: null }, 'The engine refused it and gave no reason.'],
+      [{ kind: 'prefab_invalid' }, 'Its prefab data is invalid, or its prefabs reference each other in a loop.'],
+    ])('names the cause sceneLoadRefusal() recorded after the import was refused, in a toast that stays up (%j)', async (refusal, cause) => {
+      vi.mocked(openSceneFilePicker).mockResolvedValue('{"entities":[]}');
+      // Stateful, as in the real slice: the refusal exists only once the load ran.
+      let loaded = false;
+      mockEditorStore({
+        loadScene: vi.fn(() => { loaded = true; return false; }),
+        sceneLoadRefusal: vi.fn(() => (loaded ? refusal : null)),
+      });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /load scene/i }).click();
+      });
+
+      expect(vi.mocked(showPersistentError)).toHaveBeenCalledExactlyOnceWith(
+        `The scene was not loaded. ${cause} The current scene is unchanged.`,
+        { id: 'scene-load-refused' },
+      );
+      expect(vi.mocked(showError)).not.toHaveBeenCalled();
     });
 
     it('does not show an error when a picked scene loads successfully', async () => {

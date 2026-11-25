@@ -8,6 +8,7 @@ import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
 import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import { describeSceneLoadRefusal, showSceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { showError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
@@ -44,6 +45,7 @@ export function SceneToolbar() {
   const loadScene = useEditorStore((s) => s.loadScene);
   const newScene = useEditorStore((s) => s.newScene);
   const newSceneRefusal = useEditorStore((s) => s.newSceneRefusal);
+  const sceneLoadRefusal = useEditorStore((s) => s.sceneLoadRefusal);
   const setSceneName = useEditorStore((s) => s.setSceneName);
   const engineMode = useEditorStore((s) => s.engineMode);
   const undo = useEditorStore((s) => s.undo);
@@ -163,9 +165,11 @@ export function SceneToolbar() {
       // Parity with the AI/MCP `load_scene` handler, which surfaces the same
       // rejection: without this the scene silently vanishes into a no-op when
       // its embedded prefab graph is rejected or the engine is not ready.
-      showError('The scene was not loaded. Check its prefab metadata and that the engine is ready, then try again.');
+      // `sceneLoadRefusal()` says which of those it was.
+      const refusal = sceneLoadRefusal();
+      showSceneLoadRefusal(`The scene was not loaded. ${describeSceneLoadRefusal(refusal)} The current scene is unchanged.`, refusal);
     }
-  }, [loadScene]);
+  }, [loadScene, sceneLoadRefusal]);
 
   /**
    * Report a `newScene()` that returned false, naming the RIGHT cause.
