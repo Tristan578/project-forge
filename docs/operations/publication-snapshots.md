@@ -25,6 +25,11 @@ what would reopen it. Standalone exported-game deployment is tracked by #9883.
 - Legacy rows have no publication snapshot until their next publish and retain
   the existing project-data fallback. Subsequent editor saves do not change
   newly published snapshots.
+- An R2 object never changes, so one written before #10358 states no project
+  type. When the Postgres snapshot of the same publication states one (written
+  by `docs/operations/publication-project-type-backfill.md`), the play API adds
+  that one key to the bundle it serves. A bundle that states a value is served
+  as stored.
 
 ## Configuration and access
 

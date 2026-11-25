@@ -338,6 +338,38 @@ describe('GET /api/play/[userId]/[slug]', () => {
     expect(JSON.parse(payload).game.sceneData.configuration.diagnostic).toContain('REDACTED');
   });
 
+  // #10368: an R2 bundle is immutable, so the backfill can only stamp the
+  // Postgres snapshot; the route carries that one key onto a key-less bundle.
+  it.each([
+    ['adds the backfilled Postgres type to a key-less R2 bundle', {}, { projectType: '2d' }, '2d'],
+    ['treats an explicit null in the bundle as no key', { projectType: null }, { projectType: '2d' }, '2d'],
+    ['keeps a type the bundle states itself', { projectType: '3d' }, { projectType: '2d' }, '3d'],
+    ['keeps an invalid bundle value as stored (the engine refuses it)', { projectType: 'TwoD' }, { projectType: '2d' }, 'TwoD'],
+    ['adds nothing when the Postgres snapshot states no type', {}, {}, undefined],
+    ['adds nothing for an invalid Postgres value', {}, { projectType: '2D' }, undefined],
+  ])('%s', async (_label, bundleMeta, postgresMeta, expected) => {
+    isPublishToR2EnabledMock.mockReturnValue(true);
+    const entities = [{ entityId: 'p', entityType: 'plane' }];
+    readBundleMock.mockResolvedValue({ sceneData: { metadata: { name: 'G', ...bundleMeta }, entities } });
+    const select = vi.fn()
+      .mockReturnValueOnce(mockDbChain([{ id: 'db-user-1' }]))
+      .mockReturnValueOnce(mockDbChain([{
+        id: 'game-1', status: 'published', slug: 'g', version: 1, cdnBundleKey: 'private-key',
+        publishedSceneData: { metadata: { name: 'G', ...postgresMeta }, entities },
+      }]));
+    vi.mocked(getDb).mockReturnValue({ select, update: vi.fn().mockReturnValue(mockUpdateChain()) } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/play/clerk_1/g'), {
+      params: Promise.resolve({ userId: 'clerk_1', slug: 'g' }),
+    });
+    expect(response.status).toBe(200);
+    const served = (await response.json()).game.sceneData;
+    expect(readBundleMock).toHaveBeenCalledTimes(1);
+    expect(served.metadata.projectType).toEqual(expected);
+    expect(served.metadata.name).toBe('G');
+    expect(served.entities).toEqual(entities);
+  });
+
   it('checks publication status before touching object storage', async () => {
     isPublishToR2EnabledMock.mockReturnValue(true);
     const select = vi.fn()
