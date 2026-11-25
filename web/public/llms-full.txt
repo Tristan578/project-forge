@@ -124,9 +124,9 @@ Categories: animation, asset, audio, camera, compound, cutscene, dialogue, docs,
 
 ## Links
 
-- Website: https://spawnforge.ai
-- Pricing: https://spawnforge.ai/pricing
-- Community Gallery: https://spawnforge.ai/community
+- Website: https://www.spawnforge.ai
+- Pricing: https://www.spawnforge.ai/pricing
+- Community Gallery: https://www.spawnforge.ai/community
 - Documentation: https://docs.spawnforge.ai
-- Terms of Service: https://spawnforge.ai/terms
-- Privacy Policy: https://spawnforge.ai/privacy
+- Terms of Service: https://www.spawnforge.ai/terms
+- Privacy Policy: https://www.spawnforge.ai/privacy

@@ -219,6 +219,63 @@ res="$(run_gate "$R")"
 expect "11d. a missing link whose path holds an apostrophe is reported missing" "$res" 1 "missing from the working tree"
 remedy_arg_roundtrips "11e. the missing-link remedy quotes an apostrophe path as one literal argument" "$res" "links/$EVIL"
 
+# ---- 12. control bytes in a path never reach the output raw -----------------
+# A tracked path can hold ESC or a newline on POSIX file systems. Display copies
+# must show "?" instead, so the terminal and the session-start hook cannot be
+# driven by a path or a line forged with a newline. The remedy stays printf %q text.
+# Windows file names cannot hold control bytes, so there the fixture cannot be
+# planted and the cases are probe-skipped; Linux CI still gates them.
+ESC=$'\033'
+CTRL_NAME="esc${ESC}[31mred"$'\n'"forged"
+readonly ESC CTRL_NAME
+# shellcheck source=scripts/__tests__/lib/platform.sh
+. "$HERE/lib/platform.sh"
+# Probe through git, not the shell: MSYS maps control bytes to private-use
+# characters, so the shell can create the file while git records another name.
+mkdir -p "$TMP/ctrlprobe" && git -C "$TMP/ctrlprobe" init -q \
+  && : > "$TMP/ctrlprobe/$CTRL_NAME" 2>/dev/null \
+  && git -C "$TMP/ctrlprobe" add -A 2>/dev/null
+ctrl_probe="$(git -C "$TMP/ctrlprobe" ls-files -z 2>/dev/null | tr -d '\0')"
+if [ "$ctrl_probe" != "$CTRL_NAME" ]; then
+  probe_skip_absent_on windows "file system cannot hold control bytes in a name - cases 12a-12d not exercised"
+else
+
+R="$(repo ctrlstub)"
+printf '../shared/file.md' > "$R/links/$CTRL_NAME"
+commit_all "$R"
+blob="$(git -C "$R" hash-object -w "$R/links/$CTRL_NAME")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/$CTRL_NAME"
+git -C "$R" config core.symlinks false
+expect "12a. a stub path with control bytes is printed escaped" "$(run_gate "$R")" 1 \
+  "links/esc?[31mred?forged" "~$ESC" "~  forged"
+
+R="$(repo ctrlmissing)"
+ln -s ../shared/file.md "$R/links/$CTRL_NAME"
+commit_all "$R"
+rm "$R/links/$CTRL_NAME"
+expect "12b. a missing-link path with control bytes is printed escaped" "$(run_gate "$R")" 1 \
+  "links/esc?[31mred?forged: missing from the working tree" "~$ESC"
+
+R="$(repo ctrldangling)"
+ln -s "../shared/miss${ESC}ing.md" "$R/links/$CTRL_NAME"
+commit_all "$R"
+expect "12c. a path and target with control bytes are printed escaped in a problem line" "$(run_gate "$R")" 1 \
+  "links/esc?[31mred?forged -> ../shared/miss?ing.md: does not resolve" "~$ESC"
+
+# U+009B is a one-character CSI on terminals that honour C1 controls; it is
+# UTF-8 0xC2 0x9B, which [[:cntrl:]] does not match byte-wise. A non-control
+# character beside it must come through unchanged.
+C1_NAME="c1"$'\xc2\x9b'"31mred-é"
+R="$(repo ctrlc1)"
+printf '../shared/file.md' > "$R/links/$C1_NAME"
+commit_all "$R"
+blob="$(git -C "$R" hash-object -w "$R/links/$C1_NAME")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/$C1_NAME"
+git -C "$R" config core.symlinks false
+expect "12d. a C1 control in a stub path is printed escaped, other characters intact" "$(run_gate "$R")" 1 \
+  "links/c1?31mred-é" "~"$'\xc2\x9b'
+fi
+
 echo ""
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

@@ -96,6 +96,10 @@ function matchesExpected(expected: unknown, actual: unknown, path = ''): boolean
       // `restoreCheckpoint`; this comparison is only about what the ENGINE applied.
       // `completionMode` (#9998) is the same kind of key: frontend-only, never
       // echoed, and carried to the store by the SCENE_LOADED handoff instead.
+      // An explicit `metadata.projectType: null` reads as absence everywhere the file
+      // is read (#10358), and the engine's export never writes `null` (it omits the
+      // key), so an expected `null` asserts nothing. `"2d"`/`"3d"` stay strict (#10392).
+      if (field === 'metadata.projectType' && value === null) return true;
       return ['metadata.createdAt', 'metadata.modifiedAt', 'sceneName', 'formatVersion', 'prefabInstances', 'prefabDefinitions', 'completionMode'].includes(field) ||
         matchesExpected(value, (actual as Record<string, unknown>)[key], field);
     });
