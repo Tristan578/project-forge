@@ -237,7 +237,7 @@ mkdir -p "$TMP/ctrlprobe" && git -C "$TMP/ctrlprobe" init -q \
   && git -C "$TMP/ctrlprobe" add -A 2>/dev/null
 ctrl_probe="$(git -C "$TMP/ctrlprobe" ls-files -z 2>/dev/null | tr -d '\0')"
 if [ "$ctrl_probe" != "$CTRL_NAME" ]; then
-  probe_skip_absent_on windows "file system cannot hold control bytes in a name - cases 12a-12c not exercised"
+  probe_skip_absent_on windows "file system cannot hold control bytes in a name - cases 12a-12d not exercised"
 else
 
 R="$(repo ctrlstub)"
