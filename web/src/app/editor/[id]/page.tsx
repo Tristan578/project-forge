@@ -13,6 +13,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { cancelDeferredSceneLoad } from '@/stores/slices/sceneSlice';
 import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { readCompletionModeFromSceneData } from '@/lib/scenes/sceneCompletionMode';
+import { sceneForProjectOpen } from '@/lib/scenes/sceneProjectType';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
@@ -85,8 +86,14 @@ function EditorPageContent() {
         // the editor with "Back to Dashboard" and skip the hydration that
         // follows. Only that class is caught: any other throw is a page
         // error for which no lockout exists (#10202 review).
+        //
+        // A scene that states no project type is opened as the type a fresh
+        // engine starts in (#10374). The engine survives a client-side hop
+        // between projects, and a key-less load leaves its type alone, so
+        // without this a key-less project opened after a 2D one came up 2D
+        // and saved itself as 2D.
         try {
-          loadScene(JSON.stringify(project.sceneData), { deferUntilEngineAttaches: true });
+          loadScene(JSON.stringify(sceneForProjectOpen(project.sceneData)), { deferUntilEngineAttaches: true });
         } catch (loadError) {
           if (!(loadError instanceof EngineDispatchThrewError)) throw loadError;
           console.error('The engine threw while loading the project scene; saving is locked until a reload:', loadError);

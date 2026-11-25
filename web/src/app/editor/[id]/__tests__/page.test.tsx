@@ -99,7 +99,11 @@ describe('EditorPage cold open (#10192, deferred scene load ownership)', () => {
     const engine = vi.fn((_command: string, _payload: unknown) => ({ success: true }));
     setSceneDispatcher(engine);
     const loads = engine.mock.calls.filter(([command]) => command === 'load_scene');
-    expect(loads).toEqual([['load_scene', { json: JSON.stringify(SCENE_A) }]]);
+    // `SCENE_A` states no project type, so the project open states the
+    // fresh-engine type for it (#10374); everything else is exactly that scene.
+    expect(loads).toEqual([
+      ['load_scene', { json: JSON.stringify({ ...SCENE_A, metadata: { name: 'A', projectType: '3d' } }) }],
+    ]);
   });
 
   it('drops the deferred load when the page unmounts before the engine attaches', async () => {
@@ -250,5 +254,85 @@ describe('EditorPage warm open: the engine throws on load_scene (#10202 review)'
     await waitFor(() => expect(screen.queryByText('Back to Dashboard')).not.toBeNull());
     expect(screen.queryByText('storage quota exceeded')).not.toBeNull();
     expect(useEditorStore.getState().sceneLoadError).toBeNull();
+  });
+});
+
+/**
+ * #10374: the engine is a page singleton, so a client-side hop from one
+ * project to another keeps the same Bevy app and its project type. A scene
+ * with no `metadata.projectType` leaves that type alone on load, so before
+ * this a key-less project opened after a 2D one came up 2D (and its next
+ * autosave stored `"2d"`). The page now opens a key-less project as the type
+ * a fresh engine starts in.
+ *
+ * The fake engine models the one rule that matters here, the engine's
+ * absent-aware load (`ProjectType::apply_request` in
+ * `engine/src/core/project_type.rs`): a stated type replaces the current one,
+ * an absent key keeps it. It survives every navigation, as the real one does.
+ */
+describe('EditorPage project open states a project type (#10374)', () => {
+  const SCENE_2D = { formatVersion: 3, metadata: { name: 'Platformer', projectType: '2d' }, entities: [] };
+  const SCENE_KEYLESS = { formatVersion: 3, metadata: { name: 'Legacy' }, entities: [] };
+
+  function fakeEngine() {
+    const state = { projectType: '3d' as string, loads: [] as Record<string, unknown>[] };
+    const dispatch = vi.fn((command: string, payload: unknown) => {
+      if (command === 'load_scene') {
+        const scene = JSON.parse((payload as { json: string }).json) as { metadata?: { projectType?: string | null } };
+        state.loads.push(scene as Record<string, unknown>);
+        const stated = scene.metadata?.projectType;
+        if (stated === '2d' || stated === '3d') state.projectType = stated;
+      }
+      return { success: true };
+    });
+    return { state, dispatch };
+  }
+
+  function serveProjects(byId: Record<string, Record<string, unknown>>) {
+    global.fetch = vi.fn(async (url: string) => {
+      const id = String(url).split('/').pop() ?? '';
+      return new Response(JSON.stringify({ name: id, sceneData: byId[id] }), { status: 200 });
+    }) as unknown as typeof fetch;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentProjectId = 'project-2d';
+    useEditorStore.setState({ projectId: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    setSceneDispatcher(null);
+  });
+
+  it('opens a key-less project as 3D after a 2D project in the same tab', async () => {
+    const engine = fakeEngine();
+    setSceneDispatcher(engine.dispatch);
+    serveProjects({ 'project-2d': SCENE_2D, 'project-legacy': SCENE_KEYLESS });
+
+    const { rerender } = render(<EditorPage />);
+    await waitFor(() => expect(useEditorStore.getState().projectId).toBe('project-2d'));
+    expect(engine.state.projectType).toBe('2d');
+
+    // Client-side navigation to another project: same engine, same page tree.
+    currentProjectId = 'project-legacy';
+    rerender(<EditorPage />);
+    await waitFor(() => expect(useEditorStore.getState().projectId).toBe('project-legacy'));
+
+    expect(engine.state.loads).toHaveLength(2);
+    expect(engine.state.projectType).toBe('3d');
+  });
+
+  it('leaves a scene that states its type exactly as stored', async () => {
+    const engine = fakeEngine();
+    setSceneDispatcher(engine.dispatch);
+    serveProjects({ 'project-2d': SCENE_2D });
+
+    render(<EditorPage />);
+    await waitFor(() => expect(useEditorStore.getState().projectId).toBe('project-2d'));
+
+    const loads = engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene');
+    expect(loads).toEqual([['load_scene', { json: JSON.stringify(SCENE_2D) }]]);
   });
 });

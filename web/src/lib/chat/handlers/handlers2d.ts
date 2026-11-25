@@ -309,10 +309,11 @@ const spriteHandlers: Record<string, ToolHandler> = {
 const project2dHandlers: Record<string, ToolHandler> = {
   set_project_type: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const p = parseArgs(z.object({ type: z.enum(['2d', '3d']) }), args);
+      // `projectType` is the manifest's spelling, which MCP clients and the chat agent send (#10357).
+      const p = parseArgs(z.object({ projectType: z.enum(['2d', '3d']) }), args);
       if (p.error) return p.error;
-      ctx.store.setProjectType(p.data.type);
-      return { success: true, result: { message: `Project type set to ${p.data.type}` } };
+      ctx.store.setProjectType(p.data.projectType);
+      return { success: true, result: { message: `Project type set to ${p.data.projectType}` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set project type' };
     }

@@ -1,10 +1,12 @@
+import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { cacheLife, cacheTag } from 'next/cache';
 import { DocsPage } from '@/components/docs/DocsPage';
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Documentation - SpawnForge',
   description: 'Learn how to build games with SpawnForge — guides, tutorials, and API reference.',
+  alternates: { canonical: '/docs' },
 };
 
 export default async function DocsRoute() {

@@ -154,4 +154,22 @@ describe('checkpoint engine confirmation', () => {
     await expect(applyWithReadback(expected, entityScene(2))).rejects.toThrow('different scene data');
   });
 
+  // #10392: serde reads `"projectType": null` as absence, but the engine's export
+  // always carries a concrete type, so the readback comparison rolled the restore back.
+  function withProjectType(scene: ReturnType<typeof entityScene>, projectType: unknown) {
+    return { ...scene, metadata: { ...scene.metadata, projectType } } as ReturnType<typeof entityScene>;
+  }
+
+  it('accepts a checkpoint whose metadata.projectType is an explicit null (#10392)', async () => {
+    attachFixtureValidator();
+    await expect(applyWithReadback(withProjectType(entityScene(0), null), withProjectType(entityScene(0), '2d')))
+      .resolves.toBeUndefined();
+  });
+
+  it('still rejects a projectType that differs from the readback (#10392)', async () => {
+    attachFixtureValidator();
+    await expect(applyWithReadback(withProjectType(entityScene(0), '3d'), withProjectType(entityScene(0), '2d')))
+      .rejects.toThrow('different scene data');
+  });
+
 });

@@ -28,13 +28,14 @@ import {
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
-import { boundEngineError, describeSceneRefusal, emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
+import { ENGINE_GAVE_NO_DETAIL, boundEngineError, describeSceneRefusal, emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 import {
   EngineDispatchThrewError,
   engineThrewMessage,
   sceneDispatchFailureMessage,
 } from '@/lib/scenes/engineDispatchThrew';
-import type { NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import { describeNewSceneRefusal, type NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import { clearSceneLoadRefusal, describeSceneLoadRefusal, showSceneLoadRefusal, type SceneLoadRefusal } from '@/lib/scenes/sceneLoadRefusal';
 import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
   loadPrefabInstances,
@@ -203,7 +204,9 @@ export interface SceneSlice {
    * import, an auto-save restore — passes `false`: the rejected INCOMING scene
    * never displaced the outgoing one, so the editor is not stranded, the
    * `false` return still tells the caller to surface its own error, and saving
-   * of the still-live outgoing scene stays enabled (#10056).
+   * of the still-live outgoing scene stays enabled (#10056). Such a caller
+   * gets no {@link sceneLoadError}, so it reads {@link sceneLoadRefusal} right
+   * after the `false` to name the cause.
    *
    * `strandOnThrow` is a SEPARATE fact and defaults to `true` independently of
    * `rejectionStrandsEditor`. A thrown dispatch is not a clean `{success:false}`
@@ -227,6 +230,7 @@ export interface SceneSlice {
    * @param json Serialized scene to load.
    * @param opts Independent rejection and throw lockout policies, both default true.
    * @returns Whether the engine accepted the request, not whether it applied it.
+   *   On `false`, {@link sceneLoadRefusal} says why (or `null`: no engine).
    * @throws {EngineDispatchThrewError} The engine call threw (its text as the
    *   message, bounded; the original throw as `cause` when the dispatcher
    *   rethrew one), after rollback attempts and the optional lockout. A
@@ -286,17 +290,32 @@ export interface SceneSlice {
    */
   newSceneRefusal: () => NewSceneRefusal | null;
   /**
+   * Why the most recent {@link loadScene} call answered `false`, or `null` if
+   * it answered `true`, threw, found no engine attached, or has not been
+   * called. Beside a `false`, `null` therefore means no engine was attached.
+   *
+   * Recorded on every refusal, whether or not `rejectionStrandsEditor` locked
+   * saving. A caller that opted out of the lockout (the Scene Browser switch,
+   * the auto-save restore, the toolbar import, the `load_scene` and
+   * `switch_scene` tools) gets no `sceneLoadError`, so without this it had
+   * nothing but a guess to tell the person. Read it immediately after the
+   * call, since both are synchronous; a later `loadScene`, including the
+   * replay of a deferred load, replaces it. Word it with
+   * `describeSceneLoadRefusal`.
+   */
+  sceneLoadRefusal: () => SceneLoadRefusal | null;
+  /**
    * Is the engine's command dispatcher attached to this slice yet?
    *
-   * The disambiguator for `loadScene`'s boolean, which is `false` for two
-   * unrelated facts: the engine REJECTED the request, or there was no engine
-   * to ask and the request was DEFERRED. The second is the normal cold open —
-   * the engine mounts after the editor page — so a UI surface that reports
-   * every `false` as a refusal accuses a healthy editor of an error it did
-   * not commit (#10056). Read this immediately after the call to tell them
-   * apart; both are synchronous, so nothing can change in between. For
-   * `newScene`, {@link newSceneRefusal} answers the same question and the
-   * storage one besides.
+   * Tells a DEFERRED `loadScene` from a refused one. `loadScene` answers
+   * `false` both when there was no engine to ask (the normal cold open — the
+   * engine mounts after the editor page) and when the load was refused, and a
+   * UI surface that reports every `false` as a refusal accuses a healthy
+   * editor of an error it did not commit (#10056). Read this immediately
+   * after the call; both are synchronous, so nothing can change in between.
+   * For the cause of a refusal, read {@link sceneLoadRefusal} (whose `null`
+   * beside a `false` is this same no-engine case). For `newScene`,
+   * {@link newSceneRefusal} answers both questions.
    *
    * NOT the same fact as `sceneLoadError`: a rejected `new_scene` deliberately
    * leaves the (still trustworthy) outgoing scene's saves enabled and so sets
@@ -448,6 +467,12 @@ let dispatchCommand: SceneDispatcher | null = null;
  * a store snapshot as off the live store.
  */
 let lastNewSceneRefusal: NewSceneRefusal | null = null;
+
+/**
+ * Why the latest `loadScene()` answered `false` — see `SceneSlice.sceneLoadRefusal`.
+ * Module state for the same reason as `lastNewSceneRefusal`.
+ */
+let lastSceneLoadRefusal: SceneLoadRefusal | null = null;
 
 /**
  * The one scene load that arrived while no engine was attached, held until
@@ -1066,8 +1091,14 @@ export const createSceneSlice: StateCreator<
     // viewport is untrustworthy and saving must lock regardless of
     // `rejectionStrandsEditor` (#10079). Defaults on independently.
     const strandOnThrow = opts?.strandOnThrow ?? true;
+    // Each refusal below records its cause for `sceneLoadRefusal()`; `true`, a
+    // throw and a missing engine leave it null.
+    lastSceneLoadRefusal = null;
     const setLockout = (reason: string) => set({ sceneLoadError: { reason, at: Date.now() } });
-    const rejectEditor = (reason: string) => {
+    const rejectEditor = (reason: string, refusal: SceneLoadRefusal) => {
+      // Recorded on EVERY refusal, lockout or not: a caller that opted out of
+      // the lockout still needs the cause to tell the person.
+      lastSceneLoadRefusal = refusal;
       // A non-replacing rejection cannot make a previously wrecked viewport
       // trustworthy or downgrade the provenance used by checkpoint retries.
       if (strandOnReject && !isEngineLoadThrewLockout(get().sceneLoadError)) setLockout(reason);
@@ -1118,7 +1149,7 @@ export const createSceneSlice: StateCreator<
     // desync it from what is actually rendered.
     const snapshot = restorePrefabInstances(json);
     if (!snapshot) {
-      rejectEditor(PREFAB_LOAD_REJECTION);
+      rejectEditor(PREFAB_LOAD_REJECTION, { kind: 'prefab_invalid' });
       return false;
     }
     let outcome: SceneLoadOutcome;
@@ -1163,7 +1194,14 @@ export const createSceneSlice: StateCreator<
       // and the next save would persist the wrong instances onto the scene
       // that is actually still active.
       rollbackPrefabState(snapshot);
-      rejectEditor(engineLoadRejectionReason(outcome.error));
+      // An empty reason words as ENGINE_GAVE_NO_DETAIL; record it as no
+      // reason, so the caller's own "gave no reason" sentence is used instead
+      // of "Details: The engine gave no further detail."
+      const details = outcome.error ? describeSceneRefusal(outcome.error) : null;
+      rejectEditor(engineLoadRejectionReason(outcome.error), {
+        kind: 'engine_refused',
+        details: details === ENGINE_GAVE_NO_DETAIL ? null : details,
+      });
       return false;
     }
     // A rejected request must not invalidate an unrelated recovery operation.
@@ -1171,6 +1209,9 @@ export const createSceneSlice: StateCreator<
     // rejection: the engine has now accepted a scene, so serializing it is
     // once again describing the project rather than overwriting it.
     set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+    // A refusal toast from an earlier load says "the current scene is
+    // unchanged", which stops being true here, whichever caller loaded.
+    clearSceneLoadRefusal();
     // Swap in this scene's own arrangement (or clear it) — see
     // `syncArrangementFromLoadedScene` (#10058). A deferred replay is the one
     // exception: its caller hydrated from this same data when it deferred,
@@ -1286,12 +1327,14 @@ export const createSceneSlice: StateCreator<
     // again from here (#10056). A REJECTED new_scene leaves any existing
     // `sceneLoadError` standing, because the untrustworthy scene is still up.
     set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+    clearSceneLoadRefusal();
     // A blank scene has no saved arrangement — clear whatever the previous
     // scene left behind (#10058).
     useMusicArrangementStore.getState().hydrate(null);
     return true;
   },
   newSceneRefusal: () => lastNewSceneRefusal,
+  sceneLoadRefusal: () => lastSceneLoadRefusal,
   isEngineAttached: () => dispatchCommand !== null,
   setSceneName: (name) => set({ sceneName: name }),
   setSceneModified: (modified) => set({ sceneModified: modified }),
@@ -1640,8 +1683,19 @@ export const createSceneSlice: StateCreator<
       // failed navigation, not a corrupted editor (#10056). Surface it as a
       // toast (the Scene Browser has no other channel) rather than the save-
       // locking banner `sceneLoadError` would raise.
+      // Name the cause: no `sceneLoadError` is set here, so the recorded
+      // refusal is the only place the engine's reason survives. The
+      // `newScene()` fallback keeps the ordinary toast the toolbar's New Scene
+      // uses for the same refusal.
       saveProjectScenes(project, get().projectId);
-      showError('The scene could not be opened, so the switch was cancelled. You are still on the current scene, which is unchanged.');
+      const lead = 'The scene could not be opened, so the switch was cancelled.';
+      const tail = 'You are still on the current scene, which is unchanged.';
+      if (result.sceneToLoad) {
+        const refusal = get().sceneLoadRefusal();
+        showSceneLoadRefusal(`${lead} ${describeSceneLoadRefusal(refusal)} ${tail}`, refusal);
+      } else {
+        showError(`${lead} ${describeNewSceneRefusal(get().newSceneRefusal())} ${tail}`);
+      }
       return;
     }
     saveProjectScenes(result.project, get().projectId);
