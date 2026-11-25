@@ -9,6 +9,8 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGateway } from '@ai-sdk/gateway';
+import { GATEWAY_MODEL_FAST } from '@/lib/ai/models';
 import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
 
 // generateText and createAnthropic are mocked before the import so they can
@@ -50,6 +52,10 @@ vi.mock('ai', () => ({
 }));
 vi.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: vi.fn(() => mockAnthropicModel),
+}));
+const mockGatewayModel = vi.hoisted(() => vi.fn(() => 'gateway-model-stub'));
+vi.mock('@ai-sdk/gateway', () => ({
+  createGateway: vi.fn(() => mockGatewayModel),
 }));
 // The key -> client-auth mapping (#8858) is unit-tested in wifCredential.test.ts;
 // this marks its output so the test below can see the route USES it.
@@ -289,5 +295,48 @@ describe('POST /api/generate/pacing', () => {
     expect(anthropicClientAuthForKey).toHaveBeenCalledWith('test-key');
     expect(createAnthropic).toHaveBeenCalledWith({ authToken: 'mapped:test-key' });
     expect(createAnthropic).not.toHaveBeenCalledWith({ apiKey: 'test-key' });
+  });
+
+  it('routes platform chat through the AI Gateway when the resolver returns the gateway key', async () => {
+    vi.mocked(resolveApiKey).mockResolvedValue({
+      type: 'platform',
+      key: 'gw-key',
+      metered: true,
+      usageId: 'usage-gw',
+      route: 'gateway',
+    });
+    const res = await POST(makeRequest({ report: validReport }));
+    expect(res.status).toBeLessThan(300);
+    expect(createGateway).toHaveBeenCalledWith({ apiKey: 'gw-key' });
+    expect(mockGatewayModel).toHaveBeenCalledWith(GATEWAY_MODEL_FAST);
+    expect(createAnthropic).not.toHaveBeenCalled();
+    expect(mockGenerateText).toHaveBeenCalledWith(expect.objectContaining({ model: 'gateway-model-stub' }));
+  });
+
+  it('lets the gateway client fall back to Vercel OIDC when the gateway key is the empty sentinel', async () => {
+    vi.mocked(resolveApiKey).mockResolvedValue({
+      type: 'platform',
+      key: '',
+      metered: true,
+      usageId: 'usage-oidc',
+      route: 'gateway',
+    });
+    const res = await POST(makeRequest({ report: validReport }));
+    expect(res.status).toBeLessThan(300);
+    expect(createGateway).toHaveBeenCalledWith({});
+    expect(createAnthropic).not.toHaveBeenCalled();
+  });
+
+  it('keeps a BYOK key on the direct Anthropic client', async () => {
+    vi.mocked(resolveApiKey).mockResolvedValue({
+      type: 'byok',
+      key: 'user-key',
+      metered: false,
+      route: 'direct',
+    });
+    const res = await POST(makeRequest({ report: validReport }));
+    expect(res.status).toBeLessThan(300);
+    expect(createAnthropic).toHaveBeenCalledWith({ authToken: 'mapped:user-key' });
+    expect(createGateway).not.toHaveBeenCalled();
   });
 });

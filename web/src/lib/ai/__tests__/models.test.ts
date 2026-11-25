@@ -264,9 +264,9 @@ describe('thinkingModeFor / supportsEffort (#9626)', () => {
 
 describe('gatewayFallbackModels (#9631)', () => {
   it('premium falls back to chat then fast, chat to fast, fast to nothing', () => {
-    expect(gatewayFallbackModels(GATEWAY_MODEL_PREMIUM)).toEqual([AI_MODELS.gatewayChat, 'anthropic/claude-haiku-4-5']);
-    expect(gatewayFallbackModels(AI_MODELS.gatewayChat)).toEqual(['anthropic/claude-haiku-4-5']);
-    expect(gatewayFallbackModels('anthropic/claude-haiku-4-5')).toEqual([]);
+    expect(gatewayFallbackModels(GATEWAY_MODEL_PREMIUM)).toEqual([AI_MODELS.gatewayChat, GATEWAY_MODEL_FAST]);
+    expect(gatewayFallbackModels(AI_MODELS.gatewayChat)).toEqual([GATEWAY_MODEL_FAST]);
+    expect(gatewayFallbackModels(GATEWAY_MODEL_FAST)).toEqual([]);
   });
 
   it('never guesses a fallback for an unknown id', () => {

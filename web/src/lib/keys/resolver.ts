@@ -9,6 +9,8 @@ import {
   getPlatformKeyEnvVar,
   GATEWAY_KEY_ENV,
   isResolverGatewayCapability,
+  isGatewayPreferredCapability,
+  isGatewayConfigured,
   isVercelRuntime,
   type ProviderCapability,
   type RetiredByokProvider,
@@ -30,6 +32,23 @@ export interface ResolvedKey {
   key: string;
   metered: boolean;
   usageId?: string | undefined;
+  /**
+   * Which endpoint `key` authenticates against. `'gateway'`: the Vercel AI
+   * Gateway (`AI_GATEWAY_API_KEY`, or the empty OIDC sentinel) — build the
+   * client with `createGateway` and a `provider/model` id. `'direct'` (or
+   * absent): the provider's own API — a BYOK key or the provider's platform
+   * key. A key resolved for the gateway must never be handed to a provider
+   * SDK, nor the reverse; the caller branches on this field.
+   */
+  route?: KeyRoute | undefined;
+}
+
+/** Endpoint a resolved key authenticates against — see `ResolvedKey.route`. */
+export type KeyRoute = 'gateway' | 'direct';
+
+interface PlatformKey {
+  key: string;
+  route: KeyRoute;
 }
 
 export class ApiKeyError extends Error {
@@ -57,7 +76,7 @@ const _PLATFORM_KEY_ENV_COMPLETE = PLATFORM_KEY_ENV satisfies Record<
 >;
 void _PLATFORM_KEY_ENV_COMPLETE;
 
-async function getPlatformKey(provider: Provider, capability?: ProviderCapability): Promise<string> {
+async function getPlatformKey(provider: Provider, capability?: ProviderCapability): Promise<PlatformKey> {
   // A resolver-gateway capability (image/embedding, #9523) resolves the single
   // AI_GATEWAY_API_KEY instead of the provider's PLATFORM_* var, and never
   // falls back to it: those capabilities have no direct platform path anymore,
@@ -73,14 +92,24 @@ async function getPlatformKey(provider: Provider, capability?: ProviderCapabilit
   // OpenAI key still wins.
   if (capability && isResolverGatewayCapability(capability)) {
     const gatewayKey = process.env[GATEWAY_KEY_ENV.vercelGateway];
-    if (gatewayKey) return gatewayKey;
+    if (gatewayKey) return { key: gatewayKey, route: 'gateway' };
     // Vercel OIDC auto-auth: on a Vercel runtime the AI Gateway needs no
     // explicit key — the runtime injects an OIDC token — so return the empty
     // key the gateway client reads as "use OIDC" (mirroring
     // vercelGatewayBackend.isConfigured()/getApiKey()), rather than 500ing an
     // OIDC-only deployment the gateway backend would have served (#10074).
-    if (isVercelRuntime()) return '';
+    if (isVercelRuntime()) return { key: '', route: 'gateway' };
     throw new Error(`Platform key not configured: ${GATEWAY_KEY_ENV.vercelGateway}`);
+  }
+
+  // A gateway-PREFERRED capability (chat) uses the gateway whenever it can
+  // authenticate — an explicit AI_GATEWAY_API_KEY, else the empty OIDC
+  // sentinel on a Vercel runtime — so a gateway deployment needs no separate
+  // ANTHROPIC_API_KEY for /api/generate/{localize,pacing}. When the gateway
+  // cannot authenticate it falls through to the provider's own key below,
+  // which is the #10074 behaviour for direct-Anthropic deployments.
+  if (capability && isGatewayPreferredCapability(capability) && isGatewayConfigured()) {
+    return { key: process.env[GATEWAY_KEY_ENV.vercelGateway] ?? '', route: 'gateway' };
   }
 
   // Anthropic ONLY (#8858): the federated short-lived token when Workload
@@ -92,7 +121,7 @@ async function getPlatformKey(provider: Provider, capability?: ProviderCapabilit
   if (provider === 'anthropic') {
     const auth = await resolveAnthropicClientAuth();
     const key = auth.authToken ?? auth.apiKey;
-    if (key) return key;
+    if (key) return { key, route: 'direct' };
     throw new Error(`Platform key not configured: ${getPlatformKeyEnvVar(provider) ?? provider}`);
   }
 
@@ -104,7 +133,7 @@ async function getPlatformKey(provider: Provider, capability?: ProviderCapabilit
   if (!key) {
     throw new Error(`Platform key not configured: ${envVar ?? provider}`);
   }
-  return key;
+  return { key, route: 'direct' };
 }
 
 /**
@@ -166,6 +195,7 @@ export async function resolveApiKey(
       type: 'byok',
       key: decryptProviderKey(byokKey.encryptedKey, byokKey.iv),
       metered: false,
+      route: 'direct',
     };
   }
 
@@ -197,7 +227,8 @@ export async function resolveApiKey(
   // BOTH halves are required: a charged call named `status_check`, or a free
   // call named anything else, still goes through every check.
   if (tokenCost === 0 && operation === STATUS_CHECK_OPERATION) {
-    return { type: 'platform', key: await getPlatformKey(provider, capability), metered: true };
+    const platform = await getPlatformKey(provider, capability);
+    return { type: 'platform', key: platform.key, metered: true, route: platform.route };
   }
 
   // Pro tier always has platform key access. Other paid tiers can use
@@ -241,9 +272,10 @@ export async function resolveApiKey(
 
   return {
     type: 'platform',
-    key: platformKey,
+    key: platformKey.key,
     metered: true,
     usageId: deduction.usageId,
+    route: platformKey.route,
   };
 }
 

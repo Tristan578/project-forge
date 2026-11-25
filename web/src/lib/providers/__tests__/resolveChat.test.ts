@@ -105,7 +105,7 @@ describe('resolveChatRoute', () => {
     setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
     const { resolveChatRoute } = await import('@/lib/providers/resolveChat');
     const route = resolveChatRoute('claude-sonnet-4-6');
-    expect(route!.modelId).toBe('anthropic/claude-sonnet-4-6');
+    expect(route!.modelId).toBe('anthropic/claude-sonnet-4.6');
   });
 });
 

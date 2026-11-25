@@ -7,8 +7,8 @@
  */
 
 import type { ProviderBackend, ProviderCapability } from '../types';
-import { AI_MODELS } from '@/lib/ai/models';
-import { isVercelRuntime, GATEWAY_CAPABILITIES } from '@/lib/config/providers';
+import { AI_MODELS, GATEWAY_MODEL_FAST as AI_MODELS_GATEWAY_FAST } from '@/lib/ai/models';
+import { isGatewayConfigured, GATEWAY_CAPABILITIES } from '@/lib/config/providers';
 
 const ENDPOINT = 'https://ai-gateway.vercel.sh/v1';
 
@@ -34,10 +34,15 @@ const MODEL_MAP: Record<string, string> = {
   // 4.x ids stay mapped after the Claude 5 migration (PF-1216 / #9339) so an
   // explicitly-requested legacy model still routes to itself, and so pointing
   // AI_MODEL_PRIMARY/AI_MODEL_PREMIUM back at them needs no edit here.
-  'claude-sonnet-4-6': 'anthropic/claude-sonnet-4-6',
-  'claude-opus-4-8': 'anthropic/claude-opus-4-8',
-  'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
-  'claude-haiku-4-5-20251001': 'anthropic/claude-haiku-4-5',
+  // Gateway ids spell point releases with a DOT (live catalog, checked
+  // 2026-11-25); the direct-Anthropic dash spelling is not listed there.
+  'claude-sonnet-4-6': 'anthropic/claude-sonnet-4.6',
+  'claude-opus-4-8': 'anthropic/claude-opus-4.8',
+  'claude-haiku-4-5': AI_MODELS_GATEWAY_FAST,
+  'claude-haiku-4-5-20251001': AI_MODELS_GATEWAY_FAST,
+  // The gateway spelling itself — GATEWAY_MODEL_FAST's bare form reaches
+  // resolveModelId too (modelMapCoverage.test.ts).
+  'claude-haiku-4.5': AI_MODELS_GATEWAY_FAST,
   // OpenAI models
   'gpt-4o': 'openai/gpt-4o',
   'gpt-4o-mini': 'openai/gpt-4o-mini',
@@ -55,7 +60,7 @@ export const vercelGatewayBackend: ProviderBackend = {
   isConfigured(): boolean {
     // Configured if either an explicit key is present or we're on a Vercel deployment
     // (OIDC tokens are injected automatically by the runtime)
-    return Boolean(process.env.AI_GATEWAY_API_KEY) || isVercelRuntime();
+    return isGatewayConfigured();
   },
 
   getApiKey(): string {

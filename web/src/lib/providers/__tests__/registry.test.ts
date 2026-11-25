@@ -97,7 +97,7 @@ describe('vercelGatewayBackend', () => {
 
   it('maps known canonical model names', async () => {
     const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
-    expect(vercelGatewayBackend.resolveModelId('claude-sonnet-4-6')).toBe('anthropic/claude-sonnet-4-6');
+    expect(vercelGatewayBackend.resolveModelId('claude-sonnet-4-6')).toBe('anthropic/claude-sonnet-4.6');
     expect(vercelGatewayBackend.resolveModelId('gpt-4o')).toBe('openai/gpt-4o');
     expect(vercelGatewayBackend.resolveModelId('gemini-embedding-2-preview')).toBe('google/gemini-embedding-2-preview');
   });
@@ -352,7 +352,7 @@ describe('registry — resolveBackend', () => {
     const { resolveBackend } = await import('@/lib/providers/registry');
     const route = resolveBackend('chat', 'claude-sonnet-4-6');
     expect(route).not.toBeNull();
-    expect(route!.modelId).toBe('anthropic/claude-sonnet-4-6');
+    expect(route!.modelId).toBe('anthropic/claude-sonnet-4.6');
   });
 
   it('sets metered=true on resolved route', async () => {

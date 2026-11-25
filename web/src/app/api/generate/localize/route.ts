@@ -12,10 +12,7 @@ import {
   type LocaleBundle,
 } from '@/lib/i18n/gameLocalization';
 import { generateText } from 'ai';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
-import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
-import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { fastChatModelForKey } from '@/lib/ai/fastChatModel';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { withEgressGuard } from '@/lib/security/egressGuard';
@@ -123,14 +120,10 @@ const POST_impl = createGenerationHandler<
     sourceLocale: params.sourceLocale,
     targetLocales: params.targetLocales,
   }),
-  execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
-    // A platform key can be a federated Bearer token (#8858); passing it as
-    // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
-    // omitUndefinedValues: `AnthropicClientAuth` admits an explicit
-    // `apiKey: undefined` (another caller relies on that), but the vendor
-    // `AnthropicProviderSettings` this feeds doesn't accept the key at all
-    // when its value is undefined.
-    const anthropicProvider = createAnthropic(omitUndefinedValues(anthropicClientAuthForKey(apiKey)));
+  execute: async (params, apiKey, { userId, usageId, abortSignal, keyRoute }) => {
+    // Gateway key (or OIDC) when the resolver routed platform chat through the
+    // AI Gateway; otherwise the BYOK / direct Anthropic key exactly as before.
+    const fast = fastChatModelForKey(apiKey, keyRoute);
     const result: Record<string, LocaleBundle> = {};
 
     // Resolve consent + a single trace id once for the whole localize op — every
@@ -146,7 +139,7 @@ const POST_impl = createGenerationHandler<
         const prompt = buildTranslationPrompt(chunk, params.sourceLocale, targetLocale);
         const startedAt = Date.now();
         const { text: raw, usage } = await generateText({
-          model: anthropicProvider(AI_MODEL_FAST),
+          model: fast.model,
           system: 'You are a professional video game localizer. Return only valid JSON.',
           prompt,
           maxOutputTokens: 4096,
@@ -160,8 +153,8 @@ const POST_impl = createGenerationHandler<
           distinctId: userId,
           consented,
           traceId: aiTraceId,
-          model: AI_MODEL_FAST,
-          provider: 'anthropic',
+          model: fast.modelId,
+          provider: fast.provider,
           inputTokens: usage?.inputTokens,
           outputTokens: usage?.outputTokens,
           latencySeconds: (Date.now() - startedAt) / 1000,

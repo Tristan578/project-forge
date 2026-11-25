@@ -98,20 +98,16 @@ export const GATEWAY_MODEL_CHAT = `anthropic/${AI_MODEL_PRIMARY}` as const;
 /**
  * Fast chat model via Vercel AI Gateway.
  *
- * NOTE (unverified): the `GatewayModelId` union in the installed
- * `@ai-sdk/gateway` spells Anthropic point releases with a DOT —
- * `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.6`,
- * `anthropic/claude-opus-4.8` — while this constant and both backend
- * MODEL_MAPs have always used a dash. The union has a `(string & {})` escape
- * hatch so TypeScript never caught it. The Claude 5 ids above have no point
- * release, so `anthropic/claude-sonnet-5` / `anthropic/claude-opus-5` match
- * the union exactly either way; only this Haiku string is still ambiguous.
- * Left as-is deliberately — it is a pre-existing production routing string
- * and nothing in this repo can prove which spelling the live Gateway accepts.
- * Not derived from `AI_MODEL_FAST` like the other two: that constant carries
- * a `-20251001` date suffix this gateway string must not repeat.
+ * Spelled with a DOT, as the live Gateway catalog lists it
+ * (`GET https://ai-gateway.vercel.sh/v1/models`, checked 2026-11-25:
+ * `anthropic/claude-haiku-4.5`; there is no `anthropic/claude-haiku-4-5`).
+ * It used to carry the dash spelling of the direct-Anthropic id, which the
+ * catalog does not list, so the last step of `gatewayFallbackModels` and every
+ * gateway call on the fast tier named a model the Gateway does not publish.
+ * Not derived from `AI_MODEL_FAST`: that constant carries a `-20251001` date
+ * suffix this gateway string must not repeat.
  */
-export const GATEWAY_MODEL_FAST = 'anthropic/claude-haiku-4-5' as const;
+export const GATEWAY_MODEL_FAST = 'anthropic/claude-haiku-4.5' as const;
 
 /**
  * Premium chat model via Vercel AI Gateway (Pro tier only). Derived from

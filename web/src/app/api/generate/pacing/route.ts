@@ -5,10 +5,7 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { generateText, Output } from 'ai';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
-import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
-import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { fastChatModelForKey } from '@/lib/ai/fastChatModel';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { z } from 'zod';
 import { withEgressGuard } from '@/lib/security/egressGuard';
@@ -88,7 +85,7 @@ const POST_impl = createGenerationHandler<
 
     return { ok: true, params: { report: r } };
   },
-  execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
+  execute: async (params, apiKey, { userId, usageId, abortSignal, keyRoute }) => {
     const { report } = params;
     const consented = await hasAnalyticsConsent();
 
@@ -114,16 +111,12 @@ ${existingSuggestions || 'None yet.'}
 
 Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
 
-    // A platform key can be a federated Bearer token (#8858); passing it as
-    // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
-    // omitUndefinedValues: `AnthropicClientAuth` admits an explicit
-    // `apiKey: undefined` (another caller relies on that), but the vendor
-    // `AnthropicProviderSettings` this feeds doesn't accept the key at all
-    // when its value is undefined.
-    const anthropicClient = createAnthropic(omitUndefinedValues(anthropicClientAuthForKey(apiKey)));
+    // Gateway key (or OIDC) when the resolver routed platform chat through the
+    // AI Gateway; otherwise the BYOK / direct Anthropic key exactly as before.
+    const fast = fastChatModelForKey(apiKey, keyRoute);
     const startedAt = Date.now();
     const aiResult = await generateText({
-      model: anthropicClient(AI_MODEL_FAST),
+      model: fast.model,
       system: SYSTEM_PROMPT,
       prompt,
       maxOutputTokens: 800,
@@ -139,8 +132,8 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
       distinctId: userId,
       consented,
       traceId: usageId ?? crypto.randomUUID(),
-      model: AI_MODEL_FAST,
-      provider: 'anthropic',
+      model: fast.modelId,
+      provider: fast.provider,
       inputTokens: aiResult.usage?.inputTokens,
       outputTokens: aiResult.usage?.outputTokens,
       latencySeconds: (Date.now() - startedAt) / 1000,

@@ -35,6 +35,9 @@ const MODEL_MAP: Record<string, string> = {
   'claude-opus-4-8': 'anthropic/claude-opus-4-8',
   'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
   'claude-haiku-4-5-20251001': 'anthropic/claude-haiku-4-5',
+  // GATEWAY_MODEL_FAST's bare form uses the gateway's dot spelling; it is the
+  // same model, so it maps to this backend's own Haiku id.
+  'claude-haiku-4.5': 'anthropic/claude-haiku-4-5',
   // OpenAI models on OpenRouter
   'gpt-4o': 'openai/gpt-4o',
   'gpt-4o-mini': 'openai/gpt-4o-mini',

@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse, after } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { resolveApiKey, ApiKeyError, type KeyRoute } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
 import { panelTierGateResponse } from './panelTierGate';
 import { getTokenCost } from '@/lib/tokens/pricing';
@@ -208,6 +208,14 @@ export interface GenerationHandlerConfig<TParams, TResult> {
     tier: string;
     usageId: string | undefined;
     tokenCost: number;
+    /**
+     * Which endpoint `apiKey` authenticates against (`ResolvedKey.route`):
+     * `'gateway'` means build a Vercel AI Gateway client (`createGateway`, an
+     * empty key meaning OIDC); `'direct'` means the provider's own SDK. Only
+     * gateway-preferred capabilities (chat) can resolve either way, so only
+     * their routes need to read it. Optional and additive.
+     */
+    keyRoute?: KeyRoute | undefined;
     /**
      * Abort signal wired to the generation agent's per-step wall-clock deadline.
      * Present when USE_GENERATION_AGENT or enforceRequestDeadline is enabled.
@@ -437,7 +445,7 @@ export function createGenerationHandler<TParams, TResult>(
   const runExecute = (
     params: TParams,
     apiKey: string,
-    ctx: { userId: string; tier: string; usageId: string | undefined; tokenCost: number },
+    ctx: { userId: string; tier: string; usageId: string | undefined; tokenCost: number; keyRoute: KeyRoute | undefined },
     requestDeadlineAt: number,
   ): Promise<TResult> => {
     if (!useAgent && !enforceRequestDeadline) {
@@ -682,12 +690,13 @@ export function createGenerationHandler<TParams, TResult>(
               effectiveCapability ?? undefined
             );
             const apiKey = resolved.key;
+            const keyRoute = resolved.route;
             const usageId = resolved.usageId;
             // Charged for real (see the note at mctx.provider) — cache MISS only.
             if (usageId !== undefined) mctx.tokenCost = tokenCost;
 
             try {
-              const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
+              const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost, keyRoute }, requestDeadlineAt);
               await maybeBindJobOwnership(generated, userId, resolvedProvider);
               cacheMiss = { result: generated, usageId };
               return generated;
@@ -759,6 +768,7 @@ export function createGenerationHandler<TParams, TResult>(
 
     // 6d. No caching — original path: resolve key, deduct, execute
     let apiKey: string;
+    let keyRoute: KeyRoute | undefined;
     let usageId: string | undefined;
 
     try {
@@ -775,6 +785,7 @@ export function createGenerationHandler<TParams, TResult>(
         effectiveCapability ?? undefined
       );
       apiKey = resolved.key;
+      keyRoute = resolved.route;
       usageId = resolved.usageId;
       // Charged for real (see the note at mctx.provider) — uncached path.
       if (usageId !== undefined) mctx.tokenCost = tokenCost;
@@ -791,7 +802,7 @@ export function createGenerationHandler<TParams, TResult>(
     }
 
     try {
-      const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
+      const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost, keyRoute }, requestDeadlineAt);
       await maybeBindJobOwnership(result, userId, resolvedProvider);
       // Run the durable publish post-response (see cached path). Same asyncJob +
       // QStash gate so the dormant/non-async path never touches `after()`.
