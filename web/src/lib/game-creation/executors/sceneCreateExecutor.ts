@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { waitForEngineFrame } from './engineDispatch';
-import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { createScene, loadProjectScenes, saveProjectScenes, snapshotStoredProjectScenes } from '@/lib/scenes/sceneManager';
 import type { NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import {
   ENGINE_THREW_RELOAD_GUIDANCE,
@@ -110,6 +110,13 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // spawns real geometry, so every step reaching this executor is a real scene
     // creation (PF-1138).
     const projectId = ctx.getStore().projectId;
+    // What was stored and what the editor listed before this step, taken before
+    // anything is written (#10380). A project with no stored registry yet loads
+    // as a placeholder, so the stored bytes, not the loaded project, are what a
+    // failed step must put back.
+    const restoreStoredRegistry = snapshotStoredProjectScenes(projectId);
+    const editorScenesBefore = ctx.getStore().scenes ?? [];
+    const editorActiveSceneBefore = ctx.getStore().activeSceneId ?? null;
     const project = loadProjectScenes(projectId);
     // `ctx.projectType` is the GDD's statement of the game's dimension — the
     // scene is created FOR that game, so it states that type (#10227). The
@@ -121,11 +128,8 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // scene, so the registry must not keep an entry for it.
     const rollbackRegistry = (): void => {
       try {
-        saveProjectScenes(project, projectId);
-        ctx.getStore().setScenes(
-          project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
-          project.activeSceneId,
-        );
+        restoreStoredRegistry();
+        ctx.getStore().setScenes(editorScenesBefore, editorActiveSceneBefore);
       } catch {
         // Best effort: the step is already failing, and its own error is the one
         // the user needs. A refused restore must not replace it.

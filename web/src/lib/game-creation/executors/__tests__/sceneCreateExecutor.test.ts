@@ -274,8 +274,10 @@ describe('sceneCreateExecutor', () => {
       saveProjectScenes(before, 'project-x');
       const beforeJson = JSON.stringify(loadProjectScenes('project-x'));
       const setScenes = vi.fn();
+      const editorScenes = before.scenes.map((scene) => ({ id: scene.id, name: scene.name, isStartScene: scene.isStartScene }));
       const ctx = makeCtx({ store: {
-        projectId: 'project-x', setScenes, newScene: vi.fn(newSceneImpl), newSceneRefusal: vi.fn(() => 'engine_refused'), sceneGraph: { nodes: {} },
+        projectId: 'project-x', scenes: editorScenes, activeSceneId: before.activeSceneId,
+        setScenes, newScene: vi.fn(newSceneImpl), newSceneRefusal: vi.fn(() => 'engine_refused'), sceneGraph: { nodes: {} },
       } });
 
       const result = await sceneCreateExecutor.execute({ name: 'Ghost Scene' }, ctx);
@@ -284,10 +286,22 @@ describe('sceneCreateExecutor', () => {
       expect(JSON.stringify(loadProjectScenes('project-x'))).toBe(beforeJson);
       expect(loadProjectScenes('project-x').scenes.some((scene) => scene.name === 'Ghost Scene')).toBe(false);
       // The store's list is restored last, to the original scenes and active scene.
-      expect(setScenes).toHaveBeenLastCalledWith(
-        before.scenes.map((scene) => ({ id: scene.id, name: scene.name, isStartScene: scene.isStartScene })),
-        before.activeSceneId,
-      );
+      expect(setScenes).toHaveBeenLastCalledWith(editorScenes, before.activeSceneId);
+    });
+
+    it.each(cases)('stores no placeholder registry for a project that had none when newScene() %s', async (_label, newSceneImpl) => {
+      const setScenes = vi.fn();
+      const ctx = makeCtx({ store: {
+        projectId: 'project-new', scenes: [], activeSceneId: null,
+        setScenes, newScene: vi.fn(newSceneImpl), newSceneRefusal: vi.fn(() => 'engine_refused'), sceneGraph: { nodes: {} },
+      } });
+
+      const result = await sceneCreateExecutor.execute({ name: 'Ghost Scene' }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(localStorage.getItem('forge-project-scenes:v2:project:project-new')).toBeNull();
+      expect(Object.keys(localStorage).some((key) => key.includes('project-new'))).toBe(false);
+      expect(setScenes).toHaveBeenLastCalledWith([], null);
     });
   });
 
