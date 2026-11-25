@@ -41,6 +41,7 @@ vi.mock('@/lib/scripting/useScriptRunner', () => ({
 vi.mock('@/lib/toast', () => ({
   showError: vi.fn(),
   showPersistentError: vi.fn(),
+  dismissToast: vi.fn(),
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
 }));

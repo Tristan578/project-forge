@@ -116,7 +116,22 @@ Configure Sentry Browser SDK to track:
 This covers the Sentry rules in this document only. Deployment and build
 failures do not come through the Sentry app; see the Vercel entry above.
 
-## Uptime Monitoring (Recommended)
+## Uptime Monitoring
+
+Two Sentry uptime monitors exist for project `spawnforge-ai` (created
+2026-11-04): `https://www.spawnforge.ai/` and
+`https://www.spawnforge.ai/api/health`, each every 60 s with a 10 s timeout,
+down after 2 consecutive failures. They run from Sentry's probes, so they can see an outage that the app's own
+health route cannot report. A failure raises a Sentry uptime issue; whether
+the existing issue alert emails for it was not verified, and nothing pages
+anyone. They do not cover the WASM CDN, and probe regions were not
+confirmed, so do not read them as the multi-region monitor #6832 describes
+(still open).
+
+The table below is the original recommendation, kept for the CDN row, which
+has no monitor. Its WASM filename is wrong (the binary is
+`forge_engine_bg.wasm`); verify the CDN path before creating that check.
+
 
 Set up external uptime monitoring (e.g., Checkly, UptimeRobot, or Vercel Monitoring):
 

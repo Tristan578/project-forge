@@ -8,8 +8,7 @@ import { GAME_NOT_FOUND_PAGE_TITLE } from '@/lib/play/notFoundDocument';
 import { safeAuth } from '@/lib/auth/safe-auth';
 import { GamePlayer } from '@/components/play/GamePlayer';
 import { Breadcrumbs } from '@/components/marketing/Breadcrumbs';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 /** Asynchronous author/slug route parameters supplied by Next.js. */
 interface PlayPageProps {

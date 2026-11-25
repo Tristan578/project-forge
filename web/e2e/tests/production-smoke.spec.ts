@@ -86,6 +86,20 @@ test.describe('Production Smoke Tests @smoke @production', () => {
     expect(res.status()).toBe(200);
   });
 
+  // #10448: an unknown page path used to answer a 307 to the accounts sign-in.
+  // It must be the site's own 404, and a protected page must still redirect.
+  test('unknown page path returns the 404 page, not a sign-in redirect', async ({ request }) => {
+    const res = await request.get(`${PROD_URL}/refunds-smoke-absent-10448`, { maxRedirects: 0 });
+    expect(res.status()).toBe(404);
+    expect(await res.text()).toContain('Page not found');
+  });
+
+  test('protected page still redirects an anonymous visitor to sign-in', async ({ request }) => {
+    const res = await request.get(`${PROD_URL}/dashboard`, { maxRedirects: 0 });
+    expect([302, 307]).toContain(res.status());
+    expect(res.headers()['location'] ?? '').toMatch(/sign-in/);
+  });
+
   /**
    * Regression test for SRI blank-page bug (PR #7985).
    * Vercel CDN post-processes JS chunks, invalidating build-time sha256 hashes.

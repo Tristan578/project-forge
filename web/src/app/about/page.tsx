@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { cacheLife, cacheTag } from 'next/cache';
 
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
+import { SITE_URL } from '@/lib/constants';
 
 export const metadata: Metadata = {
   title: 'About — SpawnForge',
@@ -12,8 +13,6 @@ export const metadata: Metadata = {
     description: `AI-native browser-based game engine — Rust/WASM, WebGPU, ${MCP_COMMAND_COUNT} MCP commands.`,
   },
 };
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
 const stats = [
   { label: 'MCP Commands', value: String(MCP_COMMAND_COUNT), detail: `across ${MCP_CATEGORY_COUNT} categories` },

@@ -228,6 +228,23 @@ export function loadProjectScenes(projectId: string | null = null): ProjectScene
   return parsed;
 }
 
+/** Capture one project's stored registry exactly as it is, including "nothing
+ * stored yet", so a write that has to be undone can be put back byte for byte
+ * (#10380). `loadProjectScenes` cannot serve here: for an empty slot it returns
+ * a fresh placeholder project, and saving that back would register a scene that
+ * never existed.
+ *
+ * @returns A function that restores the captured value, or removes the key when nothing was stored.
+ */
+export function snapshotStoredProjectScenes(projectId: string | null = null): () => void {
+  const key = storageKey(SCENES_STORAGE_KEY, projectId);
+  const raw = localStorage.getItem(key);
+  return () => {
+    if (raw === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, raw);
+  };
+}
+
 /**
  * Save project scenes to localStorage atomically (scene.FR-3.OP-02).
  *

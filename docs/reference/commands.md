@@ -1382,14 +1382,14 @@ Switch between 2D and 3D project modes
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `project_type` | `"2d"` \| `"3d"` | Yes | Project type |
+| `projectType` | `"2d"` \| `"3d"` | Yes | Project type |
 
 **Example:**
 ```json
 {
   "command": "set_project_type",
   "params": {
-    "project_type": "2d"
+    "projectType": "2d"
   }
 }
 ```

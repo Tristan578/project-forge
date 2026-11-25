@@ -35,6 +35,11 @@ export function showPersistentError(message: string, options?: { id?: string }):
   });
 }
 
+/** Close the toast raised with `id`, if it is still up. A no-op otherwise. */
+export function dismissToast(id: string): void {
+  toast.dismiss(id);
+}
+
 export function showSuccess(message: string): void {
   toast.success(message);
 }
