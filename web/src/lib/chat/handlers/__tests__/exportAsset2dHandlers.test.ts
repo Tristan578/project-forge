@@ -982,13 +982,13 @@ describe('handlers2d project and camera commands', () => {
   // -------------------------------------------------------------------------
   describe('set_project_type', () => {
     it('sets project type to 2d', async () => {
-      const { result, store } = await invoke2d('set_project_type', { type: '2d' });
+      const { result, store } = await invoke2d('set_project_type', { projectType: '2d' });
       expect(result.success).toBe(true);
       expect(store.setProjectType).toHaveBeenCalledWith('2d');
     });
 
     it('sets project type to 3d', async () => {
-      const { result, store } = await invoke2d('set_project_type', { type: '3d' });
+      const { result, store } = await invoke2d('set_project_type', { projectType: '3d' });
       expect(result.success).toBe(true);
       expect(store.setProjectType).toHaveBeenCalledWith('3d');
     });
