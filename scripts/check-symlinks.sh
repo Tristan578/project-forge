@@ -29,7 +29,28 @@ command -v realpath >/dev/null 2>&1 || {
 # replaced by "?". Paths and link targets come from the repository, and this
 # output reaches a terminal and the session-start hook, so a tracked path must
 # not be able to drive either. Display only: the remedy commands below already
-# quote with printf %q, which renders control bytes as $'\033'-style text.
+# quote with shq, which renders control bytes as $'\033'-style text.
+# Quote one path as a shell word for a printed remedy command. A plain path goes
+# through printf %q. A path holding a control or non-ASCII byte is written as
+# $'...' with every such byte (and \\ and ') as a three-digit octal escape:
+# bash 3.2's %q (macOS /bin/bash) can print control bytes raw, and an escape
+# is the same bytes once the shell reads it back.
+shq() {
+  local LC_ALL=C s="$1" out="" c n i
+  case "$s" in
+    *[[:cntrl:]]*|*[$'\x80'-$'\xff']*) ;;
+    *) printf '%q' "$s"; return ;;
+  esac
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [[:cntrl:]]|[$'\x80'-$'\xff']|\\|\') printf -v n '\\%03o' "'$c"; out="$out$n" ;;
+      *) out="$out$c" ;;
+    esac
+  done
+  printf "\$'%s'" "$out"
+}
+
 # Byte-wise (LC_ALL=C) so the result does not depend on the caller's locale:
 # C0 controls and DEL via [[:cntrl:]], and C1 controls (U+0080-U+009F, which a
 # UTF-8 terminal can act on, e.g. U+009B as CSI) by their exact UTF-8 encoding
@@ -52,8 +73,8 @@ while IFS= read -r -d '' rec; do
 
   if [ ! -L "$path" ] && [ ! -e "$path" ]; then
     # Paths come from the repository and the remedy is text people paste, so
-    # every path in a printed command goes through printf %q (never hand quoting).
-    problems+=("$(disp "$path"): missing from the working tree (restore it: git checkout -- $(printf '%q' "$path"))")
+    # every path in a printed command goes through shq (never hand quoting).
+    problems+=("$(disp "$path"): missing from the working tree (restore it: git checkout -- $(shq "$path"))")
     continue
   fi
   if [ ! -L "$path" ]; then
@@ -101,7 +122,7 @@ if [ "${#stubs[@]}" -gt 0 ]; then
   echo "  (Windows: Settings > System > For developers > Developer Mode must be on.)"
   echo "Then re-create each link:"
   for p in "${stubs[@]}"; do
-    q="$(printf '%q' "$p")"
+    q="$(shq "$p")"
     echo "  rm -f -- $q && git checkout -- $q"
   done
   echo ""
