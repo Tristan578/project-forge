@@ -6,6 +6,7 @@ import { SCENE_EXPORTED_EVENT } from '../../src/lib/engine/sceneExportWire';
 
 type Store = typeof useEditorStore;
 interface Quality {
+  custom?: boolean;
   preset: string;
   msaaSamples: number;
   shadowsEnabled: boolean;
@@ -61,13 +62,18 @@ async function exportScene(page: Page): Promise<Scene> {
   return JSON.parse(json) as Scene;
 }
 
-async function changeAndObserve(page: Page, command: string, payload: Record<string, unknown>, quality: Quality) {
+// `custom` is the engine's flag that the profile's values differ from the
+// standard profile of its preset label (an imported nonstandard profile).
+async function changeAndObserve(
+  page: Page, command: string, payload: Record<string, unknown>, quality: Quality, custom = false,
+) {
   await page.evaluate(() => { window.__QUALITY_EVENTS_FOR_TEST = []; });
   await dispatch(page, command, payload);
   // This callback is reached only through QUALITY_CHANGED. No optimistic store
   // action or get_quality_settings query can manufacture the expected result.
-  await expect.poll(() => page.evaluate(() => window.__QUALITY_EVENTS_FOR_TEST?.at(-1))).toEqual(quality);
+  await expect.poll(() => page.evaluate(() => window.__QUALITY_EVENTS_FOR_TEST?.at(-1))).toEqual({ ...quality, custom });
   await expect.poll(() => page.evaluate(() => (window.__EDITOR_STORE as Store).getState().qualityPreset)).toBe(quality.preset);
+  await expect.poll(() => page.evaluate(() => (window.__EDITOR_STORE as Store).getState().qualityProfileCustom)).toBe(custom);
   expect((await exportScene(page)).quality).toEqual(quality);
 }
 
@@ -99,8 +105,8 @@ test('quality commands, undo, save/load and reset reach the engine and editor mi
   // Selecting High must apply its full canonical profile, not skip by label.
   const customHigh: Quality = { ...HIGH, msaaSamples: 1, particleDensityScale: 0.25 };
   const customScene = { ...savedLow, quality: customHigh };
-  await changeAndObserve(page, 'load_scene', { json: JSON.stringify(customScene) }, customHigh);
+  await changeAndObserve(page, 'load_scene', { json: JSON.stringify(customScene) }, customHigh, true);
   await changeAndObserve(page, 'set_quality_preset', { preset: 'high' }, HIGH);
-  await changeAndObserve(page, 'undo', {}, customHigh);
+  await changeAndObserve(page, 'undo', {}, customHigh, true);
   await changeAndObserve(page, 'redo', {}, HIGH);
 });
