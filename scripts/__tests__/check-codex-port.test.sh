@@ -1313,6 +1313,7 @@ if grep -qE '^(model|effort|tools|hooks|memory|skills|mcpServers):' <<<"$FRONT";
 else
   ok "Claude-only frontmatter (model/effort/tools/hooks/…) is dropped"
 fi
+# shellcheck disable=SC2016 # the backticks and backslashes are literal fixture text
 if grep -qF 'A regex like `\bfoo\b` must survive.' "$GA"; then
   ok "the body survives byte-for-byte, backslashes included"
 else
