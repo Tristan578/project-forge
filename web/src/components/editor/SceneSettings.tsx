@@ -51,6 +51,7 @@ export function SceneSettings() {
   const updateDepthOfField = useEditorStore((s) => s.updateDepthOfField);
   const updateMotionBlur = useEditorStore((s) => s.updateMotionBlur);
   const qualityPreset = useEditorStore((s) => s.qualityPreset);
+  const qualityProfileCustom = useEditorStore((s) => s.qualityProfileCustom);
   const setQualityPreset = useEditorStore((s) => s.setQualityPreset);
   const mobileTouchConfig = useEditorStore((s) => s.mobileTouchConfig);
   const setMobileTouchConfig = useEditorStore((s) => s.setMobileTouchConfig);
@@ -130,11 +131,19 @@ export function SceneSettings() {
           <label htmlFor={fieldId('quality-preset')} className="w-20 shrink-0 text-xs text-zinc-400">Preset<InfoTooltip term="qualityPreset" /></label>
           <select
             id={fieldId('quality-preset')}
-            value={qualityPreset}
+            value={qualityProfileCustom ? 'custom' : qualityPreset}
             onChange={(e) => setQualityPreset(e.target.value as QualityPreset)}
             className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300
               focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
+            {/* An imported profile whose values differ from its labelled preset.
+                Shown so choosing the matching standard preset below is a real
+                change (the native select only fires onChange on a new value). */}
+            {qualityProfileCustom && (
+              <option value="custom" disabled>
+                Custom ({qualityPreset.charAt(0).toUpperCase() + qualityPreset.slice(1)})
+              </option>
+            )}
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>

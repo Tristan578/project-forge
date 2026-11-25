@@ -24,7 +24,7 @@ impl Default for QualityPreset {
 }
 
 /// Global rendering quality settings.
-#[derive(Resource, Clone, Debug, Serialize, Deserialize)]
+#[derive(Resource, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct QualitySettings {
     pub preset: QualityPreset,
@@ -91,6 +91,15 @@ impl QualitySettings {
         }
     }
 
+    /// True when this profile's values differ from the standard profile for the
+    /// preset it is labelled with (e.g. an imported scene that says `"high"` but
+    /// carries a 1x MSAA profile). The editor uses this to show a "Custom"
+    /// state, so re-selecting the standard preset is a real change that resets
+    /// the values instead of a no-op on the already-selected option.
+    pub fn is_custom(&self) -> bool {
+        *self != Self::from_preset(self.preset.clone())
+    }
+
     /// Parse preset name from string.
     pub fn parse_preset(name: &str) -> Option<QualityPreset> {
         match name.to_lowercase().as_str() {
@@ -100,5 +109,92 @@ impl QualitySettings {
             "ultra" => Some(QualityPreset::Ultra),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every named preset builds settings tagged with that same preset, so the
+    /// `preset` field the editor and scene file persist always matches the
+    /// profile the rest of the struct describes.
+    #[test]
+    fn from_preset_tags_settings_with_its_own_preset() {
+        for preset in [
+            QualityPreset::Low,
+            QualityPreset::Medium,
+            QualityPreset::High,
+            QualityPreset::Ultra,
+        ] {
+            assert_eq!(QualitySettings::from_preset(preset.clone()).preset, preset);
+        }
+    }
+
+    /// The presets are genuinely distinct — a boundary-condition fixture that
+    /// switches between them must observe different rendering parameters, not a
+    /// relabelled identical struct.
+    #[test]
+    fn presets_differ_in_their_rendering_parameters() {
+        let low = QualitySettings::from_preset(QualityPreset::Low);
+        let ultra = QualitySettings::from_preset(QualityPreset::Ultra);
+        assert_ne!(low.msaa_samples, ultra.msaa_samples);
+        assert!(!low.shadows_enabled && ultra.shadows_enabled);
+        assert_ne!(low.particle_density_scale, ultra.particle_density_scale);
+    }
+
+    /// Persistence integrity: settings survive a JSON serialize -> deserialize
+    /// round-trip in every field. This is the path a preset takes through the
+    /// scene file (`SceneFile.quality`), so a field that failed to round-trip
+    /// would be silent authoring-data loss on reload.
+    #[test]
+    fn settings_round_trip_through_json() {
+        for preset in [
+            QualityPreset::Low,
+            QualityPreset::Medium,
+            QualityPreset::High,
+            QualityPreset::Ultra,
+        ] {
+            let original = QualitySettings::from_preset(preset);
+            let json = serde_json::to_string(&original).expect("serialize");
+            let restored: QualitySettings = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(restored.preset, original.preset);
+            assert_eq!(restored.msaa_samples, original.msaa_samples);
+            assert_eq!(restored.shadows_enabled, original.shadows_enabled);
+            assert_eq!(restored.shadows_directional_only, original.shadows_directional_only);
+            assert_eq!(restored.bloom_enabled, original.bloom_enabled);
+            assert_eq!(restored.chromatic_aberration_enabled, original.chromatic_aberration_enabled);
+            assert_eq!(restored.sharpening_enabled, original.sharpening_enabled);
+            assert_eq!(restored.particle_density_scale, original.particle_density_scale);
+        }
+    }
+
+    #[test]
+    fn standard_profiles_are_not_custom() {
+        for preset in [
+            QualityPreset::Low,
+            QualityPreset::Medium,
+            QualityPreset::High,
+            QualityPreset::Ultra,
+        ] {
+            assert!(!QualitySettings::from_preset(preset).is_custom());
+        }
+    }
+
+    #[test]
+    fn nonstandard_values_under_a_standard_label_are_custom() {
+        let mut imported = QualitySettings::from_preset(QualityPreset::High);
+        imported.msaa_samples = 1;
+        assert!(imported.is_custom());
+        // Re-applying the standard preset yields a different profile, so the
+        // preset command is not skipped as a no-op.
+        assert_ne!(imported, QualitySettings::from_preset(QualityPreset::High));
+    }
+
+    #[test]
+    fn parse_preset_accepts_known_names_and_rejects_others() {
+        assert_eq!(QualitySettings::parse_preset("LOW"), Some(QualityPreset::Low));
+        assert_eq!(QualitySettings::parse_preset("ultra"), Some(QualityPreset::Ultra));
+        assert_eq!(QualitySettings::parse_preset("cinematic"), None);
     }
 }

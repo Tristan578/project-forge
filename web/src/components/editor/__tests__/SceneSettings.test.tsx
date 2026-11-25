@@ -101,6 +101,7 @@ const defaultState = {
     motionBlur: null as Record<string, unknown> | null,
   },
   qualityPreset: 'medium',
+  qualityProfileCustom: false,
   mobileTouchConfig: {
     enabled: false,
     preset: 'platformer',
@@ -111,11 +112,12 @@ const defaultState = {
   },
 };
 
-function setupStore() {
+function setupStore(overrides: Record<string, unknown> = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
     const state = {
       ...defaultState,
+      ...overrides,
       bridgeTools: {},
       setBridgeTool: vi.fn(),
       removeBridgeTool: vi.fn(),
@@ -250,6 +252,23 @@ describe('SceneSettings', () => {
     const presetSelect = document.querySelector('select') as HTMLSelectElement;
     fireEvent.change(presetSelect, { target: { value: 'ultra' } });
     expect(mockSetQualityPreset).toHaveBeenCalledWith('ultra');
+  });
+
+  it('shows a nonstandard imported profile as Custom and lets the standard preset be re-selected', () => {
+    setupStore({ qualityPreset: 'high', qualityProfileCustom: true });
+    render(<SceneSettings />);
+    const presetSelect = document.querySelector('select') as HTMLSelectElement;
+    expect(presetSelect.value).toBe('custom');
+    expect(screen.getByRole('option', { name: 'Custom (High)' })).toBeInTheDocument();
+    // Choosing the matching standard preset is a value change, so it dispatches.
+    fireEvent.change(presetSelect, { target: { value: 'high' } });
+    expect(mockSetQualityPreset).toHaveBeenCalledWith('high');
+  });
+
+  it('does not show the Custom option for a standard profile', () => {
+    setupStore({ qualityPreset: 'high', qualityProfileCustom: false });
+    render(<SceneSettings />);
+    expect(screen.queryByRole('option', { name: /Custom/ })).not.toBeInTheDocument();
   });
 
   // ── Ambient Light ─────────────────────────────────────────────────────

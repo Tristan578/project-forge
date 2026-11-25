@@ -29,6 +29,7 @@ use crate::core::{
     input::InputMap,
     pending_commands::{EntityType, PendingCommands, SetProjectTypeRequest},
     post_processing::PostProcessingSettings,
+    quality::QualitySettings,
     scene_file::{self, SceneName},
     selection::{Selection, SelectionChangedEvent},
     tileset::TilesetRegistry,
@@ -71,7 +72,11 @@ use crate::core::{
 pub(super) fn apply_scene_export(
     mut pending: ResMut<PendingCommands>,
     scene_name: Res<SceneName>,
-    env: Res<EnvironmentSettings>,
+    // Bundled into one tuple parameter: this system is at Bevy's 16-parameter
+    // cap (see the comments below), so `quality` could not be added flat. It
+    // rides with `env` because both are read-only scene-global resources baked
+    // into the exported JSON.
+    (env, quality): (Res<EnvironmentSettings>, Res<QualitySettings>),
     ambient: Res<GlobalAmbientLight>,
     input_map: Res<InputMap>,
     asset_registry: Res<AssetRegistry>,
@@ -296,6 +301,7 @@ pub(super) fn apply_scene_export(
         &input_map,
         asset_registry.assets.clone(),
         &post_processing_settings,
+        &quality,
         &bus_config,
         snapshots,
         None,
@@ -346,8 +352,9 @@ pub(super) fn apply_scene_load(
     mut custom_wgsl_source: ResMut<CustomWgslSource>,
     existing_entities: Query<Entity, (With<EntityId>, Without<entity_factory::Undeletable>)>,
     // Bundled into one tuple parameter: Bevy caps a system at 16 parameters and
-    // this system is at the cap, so `tilesets` below could not be added flat.
-    (mut meshes, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>),
+    // this system is at the cap, so `tilesets` below and `quality` here could
+    // not be added flat.
+    (mut meshes, mut materials, mut quality): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, ResMut<QualitySettings>),
     mut tilesets: ResMut<TilesetRegistry>,
     mut selection: ResMut<Selection>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
@@ -394,6 +401,12 @@ pub(super) fn apply_scene_load(
         scene_file.ambient_light.color[2],
     );
     ambient.brightness = scene_file.ambient_light.brightness;
+
+    // 5b. Apply the persisted quality profile. `emit_quality_on_change` sees
+    // this `Changed<QualitySettings>` write and re-reports it to the editor
+    // mirror; a file written before this field existed carries the default
+    // profile via `#[serde(default)]`.
+    *quality = scene_file.quality.clone();
 
     // 6. Apply input bindings.
     //
@@ -557,6 +570,7 @@ pub(super) fn apply_new_scene(
     mut post_processing_settings: ResMut<PostProcessingSettings>,
     mut bus_config: ResMut<AudioBusConfig>,
     mut tilesets: ResMut<TilesetRegistry>,
+    mut quality: ResMut<QualitySettings>,
     existing_entities: Query<Entity, (With<EntityId>, Without<entity_factory::Undeletable>)>,
     mut selection: ResMut<Selection>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
@@ -591,6 +605,10 @@ pub(super) fn apply_new_scene(
     *post_processing_settings = PostProcessingSettings::default();
     *bus_config = AudioBusConfig::default();
     *tilesets = TilesetRegistry::default();
+    // The quality profile is a resource that outlives entity teardown, so — like
+    // every other resource above — a new scene must reset it by hand.
+    // `emit_quality_on_change` re-reports the reset to the editor mirror.
+    *quality = QualitySettings::default();
     scene_name.0 = "Untitled".to_string();
 
     // 5. Emit events

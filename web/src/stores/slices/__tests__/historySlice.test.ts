@@ -3,13 +3,16 @@ import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createHistorySlice, setHistoryDispatcher, type HistorySlice } from '../historySlice';
 
 describe('historySlice', () => {
-  let store: ReturnType<typeof createSliceStore<HistorySlice>>;
+  let store: ReturnType<typeof createSliceStore<HistorySlice & { sceneModified: boolean }>>;
   let mockDispatch: ReturnType<typeof createMockDispatch>;
 
   beforeEach(() => {
     mockDispatch = createMockDispatch();
     setHistoryDispatcher(mockDispatch);
-    store = createSliceStore(createHistorySlice);
+    store = createSliceStore<HistorySlice & { sceneModified: boolean }>((set, get, api) => ({
+      ...createHistorySlice(set, get, api),
+      sceneModified: false,
+    }));
   });
 
   afterEach(() => {
@@ -79,6 +82,29 @@ describe('historySlice', () => {
       expect(store.getState().canRedo).toBe(false);
       expect(store.getState().undoDescription).toBeNull();
       expect(store.getState().redoDescription).toBeNull();
+    });
+  });
+
+  describe('quality history entries', () => {
+    it('undoing a Quality Change marks the scene modified', () => {
+      store.getState().setHistoryState(true, false, 'Quality Change', null);
+      store.getState().undo();
+      expect(mockDispatch).toHaveBeenCalledWith('undo', {});
+      expect(store.getState().sceneModified).toBe(true);
+    });
+
+    it('redoing a Quality Change marks the scene modified', () => {
+      store.getState().setHistoryState(false, true, null, 'Quality Change');
+      store.getState().redo();
+      expect(mockDispatch).toHaveBeenCalledWith('redo', {});
+      expect(store.getState().sceneModified).toBe(true);
+    });
+
+    it('undo/redo of other entries leaves the dirty flag to their own events', () => {
+      store.getState().setHistoryState(true, true, 'Move Cube', 'Move Cube');
+      store.getState().undo();
+      store.getState().redo();
+      expect(store.getState().sceneModified).toBe(false);
     });
   });
 });

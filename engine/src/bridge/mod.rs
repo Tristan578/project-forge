@@ -627,6 +627,11 @@ impl Plugin for SelectionPlugin {
                 audio::apply_audio_bus_effects_updates,
             ))
             .add_systems(Update, query::apply_quality_presets)
+            // The one emitter for `QualitySettings` changes — see its doc
+            // comment. Change detection tolerates running before its writers
+            // (the change is caught on the next frame), so it needs no explicit
+            // ordering against the preset/undo/load systems.
+            .add_systems(Update, query::emit_quality_on_change)
             // Entity factory and particle systems (always-active, split to stay under tuple limit)
             .add_systems(Update, entity_factory::apply_spawn_requests)
             .add_systems(Update, entity_factory::apply_delete_requests)

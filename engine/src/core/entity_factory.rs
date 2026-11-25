@@ -18,6 +18,7 @@ use super::material::MaterialData;
 use super::particles::{ParticleData, ParticleEnabled};
 use super::pending_commands::{EntityType, PendingCommands};
 use super::physics::{JointData, PhysicsData, PhysicsEnabled};
+use super::quality::QualitySettings;
 use super::scripting::ScriptData;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectData;
@@ -1605,6 +1606,12 @@ pub fn apply_undo_requests(
     enabled_query: Query<(&EntityId, Has<PhysicsEnabled>, Has<ParticleEnabled>, Has<super::physics_2d::Physics2dEnabled>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    // The global quality profile is a `Resource`, not an entity, so
+    // `execute_undo` (which only holds entity queries) cannot restore it. A
+    // `QualityChange` is applied here before delegating; every other action
+    // still flows through `execute_undo`. The change is re-reported to JS by
+    // the bridge's `emit_quality_on_change`, which watches `Changed<QualitySettings>`.
+    mut quality: ResMut<QualitySettings>,
 ) {
     use super::history::take_undo_request;
 
@@ -1613,7 +1620,11 @@ pub fn apply_undo_requests(
     }
 
     if let Some(action) = history.pop_undo() {
-        execute_undo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &enabled_query, &mut meshes, &mut materials);
+        if let UndoableAction::QualityChange { old_settings, .. } = &action {
+            *quality = old_settings.clone();
+        } else {
+            execute_undo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &enabled_query, &mut meshes, &mut materials);
+        }
         history.push_redo(action);
     }
 }
@@ -1634,6 +1645,9 @@ pub fn apply_redo_requests(
     enabled_query: Query<(&EntityId, Has<PhysicsEnabled>, Has<ParticleEnabled>, Has<super::physics_2d::Physics2dEnabled>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    // See `apply_undo_requests`: `QualityChange` targets the global
+    // `QualitySettings` resource and is reapplied here rather than in `execute_redo`.
+    mut quality: ResMut<QualitySettings>,
 ) {
     use super::history::take_redo_request;
 
@@ -1642,7 +1656,11 @@ pub fn apply_redo_requests(
     }
 
     if let Some(action) = history.pop_redo() {
-        execute_redo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &enabled_query, &mut meshes, &mut materials);
+        if let UndoableAction::QualityChange { new_settings, .. } = &action {
+            *quality = new_settings.clone();
+        } else {
+            execute_redo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &enabled_query, &mut meshes, &mut materials);
+        }
         // Use push_undo_only to avoid clearing remaining redo items
         history.push_undo_only(action);
     }
@@ -2371,6 +2389,10 @@ fn execute_undo(
                 }
             }
         }
+        // Global-resource action, handled by `apply_undo_requests` before it
+        // delegates here — `execute_undo` carries no `ResMut<QualitySettings>`.
+        // Present only to keep the match exhaustive.
+        UndoableAction::QualityChange { .. } => {}
     }
 }
 
@@ -2920,6 +2942,8 @@ fn execute_redo(
                 }
             }
         }
+        // See `execute_undo`: applied by `apply_redo_requests`, not here.
+        UndoableAction::QualityChange { .. } => {}
     }
 }
 
@@ -3149,7 +3173,7 @@ mod spawn_position_tests {
 mod terrain_drain_tests {
     use super::{
         apply_terrain_sculpts, apply_terrain_spawn_requests, apply_terrain_updates, log_safe_id,
-        HistoryStack, UndoableAction, LOG_ID_MAX_CHARS,
+        HistoryStack, QualitySettings, UndoableAction, LOG_ID_MAX_CHARS,
     };
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::pending_commands::{
@@ -3183,6 +3207,9 @@ mod terrain_drain_tests {
         world.insert_resource(Assets::<Mesh>::default());
         world.insert_resource(Assets::<StandardMaterial>::default());
         world.insert_resource(HistoryStack::default());
+        // The undo/redo arms read `ResMut<QualitySettings>`; a schedule missing
+        // the resource panics.
+        world.insert_resource(QualitySettings::default());
         // `apply_terrain_sculpts` reads `GlobalTransform`, which Bevy only
         // auto-inserts as IDENTITY -- nothing propagates it unless the transform
         // systems run, and `mark_dirty_trees` / `propagate_parent_transforms`
@@ -4885,6 +4912,7 @@ mod reverb_zone_history_tests {
     use super::{apply_redo_requests, apply_undo_requests, HistoryStack, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::history::{queue_redo_from_bridge, queue_undo_from_bridge};
+    use crate::core::quality::QualitySettings;
     use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled, ReverbZoneResync};
     use bevy::prelude::*;
 
@@ -4926,7 +4954,12 @@ mod reverb_zone_history_tests {
     /// Run one system once through a Schedule, which also flushes the deferred
     /// `Commands` the undo arms queue — without the flush every assertion below
     /// would read the pre-undo state and pass vacuously.
-    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, Query<(&EntityId, Has<crate::core::physics::PhysicsEnabled>, Has<crate::core::particles::ParticleEnabled>, Has<crate::core::physics_2d::Physics2dEnabled>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>)) {
+    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, Query<(&EntityId, Has<crate::core::physics::PhysicsEnabled>, Has<crate::core::particles::ParticleEnabled>, Has<crate::core::physics_2d::Physics2dEnabled>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, ResMut<QualitySettings>)) {
+        // The undo/redo arms now take `ResMut<QualitySettings>` to service a
+        // `QualityChange`; a schedule that fetches a missing resource panics, so
+        // every harnessed world gets the default profile whether or not the test
+        // exercises quality.
+        world.init_resource::<QualitySettings>();
         let mut schedule = Schedule::default();
         schedule.add_systems(system);
         schedule.run(world);
@@ -5151,6 +5184,122 @@ mod reverb_zone_history_tests {
 
 
 #[cfg(test)]
+mod quality_history_tests {
+    //! A quality preset change must be revertible (`render3d.FR-1.OP-03`). The
+    //! profile is a global `Resource`, not an entity, so the undo/redo arms
+    //! restore/reapply the WHOLE recorded `QualitySettings` — a per-field delta
+    //! would be wrong for a preset switch, which rewrites MSAA, shadows,
+    //! post-processing and particle density together.
+
+    use super::{apply_redo_requests, apply_undo_requests, HistoryStack, UndoableAction};
+    use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+    use crate::core::history::{queue_redo_from_bridge, queue_undo_from_bridge};
+    use crate::core::quality::{QualityPreset, QualitySettings};
+    use bevy::prelude::*;
+
+    /// World carrying exactly the resources the undo/redo arms read. No entity
+    /// is needed: `QualityChange` targets a resource.
+    fn world_with(current: QualitySettings) -> World {
+        let mut world = World::new();
+        world.insert_resource(HistoryStack::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world.insert_resource(current);
+        world
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, Query<(&EntityId, Has<crate::core::physics::PhysicsEnabled>, Has<crate::core::particles::ParticleEnabled>, Has<crate::core::physics_2d::Physics2dEnabled>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, ResMut<QualitySettings>)) {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system);
+        schedule.run(world);
+    }
+
+    fn undo(world: &mut World) {
+        queue_undo_from_bridge();
+        run_once(world, apply_undo_requests);
+    }
+
+    fn redo(world: &mut World) {
+        queue_redo_from_bridge();
+        run_once(world, apply_redo_requests);
+    }
+
+    /// Undo restores the prior profile in full; redo reapplies the new one. The
+    /// non-label fields are asserted too, so "restored the whole settings" cannot
+    /// pass while only the `preset` tag was copied.
+    #[test]
+    fn undo_restores_previous_quality_and_redo_reapplies() {
+        let old = QualitySettings::from_preset(QualityPreset::Low);
+        let new = QualitySettings::from_preset(QualityPreset::Ultra);
+        // The resource already holds `new`, as it would right after a preset
+        // command applied the change and recorded the history entry.
+        let mut world = world_with(new.clone());
+        world.resource_mut::<HistoryStack>().push(UndoableAction::QualityChange {
+            old_settings: old.clone(),
+            new_settings: new.clone(),
+        });
+
+        undo(&mut world);
+        let after_undo = world.resource::<QualitySettings>();
+        assert_eq!(after_undo.preset, QualityPreset::Low, "undo must restore the old preset");
+        assert_eq!(after_undo.msaa_samples, old.msaa_samples);
+        assert_eq!(after_undo.shadows_enabled, old.shadows_enabled);
+        assert_eq!(after_undo.particle_density_scale, old.particle_density_scale);
+
+        redo(&mut world);
+        let after_redo = world.resource::<QualitySettings>();
+        assert_eq!(after_redo.preset, QualityPreset::Ultra, "redo must reapply the new preset");
+        assert_eq!(after_redo.msaa_samples, new.msaa_samples);
+        assert_eq!(after_redo.particle_density_scale, new.particle_density_scale);
+    }
+
+    /// A `QualityChange` on the stack must not disturb the undo of an unrelated
+    /// action underneath it, nor vice versa — the boundary scenario's "preserves
+    /// authoring data" clause. Here the profile change sits ABOVE a rename; one
+    /// undo reverts only the profile and leaves the rename intact.
+    #[test]
+    fn undoing_quality_does_not_touch_the_entity_action_below_it() {
+        let mut world = world_with(QualitySettings::from_preset(QualityPreset::Ultra));
+        let entity = world
+            .spawn((
+                EntityId("e1".to_string()),
+                EntityName("Renamed".to_string()),
+                EntityVisible(true),
+                Transform::default(),
+            ))
+            .id();
+        // Oldest first: a rename, then the quality change on top.
+        {
+            let mut history = world.resource_mut::<HistoryStack>();
+            history.push(UndoableAction::Rename {
+                entity_id: "e1".to_string(),
+                old_name: "Original".to_string(),
+                new_name: "Renamed".to_string(),
+            });
+            history.push(UndoableAction::QualityChange {
+                old_settings: QualitySettings::from_preset(QualityPreset::Low),
+                new_settings: QualitySettings::from_preset(QualityPreset::Ultra),
+            });
+        }
+
+        undo(&mut world);
+
+        assert_eq!(
+            world.resource::<QualitySettings>().preset,
+            QualityPreset::Low,
+            "the top action (quality) is what undo reverts",
+        );
+        assert_eq!(
+            world.get::<EntityName>(entity).unwrap().0,
+            "Renamed",
+            "the entity action underneath must be untouched by a quality undo",
+        );
+    }
+}
+
+
+#[cfg(test)]
 mod physics2d_history_tests {
     //! `Physics2dChange` records a change to `Physics2dData` and nothing else.
     //! Enablement lives in the separate `Physics2dEnabled` marker, toggled by
@@ -5159,7 +5308,7 @@ mod physics2d_history_tests {
     //! physics ON for an entity the user had deliberately disabled — and the
     //! inspector reads the data, not the marker, so nothing showed it.
 
-    use super::{HistoryStack, UndoableAction};
+    use super::{HistoryStack, QualitySettings, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::physics_2d::{Physics2dData, Physics2dEnabled};
     use bevy::prelude::*;
@@ -5178,6 +5327,9 @@ mod physics2d_history_tests {
         world.insert_resource(HistoryStack::default());
         world.insert_resource(Assets::<Mesh>::default());
         world.insert_resource(Assets::<StandardMaterial>::default());
+        // The undo/redo arms read `ResMut<QualitySettings>`; a schedule missing
+        // the resource panics.
+        world.insert_resource(QualitySettings::default());
         world
     }
 
@@ -5432,7 +5584,7 @@ mod tilemap_skeleton2d_history_tests {
     //! undoing a tilemap or skeleton edit switched rendering back on for a
     //! surface the user had turned off.
 
-    use super::{HistoryStack, UndoableAction};
+    use super::{HistoryStack, QualitySettings, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
     use crate::core::skeleton2d::{
         BoneWorldTransforms2d, Skeleton2dResync, SkeletonData2d, SkeletonEnabled2d,
@@ -5454,6 +5606,9 @@ mod tilemap_skeleton2d_history_tests {
         world.insert_resource(HistoryStack::default());
         world.insert_resource(Assets::<Mesh>::default());
         world.insert_resource(Assets::<StandardMaterial>::default());
+        // The undo/redo arms read `ResMut<QualitySettings>`; a schedule missing
+        // the resource panics.
+        world.insert_resource(QualitySettings::default());
         world
     }
 

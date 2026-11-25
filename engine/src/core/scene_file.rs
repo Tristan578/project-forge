@@ -14,6 +14,7 @@ use super::environment::EnvironmentSettings;
 use super::history::EntitySnapshot;
 use super::input::InputMap;
 use super::post_processing::PostProcessingSettings;
+use super::quality::QualitySettings;
 use super::project_type::ProjectType;
 
 /// Maximum serialized scene size accepted by both preflight and load.
@@ -48,6 +49,12 @@ pub struct SceneFile {
     pub assets: HashMap<String, AssetMetadata>,
     #[serde(default)]
     pub post_processing: PostProcessingSettings,
+    /// Global rendering quality profile (MSAA, shadows, post-processing,
+    /// particle density). `#[serde(default)]` keeps older scene files loadable:
+    /// one written before this field existed deserializes to the default
+    /// (`High`) profile rather than failing, so no format-version bump is needed.
+    #[serde(default)]
+    pub quality: QualitySettings,
     #[serde(default)]
     pub audio_buses: AudioBusConfig,
     pub entities: Vec<EntitySnapshot>,
@@ -145,6 +152,7 @@ pub fn build_scene_file(
     input_map: &InputMap,
     assets: HashMap<String, AssetMetadata>,
     post_processing: &PostProcessingSettings,
+    quality: &QualitySettings,
     audio_buses: &AudioBusConfig,
     entities: Vec<EntitySnapshot>,
     game_ui: Option<String>,
@@ -170,6 +178,7 @@ pub fn build_scene_file(
         input_bindings: input_map.clone(),
         assets,
         post_processing: post_processing.clone(),
+        quality: quality.clone(),
         audio_buses: audio_buses.clone(),
         entities,
         game_ui,
@@ -262,6 +271,7 @@ pub(crate) fn test_scene_json() -> String {
         &InputMap::default(),
         HashMap::new(),
         &PostProcessingSettings::default(),
+        &QualitySettings::default(),
         &AudioBusConfig::default(),
         Vec::new(),
         None,
@@ -295,6 +305,46 @@ mod validation_tests {
         let mut scene = parse_scene_file(&test_scene_json()).unwrap();
         scene.entities = entities;
         parse_scene_file(&serde_json::to_string(&scene).unwrap())
+    }
+
+    /// `render3d.FR-1.OP-03` persistence: a changed quality profile survives a
+    /// save -> reload round-trip, and doing so disturbs no other scene data.
+    #[test]
+    fn quality_profile_round_trips_and_leaves_other_scene_data_untouched() {
+        use crate::core::quality::QualityPreset;
+        let mut scene = parse_scene_file(&test_scene_json()).unwrap();
+        // A profile distinct from the default (`High`) so a dropped or
+        // relabelled field would be visible in the assertions below.
+        scene.quality = QualitySettings::from_preset(QualityPreset::Low);
+        scene.entities = vec![entity("root", None)];
+        let name_before = scene.metadata.name.clone();
+        let brightness_before = scene.ambient_light.brightness;
+
+        let restored = parse_scene_file(&serde_json::to_string(&scene).unwrap()).unwrap();
+
+        // The changed profile survived in full...
+        assert_eq!(restored.quality.preset, QualityPreset::Low);
+        assert_eq!(restored.quality.msaa_samples, 1);
+        assert!(!restored.quality.shadows_enabled);
+        assert_eq!(restored.quality.particle_density_scale, 0.25);
+        // ...and nothing unrelated moved.
+        assert_eq!(restored.metadata.name, name_before);
+        assert_eq!(restored.entities.len(), 1);
+        assert_eq!(restored.entities[0].entity_id, "root");
+        assert_eq!(restored.ambient_light.brightness, brightness_before);
+    }
+
+    /// Backward compatibility: a scene written before quality was persisted (no
+    /// `quality` key) loads as the default profile rather than failing, so no
+    /// format-version bump is required.
+    #[test]
+    fn a_scene_without_a_quality_field_loads_as_the_default_profile() {
+        use crate::core::quality::QualityPreset;
+        let mut value: serde_json::Value = serde_json::from_str(&test_scene_json()).unwrap();
+        value.as_object_mut().unwrap().remove("quality");
+        let scene = parse_scene_file(&value.to_string()).unwrap();
+        assert_eq!(scene.quality.preset, QualityPreset::default());
+        assert_eq!(scene.quality.preset, QualityPreset::High);
     }
 
     #[test]
@@ -387,6 +437,7 @@ mod validation_tests {
                 &InputMap::default(),
                 HashMap::new(),
                 &PostProcessingSettings::default(),
+                &QualitySettings::default(),
                 &AudioBusConfig::default(),
                 vec![snapshot],
                 None,
@@ -526,6 +577,7 @@ mod validation_tests {
                 &InputMap::default(),
                 HashMap::new(),
                 &PostProcessingSettings::default(),
+                &QualitySettings::default(),
                 &AudioBusConfig::default(),
                 vec![snapshot],
                 None,
@@ -646,6 +698,7 @@ mod validation_tests {
                 &InputMap::default(),
                 HashMap::new(),
                 &PostProcessingSettings::default(),
+                &QualitySettings::default(),
                 &AudioBusConfig::default(),
                 vec![without_material, finite, default, zero],
                 None,
@@ -738,6 +791,7 @@ mod animation_round_trip_tests {
             &InputMap::default(),
             HashMap::new(),
             &PostProcessingSettings::default(),
+            &QualitySettings::default(),
             &AudioBusConfig::default(),
             vec![snapshot],
             None,
@@ -872,6 +926,7 @@ mod project_type_persistence_tests {
             &InputMap::default(),
             HashMap::new(),
             &PostProcessingSettings::default(),
+            &QualitySettings::default(),
             &AudioBusConfig::default(),
             Vec::new(),
             None,

@@ -3,13 +3,16 @@ import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createParticleSlice, setParticleDispatcher, type ParticleSlice } from '../particleSlice';
 
 describe('particleSlice', () => {
-  let store: ReturnType<typeof createSliceStore<ParticleSlice>>;
+  let store: ReturnType<typeof createSliceStore<ParticleSlice & { sceneModified: boolean }>>;
   let mockDispatch: ReturnType<typeof createMockDispatch>;
 
   beforeEach(() => {
     mockDispatch = createMockDispatch();
     setParticleDispatcher(mockDispatch);
-    store = createSliceStore(createParticleSlice);
+    store = createSliceStore<ParticleSlice & { sceneModified: boolean }>((set, get, api) => ({
+      ...createParticleSlice(set, get, api),
+      sceneModified: false,
+    }));
   });
 
   afterEach(() => {
@@ -171,6 +174,38 @@ describe('particleSlice', () => {
       store.getState().setQualityPreset('ultra');
       expect(store.getState().qualityPreset).toBe('ultra');
       expect(mockDispatch).toHaveBeenCalledWith('set_quality_preset', { preset: 'ultra' });
+    });
+
+    it('setQualityPreset marks the scene modified when the preset changes', () => {
+      expect(store.getState().sceneModified).toBe(false);
+      store.getState().setQualityPreset('low');
+      expect(store.getState().sceneModified).toBe(true);
+    });
+
+    it('re-selecting the current standard preset does not mark the scene modified', () => {
+      store.getState().setQualityPreset('high');
+      expect(store.getState().sceneModified).toBe(false);
+    });
+
+    it('re-selecting the labelled preset over a custom profile marks modified and clears custom', () => {
+      store.getState().setQualityFromEngine({ preset: 'high', custom: true });
+      expect(store.getState().qualityProfileCustom).toBe(true);
+      store.getState().setQualityPreset('high');
+      expect(mockDispatch).toHaveBeenCalledWith('set_quality_preset', { preset: 'high' });
+      expect(store.getState().qualityProfileCustom).toBe(false);
+      expect(store.getState().sceneModified).toBe(true);
+    });
+
+    it('setQualityFromEngine never marks the scene modified (load/reset also emits it)', () => {
+      store.getState().setQualityFromEngine({ preset: 'low', custom: false });
+      expect(store.getState().sceneModified).toBe(false);
+    });
+
+    it('setQualityFromEngine tracks a nonstandard profile and clears it when the engine reports standard', () => {
+      store.getState().setQualityFromEngine({ preset: 'high', custom: true });
+      expect(store.getState().qualityProfileCustom).toBe(true);
+      store.getState().setQualityFromEngine({ preset: 'high', custom: false });
+      expect(store.getState().qualityProfileCustom).toBe(false);
     });
 
     it('setQualityFromEngine should update preset', () => {

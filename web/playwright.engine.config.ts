@@ -94,6 +94,10 @@ export default defineConfig({
   // versioned reference game through real engine commands and checks the
   // engine's own export and scene graph against the fixture's expected-state
   // record before pressing Play. It runs under the default cap.
+  // e2e/engine/qualityPersistence.spec.ts adds one bounded engine journey for
+  // preset history, export/load/reset and the QUALITY_CHANGED editor mirror.
+  // It uses real commands and engine exports, never optimistic store writes,
+  // and shares a single engine boot for all transitions under the default cap.
   testMatch: '**/*.spec.ts',
   grep: /@engine-smoke|@engine-ui/,
   fullyParallel: true,
