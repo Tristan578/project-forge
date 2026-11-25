@@ -55,6 +55,8 @@ if (DSN) {
       databaseQueryData: false,
       graphQL: { document: false, variables: false },
       queues: false,
+      // Added in @sentry 11.10: MCP request/response content recording.
+      mcp: { inputs: false, outputs: false },
     },
     beforeSend: scrubSentryEvent,
     // @sentry v11 streams spans by default, so no transaction event is built

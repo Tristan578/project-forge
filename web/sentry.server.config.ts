@@ -79,6 +79,8 @@ if (DSN) {
       databaseQueryData: false,
       graphQL: { document: false, variables: false },
       queues: false,
+      // Added in @sentry 11.10: MCP request/response content recording.
+      mcp: { inputs: false, outputs: false },
     },
     // @sentry v11 removed `streamGenAiSpans`: gen_ai spans are always streamed as
     // separate envelope items now, which is the documented upstream default.
