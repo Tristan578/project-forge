@@ -3,8 +3,7 @@ import { cacheLife, cacheTag } from 'next/cache';
 import { PricingPage } from '@/components/pricing/PricingPage';
 import { Breadcrumbs } from '@/components/marketing/Breadcrumbs';
 import { TIER_PLANS, tierSummary } from '@/lib/billing/tierPlans';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 // Every plan name and price comes from TIER_PLANS. Restating them here is what
 // let this page advertise a $99 tier that the cards below sold for $79, and
