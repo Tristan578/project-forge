@@ -37,6 +37,28 @@ make_fixture_repo() {
 }
 readonly -f make_fixture_repo
 
+assert_grep() {
+  local desc="$1" pattern="$2" file="$3"
+  if grep -q -- "$pattern" "$file"; then
+    echo "ok   - $desc"
+  else
+    echo "FAIL - $desc (no line matched '$pattern')"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+readonly -f assert_grep
+
+assert_no_grep() {
+  local desc="$1" pattern="$2" file="$3"
+  if grep -q -- "$pattern" "$file"; then
+    echo "FAIL - $desc (a line matched '$pattern')"
+    FAILURES=$((FAILURES + 1))
+  else
+    echo "ok   - $desc"
+  fi
+}
+readonly -f assert_no_grep
+
 # 1. Real repo, run from repo root: engine/src exists and is clean.
 (cd "$REPO_ROOT" && bash "$HOOK" >/dev/null 2>&1)
 assert_exit "clean real tree from repo root" 0 $?
@@ -124,8 +146,79 @@ mkdir -p "$MISSING_REPO/engine/src/core"
 (cd "$MISSING_REPO" && CHECK_ARCH_PY="$MISSING_REPO/nope.py" bash "$HOOK" >/dev/null 2>&1)
 assert_exit "missing canonical validator fails closed" 2 $?
 
+# 14-20. The canonical validator ITSELF, run directly rather than through the
+#    hook. The hook's fail-closed guard (cases 5, 6, 13) is bash; the Python
+#    had none. A direct `python3 check_arch.py --strict` from engine/ walked a
+#    relative "engine/src" that did not exist, found zero files, and printed
+#    "Architecture Check Passed. (7 rules, 0 violations)" with exit 0 -- the
+#    verdict a commit on #10399 quoted as evidence while the root-level run
+#    reported 134 violations. The validator now exits 2 (the code the hook
+#    already maps to "refusing to pass vacuously") when a tree it scans is not
+#    under the cwd or holds no source files. Exit codes are asserted exactly:
+#    2 is "could not scan", never 1 ("violations") and never 0.
+VALIDATOR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../skills/arch-validator" && pwd)/check_arch.py"
+PYTHON="$(command -v python3 || command -v python)"
+VALIDATOR_OUT="$(mktemp -d)"
+
+# 14. The finding's exact wrong cwd: engine/, one level below the root.
+(cd "$REPO_ROOT/engine" && "$PYTHON" "$VALIDATOR" --strict \
+  >"$VALIDATOR_OUT/stdout" 2>"$VALIDATOR_OUT/stderr")
+assert_exit "validator --strict from engine/ (wrong cwd) exits 2" 2 $?
+assert_grep "validator from engine/ says why on stderr" \
+  "refusing to pass vacuously" "$VALIDATOR_OUT/stderr"
+assert_no_grep "validator from engine/ prints no pass line" \
+  "Architecture Check Passed" "$VALIDATOR_OUT/stdout"
+
+# 15. A tree with engine/src but no web/src: the full run would walk an empty
+#     relative web/src for rules 3, 6 and 7, so it must refuse.
+RUST_ONLY="$(make_fixture_repo)"
+mkdir -p "$RUST_ONLY/engine/src/core"
+echo 'pub fn ok() {}' > "$RUST_ONLY/engine/src/core/ok.rs"
+(cd "$RUST_ONLY" && "$PYTHON" "$VALIDATOR" --strict >/dev/null 2>&1)
+assert_exit "validator --strict without web/src exits 2" 2 $?
+
+# 16. Looks-like-but-isn't: --js-interop-only reads engine/src alone, so the
+#     same tree is complete for it. The hook fixtures above have no web/src,
+#     so requiring it in this mode would turn cases 4, 8, 9 and 10 red.
+(cd "$RUST_ONLY" && "$PYTHON" "$VALIDATOR" --js-interop-only >/dev/null 2>&1)
+assert_exit "validator --js-interop-only without web/src exits 0" 0 $?
+
+# 17. engine/src exists but holds no Rust: zero files scanned is not a pass.
+EMPTY_SRC="$(make_fixture_repo)"
+mkdir -p "$EMPTY_SRC/engine/src/core"
+echo 'not rust' > "$EMPTY_SRC/engine/src/core/README.md"
+(cd "$EMPTY_SRC" && "$PYTHON" "$VALIDATOR" --js-interop-only >/dev/null 2>&1)
+assert_exit "validator --js-interop-only over an engine/src with no .rs exits 2" 2 $?
+
+# 18. Nothing at all under the cwd, both modes.
+BARE_DIR="$(mktemp -d)"
+(cd "$BARE_DIR" && "$PYTHON" "$VALIDATOR" --strict >/dev/null 2>&1)
+assert_exit "validator --strict from an empty directory exits 2" 2 $?
+(cd "$BARE_DIR" && "$PYTHON" "$VALIDATOR" --js-interop-only >/dev/null 2>&1)
+assert_exit "validator --js-interop-only from an empty directory exits 2" 2 $?
+
+# 19. Positive control: a complete, clean tree passes with the pass line, so
+#     the guard admits what it should.
+COMPLETE="$(make_fixture_repo)"
+mkdir -p "$COMPLETE/engine/src/core" "$COMPLETE/web/src"
+echo 'pub fn ok() {}' > "$COMPLETE/engine/src/core/ok.rs"
+echo 'export const ok = 1;' > "$COMPLETE/web/src/ok.ts"
+(cd "$COMPLETE" && "$PYTHON" "$VALIDATOR" --strict >"$VALIDATOR_OUT/complete" 2>&1)
+assert_exit "validator --strict over a complete clean tree exits 0" 0 $?
+assert_grep "validator over a complete clean tree prints the pass line" \
+  "Architecture Check Passed" "$VALIDATOR_OUT/complete"
+
+# 20. Positive control for the rules themselves: an 801-line Rust file in the
+#     same tree is a rule-2 violation, so --strict exits 1 -- proving the run
+#     scanned the fixture rather than clearing the guard and nothing else.
+yes '// filler' | head -n 801 > "$COMPLETE/engine/src/core/big.rs"
+(cd "$COMPLETE" && "$PYTHON" "$VALIDATOR" --strict >"$VALIDATOR_OUT/big" 2>&1)
+assert_exit "validator --strict over an 801-line Rust file exits 1" 1 $?
+assert_grep "validator names the oversized file" "big.rs" "$VALIDATOR_OUT/big"
+
 rm -rf "$VIOLATION_REPO" "$CLEAN_REPO" "$EMPTY_REPO" "$NON_REPO" \
-  "$SERDE_REPO" "$COMMENT_REPO" "$PLATFORM_REPO" "$ATTR_REPO" "$PATHUSE_REPO" "$MISSING_REPO"
+  "$SERDE_REPO" "$COMMENT_REPO" "$PLATFORM_REPO" "$ATTR_REPO" "$PATHUSE_REPO" "$MISSING_REPO" \
+  "$RUST_ONLY" "$EMPTY_SRC" "$BARE_DIR" "$COMPLETE" "$VALIDATOR_OUT"
 
 if [ "$FAILURES" -gt 0 ]; then
   echo "$FAILURES test(s) failed"
