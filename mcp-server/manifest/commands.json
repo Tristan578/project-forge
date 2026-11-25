@@ -9843,7 +9843,7 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "project_type": {
+          "projectType": {
             "type": "string",
             "enum": [
               "2d",
@@ -9853,7 +9853,7 @@
           }
         },
         "required": [
-          "project_type"
+          "projectType"
         ]
       },
       "tokenCost": 0,
