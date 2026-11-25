@@ -10,6 +10,13 @@ export interface ParticleSlice {
   particleEnabled: boolean;
   postProcessing: PostProcessingData;
   qualityPreset: QualityPreset;
+  /**
+   * True when the engine's live quality profile has values that differ from the
+   * standard profile of `qualityPreset` (e.g. an imported scene labelled "high"
+   * with 1x MSAA). The Scene Settings select shows "Custom" then, so choosing
+   * the standard preset is a real change that resets the values.
+   */
+  qualityProfileCustom: boolean;
 
   setParticle: (entityId: string, data: Partial<ParticleData>) => void;
   removeParticle: (entityId: string) => void;
@@ -39,7 +46,9 @@ export function setParticleDispatcher(dispatcher: (command: string, payload: unk
   dispatchCommand = dispatcher;
 }
 
-export const createParticleSlice: StateCreator<ParticleSlice, [], [], ParticleSlice> = (set, get) => ({
+// `sceneModified` lives in the scene slice; a user-originated quality change is a
+// saved-scene edit, so it must mark the scene dirty for autosave and New Scene.
+export const createParticleSlice: StateCreator<ParticleSlice & { sceneModified: boolean }, [], [], ParticleSlice> = (set, get) => ({
   primaryParticle: null,
   particleEnabled: false,
   postProcessing: {
@@ -52,6 +61,7 @@ export const createParticleSlice: StateCreator<ParticleSlice, [], [], ParticleSl
     motionBlur: null,
   },
   qualityPreset: 'high',
+  qualityProfileCustom: false,
 
   setParticle: (entityId, data) => {
     if (dispatchCommand) dispatchCommand('set_particle', { entityId, ...data });
@@ -83,12 +93,21 @@ export const createParticleSlice: StateCreator<ParticleSlice, [], [], ParticleSl
   },
   setPostProcessing: (data) => set({ postProcessing: data }),
   setQualityPreset: (preset) => {
-    set({ qualityPreset: preset });
+    const { qualityPreset, qualityProfileCustom } = get();
+    // Re-selecting the current standard preset changes nothing (the engine skips
+    // it too), so it must not dirty the scene. Selecting the standard preset over
+    // a custom profile does change the engine, so it does.
+    const changed = preset !== qualityPreset || qualityProfileCustom;
+    set(changed
+      ? { qualityPreset: preset, qualityProfileCustom: false, sceneModified: true }
+      : { qualityPreset: preset });
     if (dispatchCommand) dispatchCommand('set_quality_preset', { preset });
   },
   setQualityFromEngine: (data) => {
-    // Implementation from original store
-    set({ qualityPreset: (data as { preset: string }).preset as QualityPreset });
+    // Engine mirror only: this also fires on scene load/reset, so it never marks
+    // the scene modified (user edits do that in setQualityPreset / undo / redo).
+    const payload = data as { preset: string; custom?: boolean };
+    set({ qualityPreset: payload.preset as QualityPreset, qualityProfileCustom: payload.custom === true });
   },
   updateBloom: (partial) => {
     const state = get();

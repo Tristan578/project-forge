@@ -91,6 +91,15 @@ impl QualitySettings {
         }
     }
 
+    /// True when this profile's values differ from the standard profile for the
+    /// preset it is labelled with (e.g. an imported scene that says `"high"` but
+    /// carries a 1x MSAA profile). The editor uses this to show a "Custom"
+    /// state, so re-selecting the standard preset is a real change that resets
+    /// the values instead of a no-op on the already-selected option.
+    pub fn is_custom(&self) -> bool {
+        *self != Self::from_preset(self.preset.clone())
+    }
+
     /// Parse preset name from string.
     pub fn parse_preset(name: &str) -> Option<QualityPreset> {
         match name.to_lowercase().as_str() {
@@ -158,6 +167,28 @@ mod tests {
             assert_eq!(restored.sharpening_enabled, original.sharpening_enabled);
             assert_eq!(restored.particle_density_scale, original.particle_density_scale);
         }
+    }
+
+    #[test]
+    fn standard_profiles_are_not_custom() {
+        for preset in [
+            QualityPreset::Low,
+            QualityPreset::Medium,
+            QualityPreset::High,
+            QualityPreset::Ultra,
+        ] {
+            assert!(!QualitySettings::from_preset(preset).is_custom());
+        }
+    }
+
+    #[test]
+    fn nonstandard_values_under_a_standard_label_are_custom() {
+        let mut imported = QualitySettings::from_preset(QualityPreset::High);
+        imported.msaa_samples = 1;
+        assert!(imported.is_custom());
+        // Re-applying the standard preset yields a different profile, so the
+        // preset command is not skipped as a no-op.
+        assert_ne!(imported, QualitySettings::from_preset(QualityPreset::High));
     }
 
     #[test]

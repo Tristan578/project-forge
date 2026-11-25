@@ -652,7 +652,20 @@ pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String,
 
 /// Emit a quality settings changed event.
 pub fn emit_quality_changed(settings: &crate::core::quality::QualitySettings) {
-    emit_event("QUALITY_CHANGED", settings);
+    /// The profile plus whether its values differ from the standard profile of
+    /// its `preset` label, so the editor can tell an imported nonstandard
+    /// profile from the standard preset.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct QualityChangedPayload<'a> {
+        #[serde(flatten)]
+        settings: &'a crate::core::quality::QualitySettings,
+        custom: bool,
+    }
+    emit_event(
+        "QUALITY_CHANGED",
+        &QualityChangedPayload { settings, custom: settings.is_custom() },
+    );
 }
 
 /// Emit a delta play-tick event.

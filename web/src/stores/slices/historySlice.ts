@@ -29,12 +29,15 @@ export function setHistoryDispatcher(dispatcher: (command: string, payload: unkn
   dispatchCommand = dispatcher;
 }
 
+// The engine labels a quality-profile history entry with this description.
+const QUALITY_CHANGE_DESCRIPTION = 'Quality Change';
+
 export const createHistorySlice: StateCreator<
-  HistorySlice,
+  HistorySlice & { sceneModified: boolean },
   [],
   [],
   HistorySlice
-> = (set) => ({
+> = (set, get) => ({
   // Initial state
   canUndo: false,
   canRedo: false,
@@ -43,12 +46,20 @@ export const createHistorySlice: StateCreator<
 
   // Actions
   undo: () => {
+    // Undoing a quality change emits no scene-node event, so mark the scene
+    // modified here or autosave / New Scene would miss the reverted profile.
+    if (get().canUndo && get().undoDescription === QUALITY_CHANGE_DESCRIPTION) {
+      set({ sceneModified: true });
+    }
     if (dispatchCommand) {
       dispatchCommand('undo', {});
     }
   },
 
   redo: () => {
+    if (get().canRedo && get().redoDescription === QUALITY_CHANGE_DESCRIPTION) {
+      set({ sceneModified: true });
+    }
     if (dispatchCommand) {
       dispatchCommand('redo', {});
     }
