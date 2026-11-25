@@ -220,13 +220,25 @@ expect "11d. a missing link whose path holds an apostrophe is reported missing" 
 remedy_arg_roundtrips "11e. the missing-link remedy quotes an apostrophe path as one literal argument" "$res" "links/$EVIL"
 
 # ---- 12. control bytes in a path never reach the output raw -----------------
-# A tracked path can hold ESC or a newline (Linux only: Windows file names cannot,
-# which is why this suite runs on the Linux portable-paths job). Display copies
+# A tracked path can hold ESC or a newline on POSIX file systems. Display copies
 # must show "?" instead, so the terminal and the session-start hook cannot be
 # driven by a path or a line forged with a newline. The remedy stays printf %q text.
+# Windows file names cannot hold control bytes, so there the fixture cannot be
+# planted and the cases are probe-skipped; Linux CI still gates them.
 ESC=$'\033'
 CTRL_NAME="esc${ESC}[31mred"$'\n'"forged"
 readonly ESC CTRL_NAME
+# shellcheck source=scripts/__tests__/lib/platform.sh
+. "$HERE/lib/platform.sh"
+# Probe through git, not the shell: MSYS maps control bytes to private-use
+# characters, so the shell can create the file while git records another name.
+mkdir -p "$TMP/ctrlprobe" && git -C "$TMP/ctrlprobe" init -q \
+  && : > "$TMP/ctrlprobe/$CTRL_NAME" 2>/dev/null \
+  && git -C "$TMP/ctrlprobe" add -A 2>/dev/null
+ctrl_probe="$(git -C "$TMP/ctrlprobe" ls-files -z 2>/dev/null | tr -d '\0')"
+if [ "$ctrl_probe" != "$CTRL_NAME" ]; then
+  probe_skip_absent_on windows "file system cannot hold control bytes in a name - cases 12a-12c not exercised"
+else
 
 R="$(repo ctrlstub)"
 printf '../shared/file.md' > "$R/links/$CTRL_NAME"
@@ -249,6 +261,7 @@ ln -s "../shared/miss${ESC}ing.md" "$R/links/$CTRL_NAME"
 commit_all "$R"
 expect "12c. a path and target with control bytes are printed escaped in a problem line" "$(run_gate "$R")" 1 \
   "links/esc?[31mred?forged -> ../shared/miss?ing.md: does not resolve" "~$ESC"
+fi
 
 echo ""
 echo "=== $pass passed, $fail failed ==="
