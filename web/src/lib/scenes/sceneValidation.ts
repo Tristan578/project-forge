@@ -131,6 +131,13 @@ const ENGINE_REFUSAL_PREFIX = /^(?:Invalid scene file:\s*)+/;
 const SERDE_POSITION_SUFFIX = /\s+at line \d+ column \d+$/;
 
 /**
+ * What {@link describeSceneRefusal} returns when the engine's reason is empty
+ * once its prefix is stripped. Exported so a caller that has its own sentence
+ * for "no reason given" can recognise this one instead of quoting it.
+ */
+export const ENGINE_GAVE_NO_DETAIL = 'The engine gave no further detail.';
+
+/**
  * Turn an engine or envelope refusal into the text a creator reads.
  *
  * Drops the `Invalid scene file:` prefix (the surrounding sentence already
@@ -147,7 +154,7 @@ const SERDE_POSITION_SUFFIX = /\s+at line \d+ column \d+$/;
 export function describeSceneRefusal(reason: string): string {
   if (reason === ENVELOPE_REFUSAL) return ENVELOPE_REFUSAL_FOR_CREATORS;
   const text = reason.replace(ENGINE_REFUSAL_PREFIX, '').replace(SERDE_POSITION_SUFFIX, '').trim();
-  if (!text) return 'The engine gave no further detail.';
+  if (!text) return ENGINE_GAVE_NO_DETAIL;
   const sentence = text.charAt(0).toUpperCase() + text.slice(1);
   return /[.!?\]]$/.test(sentence) ? sentence : `${sentence}.`;
 }

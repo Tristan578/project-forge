@@ -3,7 +3,7 @@
 > The engine is on Bevy 0.19 (#8887). The 0.19 migration notes (scene rename, `Skybox`,
 > `shadow_maps_enabled`, `AssetMut`, `RenderStartup` pipelines) live in `.claude/rules/bevy-api.md`.
 
-## Migration from 0.16 to 0.18
+## Migration from 0.16 to 0.18 (historical; 0.19 notes live in .claude/rules/bevy-api.md)
 
 ### Bevy 0.17 changes
 - **Events renamed**: `EventWriter<T>` → `MessageWriter<T>`, `EventReader<T>` → `MessageReader<T>`
