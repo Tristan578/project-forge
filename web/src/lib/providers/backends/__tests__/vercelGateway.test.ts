@@ -94,7 +94,7 @@ describe('vercelGatewayBackend', () => {
   describe('resolveModelId', () => {
     it('maps Anthropic canonical models to gateway format', async () => {
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
-      expect(vercelGatewayBackend.resolveModelId('claude-sonnet-4-6')).toBe('anthropic/claude-sonnet-4-6');
+      expect(vercelGatewayBackend.resolveModelId('claude-sonnet-4-6')).toBe('anthropic/claude-sonnet-4.6');
     });
 
     it('treats retired Anthropic IDs as unknown, not as mapped models', async () => {
@@ -118,9 +118,9 @@ describe('vercelGatewayBackend', () => {
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.resolveModelId('claude-sonnet-5')).toBe('anthropic/claude-sonnet-5');
       expect(vercelGatewayBackend.resolveModelId('claude-opus-5')).toBe('anthropic/claude-opus-5');
-      expect(vercelGatewayBackend.resolveModelId('claude-opus-4-8')).toBe('anthropic/claude-opus-4-8');
-      expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5')).toBe('anthropic/claude-haiku-4-5');
-      expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5-20251001')).toBe('anthropic/claude-haiku-4-5');
+      expect(vercelGatewayBackend.resolveModelId('claude-opus-4-8')).toBe('anthropic/claude-opus-4.8');
+      expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5')).toBe('anthropic/claude-haiku-4.5');
+      expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5-20251001')).toBe('anthropic/claude-haiku-4.5');
     });
 
     it('maps OpenAI canonical models to gateway format', async () => {

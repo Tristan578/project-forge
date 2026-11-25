@@ -326,6 +326,32 @@ export function isResolverGatewayCapability(capability: ProviderCapability): boo
 }
 
 /**
+ * Capabilities whose PLATFORM path PREFERS the Vercel AI Gateway when it is
+ * configured, and falls back to the provider's own platform key when it is
+ * not. `chat` is the only one: `/api/generate/{localize,pacing}` used to
+ * resolve `ANTHROPIC_API_KEY` unconditionally, so a deployment running every
+ * other model call through the gateway still had to keep a separate Anthropic
+ * key for those two routes. Preferring the gateway removes that second key;
+ * falling back keeps the direct-Anthropic deployments #10074 protected (no
+ * gateway key and not on Vercel → `ANTHROPIC_API_KEY`, exactly as before).
+ *
+ * Deliberately separate from `RESOLVER_GATEWAY_CAPABILITIES` (gateway-ONLY,
+ * no fallback). BYOK is unaffected: `resolveApiKey` returns a user's own key
+ * before the platform path runs.
+ */
+export const GATEWAY_PREFERRED_CAPABILITIES = ['chat'] as const satisfies readonly ProviderCapability[];
+
+/**
+ * Whether the resolver prefers the gateway for a capability's platform key
+ * (see `GATEWAY_PREFERRED_CAPABILITIES`).
+ * @param capability Server-derived provider capability to inspect.
+ * @returns True for chat; false for every other capability.
+ */
+export function isGatewayPreferredCapability(capability: ProviderCapability): boolean {
+  return (GATEWAY_PREFERRED_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
+}
+
+/**
  * Capabilities that must be refused everywhere — `/api/capabilities`, the
  * generation dialogs, and `createGenerationHandler` — regardless of which
  * keys are set, because no key can make them work. Declared in code, not in
@@ -539,6 +565,17 @@ export const CHAT_BACKEND_ENV_VARS: readonly string[] = CHAT_BACKENDS.flatMap((b
 export function isVercelRuntime(): boolean {
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness inside Boolean(); a blank env var and an absent one must read identically
   return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+}
+
+/**
+ * Whether the Vercel AI Gateway can authenticate in this process: an explicit
+ * `AI_GATEWAY_API_KEY`, or a Vercel runtime where OIDC stands in for it. The
+ * single definition behind `vercelGatewayBackend.isConfigured()` and the
+ * resolver's gateway-preferred path, so the backend that serves chat and the
+ * resolver that picks the generate routes' credential cannot disagree.
+ */
+export function isGatewayConfigured(): boolean {
+  return Boolean(process.env[GATEWAY_KEY_ENV.vercelGateway]) || isVercelRuntime();
 }
 
 /**

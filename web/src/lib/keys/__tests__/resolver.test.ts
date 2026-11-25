@@ -357,7 +357,7 @@ describe('resolveApiKey - status poll (tokenCost 0 AND STATUS_CHECK_OPERATION, #
   it('resolves the platform key for a starter whose trial grant is spent, with no deduction and no usage record', async () => {
     wireDb([], [makeUser(SPENT_STARTER)]);
     const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
-    expect(result).toEqual({ type: 'platform', key: 'platform-meshy-secret', metered: true });
+    expect(result).toEqual({ type: 'platform', key: 'platform-meshy-secret', metered: true, route: 'direct' });
     expect(result.usageId).toBeUndefined();
     expect(mockDeductTokens).not.toHaveBeenCalled();
   });
@@ -373,7 +373,7 @@ describe('resolveApiKey - status poll (tokenCost 0 AND STATUS_CHECK_OPERATION, #
   it('still prefers a BYOK key over the platform key', async () => {
     wireDb([makeBYOKKey()], [makeUser(SPENT_STARTER)]);
     const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
-    expect(result).toEqual({ type: 'byok', key: 'decrypted:encrypted-meshy-key', metered: false });
+    expect(result).toEqual({ type: 'byok', key: 'decrypted:encrypted-meshy-key', metered: false, route: 'direct' });
     expect(mockDeductTokens).not.toHaveBeenCalled();
   });
 
@@ -521,17 +521,67 @@ describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
     const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
     expect(result.type).toBe('platform');
     expect(result.key).toBe('sk-ant-platform');
+    expect(result.route).toBe('direct');
   });
 
-  it('does not consult AI_GATEWAY_API_KEY for the chat capability even when it is set', async () => {
-    // chat is gateway-SERVED (via /api/chat) but not gateway-ONLY: the resolver
-    // path for localize/pacing resolves the provider's own Anthropic key.
+  it('prefers AI_GATEWAY_API_KEY for the chat capability when it is set, so no Anthropic key is needed', async () => {
+    // chat is gateway-PREFERRED: a gateway deployment needs no ANTHROPIC_API_KEY
+    // for localize/pacing. The direct key being set too changes nothing.
     vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
     wireDb([], [makeUser({ tier: 'pro' })]);
     mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat2' });
     const result = await resolveApiKey('user-1', 'anthropic', 10, 'pacing_suggestions', undefined, 'chat');
+    expect(result.key).toBe('gw-secret');
+    expect(result.route).toBe('gateway');
+    expect(result.usageId).toBe('u-chat2');
+  });
+
+  it('routes the chat capability through the gateway with no Anthropic key at all', async () => {
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat3' });
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
+    expect(result).toEqual({ type: 'platform', key: 'gw-secret', metered: true, usageId: 'u-chat3', route: 'gateway' });
+  });
+
+  it('uses Vercel OIDC (empty key, gateway route) for the chat capability on Vercel with no keys set', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production');
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat-oidc' });
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
+    expect(result.key).toBe('');
+    expect(result.route).toBe('gateway');
+  });
+
+  it('still throws the Anthropic-key error before deducting when neither the gateway nor a direct key is available', async () => {
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-none' });
+    await expect(
+      resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat'),
+    ).rejects.toThrow('Platform key not configured: ANTHROPIC_API_KEY');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('keeps a BYOK Anthropic key on the direct route even when the gateway is configured', async () => {
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
+    wireDb([{ encryptedKey: 'enc-anthropic', iv: 'iv' }], [makeUser({ tier: 'pro' })]);
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
+    expect(result.type).toBe('byok');
+    expect(result.route).toBe('direct');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('does not route the 5-arg (capability-less) Anthropic call through the gateway', async () => {
+    // /api/chat's direct-backend billing call passes no capability; it must
+    // keep resolving the direct key so the direct backend it bills for works.
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-direct' });
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
     expect(result.key).toBe('sk-ant-platform');
+    expect(result.route).toBe('direct');
   });
 
   it.each(['image', 'embedding'] as const)(
@@ -607,7 +657,7 @@ describe('resolveApiKey - Anthropic WIF (#8858)', () => {
 
     const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
 
-    expect(result).toEqual({ type: 'byok', key: 'decrypted:enc-anthropic', metered: false });
+    expect(result).toEqual({ type: 'byok', key: 'decrypted:enc-anthropic', metered: false, route: 'direct' });
     expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(0);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockDeductTokens).not.toHaveBeenCalled();
@@ -645,7 +695,7 @@ describe('resolveApiKey - Anthropic WIF (#8858)', () => {
 
     const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
 
-    expect(result).toEqual({ type: 'platform', key: MINTED, metered: true, usageId: 'u-wif' });
+    expect(result).toEqual({ type: 'platform', key: MINTED, metered: true, usageId: 'u-wif', route: 'direct' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(1);
     // #8597 ordering: the credential is resolved before any balance change.

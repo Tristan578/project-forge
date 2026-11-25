@@ -31,9 +31,13 @@ function bareId(id: string): string {
   return slash === -1 ? id : id.slice(slash + 1);
 }
 
-/** Strip a trailing dated-snapshot suffix ('-20251001'). */
+/**
+ * Strip a trailing dated-snapshot suffix ('-20251001') and fold the point
+ * release spelling: the Vercel AI Gateway lists `claude-haiku-4.5` where the
+ * direct Anthropic API says `claude-haiku-4-5`. Same model, two spellings.
+ */
 function undated(id: string): string {
-  return id.replace(/-\d{8}$/, '');
+  return id.replace(/-\d{8}$/, '').replace(/(\d)\.(\d)/g, '$1-$2');
 }
 
 /**

@@ -181,6 +181,55 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     expect(capturedKey).toBe(GATEWAY_KEY);
   });
 
+  it('resolves AI_GATEWAY_API_KEY with keyRoute gateway for a chat route with ANTHROPIC_API_KEY unset', async () => {
+    // /api/generate/{localize,pacing} declare capability 'chat'. A gateway
+    // deployment must not need a separate Anthropic key for them, and the
+    // execute callback must learn the key is a gateway credential.
+    let capturedKey: string | undefined;
+    let capturedRoute: string | undefined;
+    const handler = createGenerationHandler({
+      route: '/api/generate/chat-test',
+      panel: 'ai-chat',
+      provider: 'anthropic',
+      capability: 'chat',
+      operation: 'localize_scene',
+      rateLimitKey: 'gen-chat',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async (_params, apiKey, ctx) => {
+        capturedKey = apiKey;
+        capturedRoute = ctx.keyRoute;
+        return { ok: true };
+      },
+    });
+
+    const res = await handler(makeRequest({ prompt: 'translate the menu' }));
+
+    expect(res.status).toBe(200);
+    expect(capturedKey).toBe(GATEWAY_KEY);
+    expect(capturedRoute).toBe('gateway');
+  });
+
+  it('passes keyRoute direct for a direct-routed capability', async () => {
+    vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el-key');
+    let capturedRoute: string | undefined;
+    const handler = createGenerationHandler({
+      route: '/api/generate/sfx-route-test',
+      panel: 'generate-sound',
+      provider: 'elevenlabs',
+      capability: 'sfx',
+      operation: 'sfx_generation',
+      rateLimitKey: 'gen-sfx',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async (_params, _apiKey, ctx) => {
+        capturedRoute = ctx.keyRoute;
+        return { ok: true };
+      },
+    });
+    const res = await handler(makeRequest({ prompt: 'door creak' }));
+    expect(res.status).toBe(200);
+    expect(capturedRoute).toBe('direct');
+  });
+
   it('a NON-gateway capability still 500s when its PLATFORM_* var is unset (guards the mock)', async () => {
     // sfx is a direct-routed capability → PLATFORM_ELEVENLABS_KEY. Unset it so the
     // real resolver throws "Platform key not configured", proving the gateway pass

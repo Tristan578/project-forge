@@ -99,10 +99,13 @@ yet. A future consumer must pair the key with a gateway endpoint/model adapter
 and use an OIDC-aware SDK for the empty-key sentinel; image integration remains
 tracked in #9818. A configured gate does not establish successful generation.
 
-`ANTHROPIC_API_KEY` serves a direct editor-chat backend and ALWAYS serves
-localization/pacing, even when a gateway key is present
-(https://console.anthropic.com/settings/keys); `PLATFORM_HYPER3D_KEY`
-is BYOK-only and never read on the platform path.
+`ANTHROPIC_API_KEY` serves the direct editor-chat backend, and serves
+localization/pacing only when the gateway cannot authenticate (no
+`AI_GATEWAY_API_KEY` and not on a Vercel runtime). Wherever the gateway is
+configured, localization/pacing route through it on the Haiku gateway model and
+need no Anthropic key, so a gateway deployment can drop `ANTHROPIC_API_KEY`
+once nothing else needs it (https://console.anthropic.com/settings/keys).
+`PLATFORM_HYPER3D_KEY` is BYOK-only and never read on the platform path.
 
 The local operator script grades gateway rows on an explicit `AI_GATEWAY_API_KEY`.
 Unlike the Vercel runtime capability gate, its credit-free account probe does not
