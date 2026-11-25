@@ -37,8 +37,8 @@
   },
   "dependencies": {
     "clsx": "^2",
-    "idb-keyval": "^6.2.2",
-    "tailwind-merge": "^3"
+    "idb-keyval": "^6.3.0",
+    "tailwind-merge": "^3.7.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",
