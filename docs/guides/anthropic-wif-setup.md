@@ -22,9 +22,12 @@ What uses the federated token when it is on:
   `direct` backend, not through the AI Gateway, OpenRouter or GitHub Models. The
   keys that are set decide which backend serves chat.
 - **`getPlatformKey('anthropic')`** in `web/src/lib/keys/resolver.ts`. This is
-  the platform key that `/api/generate/localize` and `/api/generate/pacing` use.
-  Those routes turn it into a client with `anthropicClientAuthForKey()`, so a
-  Bearer token is never sent as `x-api-key`.
+  the platform key that `/api/generate/localize` and `/api/generate/pacing` use
+  ONLY when the AI Gateway cannot authenticate (no `AI_GATEWAY_API_KEY` and not
+  a Vercel runtime). Wherever the gateway can authenticate, those routes use the
+  gateway and never reach this credential. On the direct path they turn it into
+  a client with `anthropicClientAuthForKey()`, so a Bearer token is never sent
+  as `x-api-key`.
 
 A user's own (BYOK) Anthropic key still wins over any platform credential.
 

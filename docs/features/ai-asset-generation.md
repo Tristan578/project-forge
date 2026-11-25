@@ -97,7 +97,7 @@ Platform credential resolution has two policies. Existing stored BYOK credential
 | Image | Gateway only (#9523) | `AI_GATEWAY_API_KEY` (or Vercel OIDC) — `PLATFORM_OPENAI_KEY` no longer serves it |
 | Embedding | Gateway only (#9523) | `AI_GATEWAY_API_KEY` (or Vercel OIDC) — `PLATFORM_OPENAI_KEY` no longer serves it |
 | Editor chat (`/api/chat`) | Existing backend routing | Gateway / OIDC or a configured direct/router backend |
-| Localization and pacing | Direct Anthropic | `ANTHROPIC_API_KEY` or an existing Anthropic BYOK credential, even with a gateway key |
+| Localization and pacing | Gateway preferred | `AI_GATEWAY_API_KEY` or Vercel OIDC wherever the gateway can authenticate (any Vercel runtime counts); otherwise `ANTHROPIC_API_KEY`. An Anthropic BYOK credential always goes direct |
 | Sprite / Pixel art | Direct | `PLATFORM_REPLICATE_KEY` + `PLATFORM_OPENAI_KEY` (DALL-E 3 default) |
 | 3D Model / Texture | Direct | `PLATFORM_MESHY_KEY` |
 | Sound Effect / Voice / Music | Direct | `PLATFORM_ELEVENLABS_KEY` |

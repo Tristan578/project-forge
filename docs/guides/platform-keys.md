@@ -85,7 +85,7 @@ to mint" columns are this runbook's; keep them in step when the tables change.
 
 | Capability | Provider | Route | Env var | Decision | Where to mint |
 |---|---|---|---|---|---|
-| `chat`, `embedding`, `image` | Vercel AI Gateway | gateway | `AI_GATEWAY_API_KEY` | **Gateway credentials** — recorded in production on 2026-09-05; image/embedding consumer transport is not verified | Vercel dashboard → AI Gateway |
+| `chat`, `embedding`, `image` | Vercel AI Gateway | gateway | `AI_GATEWAY_API_KEY` | **Gateway credentials** — recorded in production on 2026-09-05. Editor chat tries the gateway first; localization/pacing prefer it and fall back to `ANTHROPIC_API_KEY` only off Vercel with no gateway key; image/embedding are gateway-only and their consumer transport is not verified | Vercel dashboard → AI Gateway |
 | `model3d`, `texture` (also skybox) | Meshy | platform-key | `PLATFORM_MESHY_KEY` | **Platform key** (owner) | https://www.meshy.ai/settings/api — shown once, prefix `msy_` |
 | `sfx`, `voice`, `music` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key; the one key covers all three | https://elevenlabs.io/app/settings/api-keys |
 | `sprite` (and pixel art) | Replicate or OpenAI, per operation | platform-key | `PLATFORM_REPLICATE_KEY` or `PLATFORM_OPENAI_KEY` | Pixel-art sprites, sprite sheets and tilesets use Replicate. Other single-sprite styles use OpenAI. The aggregate capability requires both; the dialog gates each selected operation independently. Provision both to support every operation. OpenAI and Replicate are not currently supported by user key setup; unavailable operations do not offer a Settings link. | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
@@ -103,8 +103,24 @@ tracked in #9818. A configured gate does not establish successful generation.
 localization/pacing only when the gateway cannot authenticate (no
 `AI_GATEWAY_API_KEY` and not on a Vercel runtime). Wherever the gateway is
 configured, localization/pacing route through it on the Haiku gateway model and
-need no Anthropic key, so a gateway deployment can drop `ANTHROPIC_API_KEY`
-once nothing else needs it (https://console.anthropic.com/settings/keys).
+need no Anthropic key (https://console.anthropic.com/settings/keys).
+
+**On Vercel the gateway always counts as configured**, because OIDC needs no
+key. So on any Vercel deployment localization/pacing go to the gateway even if
+only `ANTHROPIC_API_KEY` is set, and there is no fallback to that key if the
+gateway call fails (no AI Gateway credits, or a budget hit). Keep the AI Gateway
+funded on every Vercel environment that serves these features.
+
+Which Anthropic credentials to keep:
+
+- **Keep `ANTHROPIC_API_KEY`** while anything still uses the direct Anthropic
+  path: editor chat's `direct` backend (the last fallback after the gateway,
+  OpenRouter and GitHub Models), and Anthropic Workload Identity Federation,
+  which needs it as the fallback for a failed token exchange
+  (`docs/guides/anthropic-wif-setup.md`).
+- **It can go** on a gateway deployment that uses neither: no WIF variables set,
+  and no wish for chat to fall back to Anthropic directly when the gateway is
+  down. Localization and pacing no longer need it there.
 `PLATFORM_HYPER3D_KEY` is BYOK-only and never read on the platform path.
 
 The local operator script grades gateway rows on an explicit `AI_GATEWAY_API_KEY`.
