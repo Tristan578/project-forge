@@ -7,7 +7,7 @@
  * The generated command pages (`content/mcp/*.mdx`) carry NO `title` frontmatter
  * — only `commandName` / `category` / `visibility` / `description`
  * (`scripts/generate-mcp-docs.ts`). The fumadocs source schema in
- * `source.config.ts` is the single place that turns that into the title a
+ * `lib/docs-schema.ts` is the single place that turns that into the title a
  * command page shows in the sidebar and heading, by deriving `title` from
  * `commandName`. This asserts that derivation over a REAL generated page — the
  * same generator output the site ships — so a regression to a hardcoded label
@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
 import { generateMcpDocs } from '../../scripts/generate-mcp-docs';
-import { docsSchema } from '../../source.config';
+import { docsSchema } from '../../lib/docs-schema';
 
 const here = join(fileURLToPath(import.meta.url), '..');
 // The in-root manifest copy (kept identical to mcp-server/manifest/commands.json
