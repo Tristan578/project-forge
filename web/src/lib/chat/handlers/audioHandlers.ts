@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
 import { zEntityId, parseArgs } from './types';
 import { audioManager } from '@/lib/audio/audioManager';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 
 const zStem = z.object({
   name: z.string(),
@@ -152,5 +153,152 @@ export const audioHandlers: Record<string, ToolHandler> = {
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set audio occlusion' };
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Music arrangement (music.FR-2.OP-01 / OP-02, #9854).
+  //
+  // The in-app AI half of the same operations the MusicArrangementPanel offers
+  // manually. Both call the identical `useMusicArrangementStore` actions, so the
+  // manual controls and the AI path share one validated command/data contract
+  // and one undo/redo history — never two implementations of "trim a clip".
+  // ---------------------------------------------------------------------------
+
+  arrangement_add_track: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ name: z.string().optional() }), args);
+    if (p.error) return p.error;
+    const trackId = useMusicArrangementStore.getState().addTrack(p.data.name);
+    return { success: true, result: { trackId, message: `Added arrangement track ${trackId}.` } };
+  },
+
+  arrangement_delete_track: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ trackId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.tracks.some((t) => t.id === p.data.trackId)) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
+    store.deleteTrack(p.data.trackId);
+    return { success: true, result: { message: `Deleted arrangement track ${p.data.trackId}.` } };
+  },
+
+  arrangement_set_track_muted: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ trackId: z.string().min(1), muted: z.boolean() }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.tracks.some((t) => t.id === p.data.trackId)) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
+    store.setTrackMuted(p.data.trackId, p.data.muted);
+    return { success: true, result: { message: `Set mute on track ${p.data.trackId} to ${p.data.muted}.` } };
+  },
+
+  arrangement_rename_track: async (args, _ctx): Promise<ExecutionResult> => {
+    // `.trim().min(1)`, not the store's own trim-and-no-op: a blank (or
+    // whitespace-only) name silently doing nothing would report success
+    // without renaming anything, the same class of gap the trackId-not-found
+    // guards on this object exist to close.
+    const p = parseArgs(z.object({ trackId: z.string().min(1), name: z.string().trim().min(1) }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.tracks.some((t) => t.id === p.data.trackId)) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
+    store.renameTrack(p.data.trackId, p.data.name);
+    return { success: true, result: { message: `Renamed track ${p.data.trackId} to "${p.data.name.trim()}".` } };
+  },
+
+  arrangement_add_clip: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      trackId: z.string().min(1),
+      sourceUrl: z.string().min(1),
+      sourceDurationSeconds: z.number(),
+      startOffset: z.number().optional(),
+      name: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+    const clipId = useMusicArrangementStore.getState().addClip({
+      trackId: p.data.trackId,
+      sourceUrl: p.data.sourceUrl,
+      sourceDurationSeconds: p.data.sourceDurationSeconds,
+      startOffset: p.data.startOffset,
+      name: p.data.name,
+    });
+    if (clipId === null) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
+    return { success: true, result: { clipId, message: `Added clip ${clipId} to track ${p.data.trackId}.` } };
+  },
+
+  arrangement_move_clip: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      clipId: z.string().min(1),
+      startOffset: z.number(),
+      trackId: z.string().min(1).optional(),
+    }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.clips.some((c) => c.id === p.data.clipId)) {
+      return { success: false, error: `Arrangement clip not found: ${p.data.clipId}` };
+    }
+    if (p.data.trackId !== undefined && !store.arrangement.tracks.some((t) => t.id === p.data.trackId)) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
+    store.moveClip(p.data.clipId, p.data.startOffset, p.data.trackId);
+    return { success: true, result: { message: `Moved clip ${p.data.clipId}.` } };
+  },
+
+  arrangement_trim_clip: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      clipId: z.string().min(1),
+      trimStart: z.number().optional(),
+      trimEnd: z.number().optional(),
+    }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.clips.some((c) => c.id === p.data.clipId)) {
+      return { success: false, error: `Arrangement clip not found: ${p.data.clipId}` };
+    }
+    store.trimClip(p.data.clipId, { trimStart: p.data.trimStart, trimEnd: p.data.trimEnd });
+    return { success: true, result: { message: `Trimmed clip ${p.data.clipId}.` } };
+  },
+
+  arrangement_set_loop: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      clipId: z.string().min(1),
+      loopEnabled: z.boolean(),
+      trimStart: z.number().optional(),
+      trimEnd: z.number().optional(),
+    }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.clips.some((c) => c.id === p.data.clipId)) {
+      return { success: false, error: `Arrangement clip not found: ${p.data.clipId}` };
+    }
+    store.setLoopPoints(p.data.clipId, {
+      loopEnabled: p.data.loopEnabled,
+      trimStart: p.data.trimStart,
+      trimEnd: p.data.trimEnd,
+    });
+    return { success: true, result: { message: `Set loop on clip ${p.data.clipId} to ${p.data.loopEnabled}.` } };
+  },
+
+  arrangement_delete_clip: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ clipId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.clips.some((c) => c.id === p.data.clipId)) {
+      return { success: false, error: `Arrangement clip not found: ${p.data.clipId}` };
+    }
+    store.deleteClip(p.data.clipId);
+    return { success: true, result: { message: `Deleted clip ${p.data.clipId}.` } };
+  },
+
+  arrangement_set_tempo: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ bpm: z.number() }), args);
+    if (p.error) return p.error;
+    useMusicArrangementStore.getState().setTempoBpm(p.data.bpm);
+    const tempoBpm = useMusicArrangementStore.getState().arrangement.tempoBpm;
+    return { success: true, result: { tempoBpm, message: `Set arrangement tempo to ${tempoBpm} BPM.` } };
   },
 };

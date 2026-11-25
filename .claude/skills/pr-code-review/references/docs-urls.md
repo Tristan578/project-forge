@@ -36,7 +36,7 @@ Use these when verifying API signatures, configuration options, or migration gui
 
 | Library | Version | URL |
 |---------|---------|-----|
-| Stripe Node.js | 20.x (pinned) | https://stripe.com/docs/api |
+| Stripe Node.js | see `web/package.json` | https://stripe.com/docs/api |
 | Stripe webhooks | — | https://stripe.com/docs/webhooks |
 | Stripe checkout | — | https://stripe.com/docs/payments/checkout |
 
@@ -79,10 +79,10 @@ Use these when verifying API signatures, configuration options, or migration gui
 
 | Library | URL |
 |---------|-----|
-| Bevy 0.18 | https://bevyengine.org/learn/migration-guides/ |
+| Bevy 0.19 | https://bevyengine.org/learn/migration-guides/ |
 | Bevy ECS | https://docs.rs/bevy/latest/bevy/ecs/index.html |
 | wasm-bindgen 0.2.127 | https://rustwasm.github.io/wasm-bindgen/introduction.html |
-| bevy_rapier3d 0.33 | https://docs.rs/bevy_rapier3d/latest/bevy_rapier3d/ |
+| bevy_rapier3d 0.35 | https://docs.rs/bevy_rapier3d/latest/bevy_rapier3d/ |
 | serde | https://serde.rs/ |
 
 ## Infrastructure

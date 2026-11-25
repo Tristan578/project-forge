@@ -49,14 +49,17 @@ Documenting why specific dependencies are pinned and what must be audited before
 2. Run `/changelog-review` to check for breaking changes
 3. Test E2E with `npx playwright test` — hydration dialogs often change behavior
 4. Check `web/src/proxy.ts` — middleware API may have changed
-5. Verify `vercel.json` is still valid (no deprecated fields)
+5. Verify `web/vercel.ts` is still valid (no deprecated fields) — `tsc --noEmit` now
+   catches an invalid `VercelConfig` shape on its own (PF-1060/#9097), so this step is
+   mostly a formality; it still matters for fields that are structurally valid but
+   deprecated/no-ops, which `tsc` cannot detect
 
 ---
 
-### Bevy — Currently `0.18`
+### Bevy — Currently `0.19`
 
 **Why constrained:** Bevy is in active development and every minor version has breaking API changes. Upgrading requires:
-- Updating all import paths (see `.claude/rules/bevy-api.md` for the 0.16→0.18 migration)
+- Updating all import paths (see `.claude/rules/bevy-api.md` for the 0.16→0.19 migration)
 - Updating all event types (`MessageWriter`, `MessageReader`, `#[derive(Message)]`)
 - Rebuilding WASM with matching bevy_rapier, bevy_hanabi versions
 - Testing physics, rendering, particles, and animation
@@ -111,15 +114,15 @@ Audit ticket: #9975.
 | `stripe` | `^22.6.1` | LOW | Centralized in `stripe-client.ts`, check apiVersion string (currently `2026-08-26.dahlia` — verified 2026-09-11) |
 | `wasm-bindgen` | =0.2.127 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
-| `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
+| `bevy` | 0.19 | HIGH (API churn) | Only on planned engine upgrade sprint |
 | `@clerk/nextjs` | ^7.9.1 | LOW-MEDIUM | Check for auth() API changes (7.5 dropped `baseTheme` — appearance API migrated in f55ec99d) |
 | `drizzle-orm` | 0.45.2 | LOW | Check migration query syntax |
 | `vitest` | ^5.0.0 | LOW | Check for workspace config changes; 5.x brought `@rolldown/binding` in as a native dep — see `scripts/check-native-bindings.sh` |
 | `zod` | ^4.5.4 | LOW | Already on v4 |
 | `typescript` | ^6.0.3 | **HIGH (no programmatic API in 7.0)** | Do not bump to 7 without the audit — see the TypeScript section above and #9975 |
-| `@sentry/nextjs` + `@sentry/profiling-node` | `^10.73.0` (both) | MEDIUM | The two **declared ranges** must stay byte-identical; a skew fails silently at load. Pinned by `sentry-regressions.test.ts:863` |
+| `@sentry/nextjs` + `@sentry/profiling-node` | `^11.0.0` (both) | MEDIUM | The two **declared ranges** must stay byte-identical; a skew fails silently at load. Pinned by the `sentry-regressions.test.ts` case "pins @sentry/profiling-node to the same declared range as @sentry/nextjs" |
 
-> **This column is the declared range, not the locked version.** The range in `web/package.json` is usually behind what `package-lock.json` resolves: `@sentry/*` declares `^10.73.0` and locks `10.74.0`; `@clerk/nextjs` declares `^7.9.1` and locks `7.9.2`. Compare like with like before concluding something is out of date — reading a range against a registry `latest` is how a routine bump gets mistaken for a major one.
+> **This column is the declared range, not the locked version.** The range in `web/package.json` is usually behind what `package-lock.json` resolves: `@clerk/nextjs` declares `^7.9.1` and locks `7.9.2` (the two can also coincide: `@sentry/*` declares `^11.0.0` and locks `11.0.0` as of #10302). Compare like with like before concluding something is out of date — reading a range against a registry `latest` is how a routine bump gets mistaken for a major one.
 >
 > Last verified against `origin/main` on **2026-09-11**. Read `web/package.json` and `package-lock.json` for live values rather than trusting this snapshot.
 

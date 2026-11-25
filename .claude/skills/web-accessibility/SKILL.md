@@ -341,45 +341,41 @@ Validate accessibility with automated and manual testing.
 - Test all features with keyboard only
 - Screen reader testing (NVDA, VoiceOver)
 
-**Example** (Jest + axe-core):
+**Example** (SpawnForge: Playwright + `@axe-core/playwright` for scans, Vitest + RTL for keyboard behavior; see `web/e2e/tests/accessibility-audit.spec.ts`):
 ```typescript
+// web/e2e/tests/*.spec.ts — axe scan of a rendered page
+import AxeBuilder from '@axe-core/playwright';
+import { test, expect } from '../fixtures/editor.fixture';
+
+test('editor has no WCAG AA violations', async ({ page }) => {
+  await page.goto('/dev');
+  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
+  expect(results.violations).toEqual([]);
+});
+
+// Keyboard focus: drive real Tab presses (lesson #11 — programmatic focus()
+// does not trigger :focus-visible after a pointer event)
+test('the first Tab stop shows a visible focus ring', async ({ page }) => {
+  await page.goto('/dev');
+  await page.keyboard.press('Tab');
+  const outlineStyle = await page.evaluate(() => getComputedStyle(document.activeElement!).outlineStyle);
+  expect(outlineStyle).not.toBe('none');
+});
+```
+
+```typescript
+// web/src/components/**/__tests__/*.test.tsx — Vitest + RTL
 import { render } from '@testing-library/react';
-import { axe, toHaveNoViolations } from 'jest-axe';
-import AccessibleButton from './AccessibleButton';
+import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 
-expect.extend(toHaveNoViolations);
-
-describe('AccessibleButton', () => {
-  it('should have no accessibility violations', async () => {
-    const { container } = render(
-      <AccessibleButton onClick={() => {}}>
-        Click Me
-      </AccessibleButton>
-    );
-
-    const results = await axe(container);
-    expect(results).toHaveNoViolations();
-  });
-
-  it('should be keyboard accessible', () => {
-    const handleClick = jest.fn();
-    const { getByRole } = render(
-      <AccessibleButton onClick={handleClick}>
-        Click Me
-      </AccessibleButton>
-    );
-
-    const button = getByRole('button');
-
-    // Enter key
-    button.focus();
-    fireEvent.keyDown(button, { key: 'Enter' });
-    expect(handleClick).toHaveBeenCalled();
-
-    // Space key
-    fireEvent.keyDown(button, { key: ' ' });
-    expect(handleClick).toHaveBeenCalledTimes(2);
-  });
+it('activates with Enter and Space', async () => {
+  const onClick = vi.fn();
+  render(<button onClick={onClick}>Click Me</button>);
+  await userEvent.tab();
+  await userEvent.keyboard('{Enter}');
+  await userEvent.keyboard(' ');
+  expect(onClick).toHaveBeenCalledTimes(2);
 });
 ```
 
@@ -623,10 +619,6 @@ function AccessibleTabs({ tabs }: { tabs: { id: string; label: string; content: 
 - **Current Version**: 1.0.0
 - **Last Updated**: 2025-01-01
 - **Compatible Platforms**: Claude, ChatGPT, Gemini
-
-### Related Skills
-- [ui-component-patterns](../ui-component-patterns/SKILL.md): UI component implementation
-- [responsive-design](../responsive-design/SKILL.md): Responsive design
 
 ### Tags
 `#accessibility` `#a11y` `#WCAG` `#ARIA` `#screen-reader` `#keyboard-navigation` `#frontend`

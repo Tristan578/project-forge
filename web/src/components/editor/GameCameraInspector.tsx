@@ -12,6 +12,7 @@ import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   acceptsNegative,
   ENGINE_CAMERA_DEFAULTS,
+  MODE_READS_DAMPING,
   readCameraFieldValue,
   type NumericCameraField,
 } from '@/lib/game/gameCameraPayload';
@@ -30,19 +31,47 @@ import {
  * the engine's 0.1 — that field is DEGREES of yaw per pixel of mouse delta
  * (`fp_state.yaw -= delta.dx * sensitivity`), so 0.1 turns a 900-pixel sweep
  * through 90° and 2 turns it through 1800°: five full rotations, unusable.
+ *
+ * `followSmoothing` is seeded for every mode in `MODE_READS_DAMPING` rather
+ * than listed per mode: the engine reads `damping` in all three follow arms,
+ * and this table used to seed it for `thirdPersonFollow` alone — the same
+ * one-mode-only shape the payload builder had (Sentry finding on #10295).
+ *
+ * Agreement with that table is enforced by {@link ModeDefaults} at compile
+ * time, in both directions: a follow mode missing the seed fails the
+ * required `followSmoothing`, and a non-follow mode carrying one fails the
+ * `never`. A module-scope runtime check did this first, and a `throw` at
+ * import time in a `'use client'` bundle turns table drift into a blank
+ * inspector for every user rather than a red `tsc` for the one who drifted it.
  */
-const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
+type ModeDefaults = {
+  [M in GameCameraMode]: (typeof MODE_READS_DAMPING)[M] extends true
+    ? Partial<GameCameraData> & { followSmoothing: number }
+    : Partial<GameCameraData> & { followSmoothing?: never };
+};
+
+const FOLLOW_DEFAULTS: { followSmoothing: number } = {
+  followSmoothing: ENGINE_CAMERA_DEFAULTS.followSmoothing,
+};
+
+const MODE_DEFAULTS: ModeDefaults = {
   thirdPersonFollow: {
     followDistance: ENGINE_CAMERA_DEFAULTS.followDistance,
     followHeight: ENGINE_CAMERA_DEFAULTS.followHeight,
-    followSmoothing: ENGINE_CAMERA_DEFAULTS.followSmoothing,
+    ...FOLLOW_DEFAULTS,
   },
   firstPerson: {
     firstPersonHeight: ENGINE_CAMERA_DEFAULTS.firstPersonHeight,
     firstPersonMouseSensitivity: ENGINE_CAMERA_DEFAULTS.firstPersonMouseSensitivity,
   },
-  sideScroller: { sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance },
-  topDown: { topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight },
+  sideScroller: {
+    sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance,
+    ...FOLLOW_DEFAULTS,
+  },
+  topDown: {
+    topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight,
+    ...FOLLOW_DEFAULTS,
+  },
   fixed: {},
   orbital: {
     orbitalDistance: ENGINE_CAMERA_DEFAULTS.orbitalDistance,
@@ -297,7 +326,13 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
             type="text"
             value={primaryGameCamera.targetEntity ?? ''}
             onChange={(e) => handleParamChange({ targetEntity: e.target.value || null })}
-            placeholder="(follow selected)"
+            // Not "(follow selected)": nothing fills a blank target with the
+            // editor selection. The engine resolves `target_entity: None` to no
+            // target and skips every arm that reads it, so a blank field is a
+            // camera that never moves in every mode but Fixed (see
+            // `cameraModeNeedsTarget`). "track", not "follow": the guide and the
+            // tooltip keep "follow" for the three modes with Smoothing.
+            placeholder="entity id (required to track)"
             className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
               focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-400"
           />
@@ -308,8 +343,6 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
           <>
             <NumberParamRow label="Distance" term="gameCameraFollowDist" field="followDistance" camera={primaryGameCamera} onChange={handleParamChange} />
             <NumberParamRow label="Height" term="gameCameraFollowHeight" field="followHeight" camera={primaryGameCamera} onChange={handleParamChange} />
-            {/* min=0: the engine refuses a negative follow rate outright (PF-1166). */}
-            <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
         )}
 
@@ -333,6 +366,20 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
             <NumberParamRow label="Distance" term="gameCameraOrbitalDist" field="orbitalDistance" camera={primaryGameCamera} onChange={handleParamChange} />
             <NumberParamRow label="Auto Rotate" term="gameCameraAutoRotate" field="orbitalAutoRotateSpeed" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
+        )}
+
+        {/*
+          Smoothing is a follow rate, and every mode that FOLLOWS reads it — the
+          engine's `damping`, in the thirdPersonFollow, sideScroller and topDown
+          arms alike. Gated by the payload module's own table rather than a
+          second hand-written mode list: this row sat inside the
+          thirdPersonFollow block above, so a side-scroller or top-down author
+          had no control for a value the engine was reading all along.
+          `min={0}` (via `acceptsNegative`): the engine refuses a negative rate
+          outright (PF-1166).
+        */}
+        {MODE_READS_DAMPING[primaryGameCamera.mode] && (
+          <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
         )}
 
         {primaryGameCamera.mode === 'fixed' && (

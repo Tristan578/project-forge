@@ -10,6 +10,7 @@ import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, Phy
 import type { GenerationJob } from '@/stores/generationStore';
 import { loadScripts as loadLibraryScripts } from '@/stores/scriptLibraryStore';
 import { buildEntityIndex } from '@/lib/engine/entityIndex';
+import { DEFAULT_COMPLETION_MODE, isCompletionMode, requiresWinCondition } from '@/lib/playMode/completionMode';
 
 /**
  * Render an entity id the scene graph has no name for.
@@ -38,37 +39,37 @@ interface EditorSnapshot {
   primaryId: string | null;
   primaryTransform: TransformData | null;
   primaryMaterial: MaterialData | null;
-  primaryShaderEffect?: ShaderEffectData | null;
+  primaryShaderEffect?: ShaderEffectData | null | undefined;
   primaryLight: LightData | null;
-  primaryPhysics?: PhysicsData | null;
-  physicsEnabled?: boolean;
+  primaryPhysics?: PhysicsData | null | undefined;
+  physicsEnabled?: boolean | undefined;
   ambientLight: AmbientLightData;
   environment: EnvironmentData;
-  engineMode?: EngineMode;
+  engineMode?: EngineMode | undefined;
   canUndo: boolean;
   canRedo: boolean;
   undoDescription: string | null;
   redoDescription: string | null;
-  inputBindings?: InputBinding[];
-  inputPreset?: InputPreset;
-  sceneName?: string;
-  assetRegistry?: Record<string, AssetMetadata>;
-  allScripts?: Record<string, ScriptData>;
-  entityAudio?: Record<string, AudioData>;
-  primaryParticle?: ParticleData | null;
-  particleEnabled?: boolean;
-  primaryAnimation?: AnimationPlaybackState | null;
-  primaryAnimationClip?: AnimationClipData | null;
-  postProcessing?: PostProcessingData;
-  audioBuses?: AudioBusDef[];
-  terrainData?: Record<string, import('@/stores/editorStore').TerrainDataState>;
-  primaryJoint?: JointData | null;
-  scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
-  activeSceneId?: string | null;
-  allGameComponents?: Record<string, import('@/stores/editorStore').GameComponentData[]>;
-  allGameCameras?: Record<string, import('@/stores/editorStore').GameCameraData>;
-  activeGameCameraId?: string | null;
-  activeGenerations?: GenerationJob[];
+  inputBindings?: InputBinding[] | undefined;
+  inputPreset?: InputPreset | undefined;
+  sceneName?: string | undefined;
+  assetRegistry?: Record<string, AssetMetadata> | undefined;
+  allScripts?: Record<string, ScriptData> | undefined;
+  entityAudio?: Record<string, AudioData> | undefined;
+  primaryParticle?: ParticleData | null | undefined;
+  particleEnabled?: boolean | undefined;
+  primaryAnimation?: AnimationPlaybackState | null | undefined;
+  primaryAnimationClip?: AnimationClipData | null | undefined;
+  postProcessing?: PostProcessingData | undefined;
+  audioBuses?: AudioBusDef[] | undefined;
+  terrainData?: Record<string, import('@/stores/editorStore').TerrainDataState> | undefined;
+  primaryJoint?: JointData | null | undefined;
+  scenes?: Array<{ id: string; name: string; isStartScene: boolean }> | undefined;
+  activeSceneId?: string | null | undefined;
+  allGameComponents?: Record<string, import('@/stores/editorStore').GameComponentData[]> | undefined;
+  allGameCameras?: Record<string, import('@/stores/editorStore').GameCameraData> | undefined;
+  activeGameCameraId?: string | null | undefined;
+  activeGenerations?: GenerationJob[] | undefined;
 }
 
 function formatVec3(v: [number, number, number]): string {
@@ -216,7 +217,18 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Scene overview
   const sceneLabel = state.sceneName && state.sceneName !== 'Untitled' ? ` "${state.sceneName}"` : '';
-  sections.push(`## Current Scene State${sceneLabel}\nEntities: ${nodeCount}`);
+  // The completion mode (#9998) is stated so the AI can tell a sandbox the
+  // creator chose from a win game missing its goal — and so it reads the mode
+  // before `set_completion_mode` changes it, rather than overriding a manual
+  // choice it never saw. Absent is the legacy `win`, said as such. Narrowed
+  // before interpolation: this string is part of the system prompt, so only
+  // one of the four known words may ever reach it.
+  const mode = isCompletionMode(sceneGraph.completionMode) ? sceneGraph.completionMode : undefined;
+  const modeLabel = mode ?? `${DEFAULT_COMPLETION_MODE} (default, not set)`;
+  const modeRule = requiresWinCondition(mode)
+    ? 'Play requires a win condition the player can complete'
+    : 'Play does not require a win condition';
+  sections.push(`## Current Scene State${sceneLabel}\nEntities: ${nodeCount}\nCompletion mode: ${modeLabel} — ${modeRule}`);
 
   if (nodeCount === 0) {
     sections.push('(Empty scene — no entities yet)');

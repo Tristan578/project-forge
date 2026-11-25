@@ -12,7 +12,7 @@
  *   - Pro gets all panels including the most powerful ones (auto-iteration, playtest).
  */
 
-import type { Tier } from '@/stores/userStore';
+import type { Tier } from '@/lib/db/schema';
 
 // ---------------------------------------------------------------------------
 // Tier ordering
@@ -29,6 +29,56 @@ const TIER_RANK: Record<Tier, number> = {
 /** Returns true if `tier` meets or exceeds `required`. */
 export function tierAtLeast(tier: Tier, required: Tier): boolean {
   return TIER_RANK[tier] >= TIER_RANK[required];
+}
+
+// ---------------------------------------------------------------------------
+// Trial access (#7715)
+// ---------------------------------------------------------------------------
+
+/**
+ * The access level a `starter` account is granted while it holds tokens it
+ * can spend. Signup grants `TRIAL_GRANT_TOKENS` (`grantTrialTokens`), and a
+ * cancelled subscription leaves the starter allocation behind; either way the
+ * tokens are only worth something if the AI surfaces that spend them open.
+ * `hobbyist` is the lowest tier with AI access, so that is what the tokens
+ * buy: chat and the hobbyist generation panels. Creator and pro panels stay
+ * gated on the paid tier.
+ */
+export const TRIAL_ACCESS_TIER: Tier = 'hobbyist';
+
+/**
+ * Tokens the account can spend right now: the unused part of the monthly
+ * allocation plus add-ons. The same arithmetic `getTokenBalance` reports as
+ * `total`; kept here so the server gates and the client gate agree on it.
+ */
+export function spendableTokensOf(user: {
+  monthlyTokens: number;
+  monthlyTokensUsed: number;
+  addonTokens: number;
+}): number {
+  return Math.max(0, user.monthlyTokens - user.monthlyTokensUsed) + user.addonTokens;
+}
+
+/**
+ * The tier to use for an ACCESS decision. A `starter` account with spendable
+ * tokens is treated as `TRIAL_ACCESS_TIER`; every other account is its own
+ * tier. This is the single rule behind `canAccessPanel` in the editor,
+ * `assertAiAccess` on `/api/chat` and `/api/game/decompose`, the platform-key
+ * resolver, and the per-route `panel` gate (`panelTierGateResponse`, run by
+ * `createGenerationHandler` and by `voice/batch`, which resolves its key
+ * directly — #7715 review rounds 2-3) — the gates that had kept a trial grant unusable, or left a
+ * generation route reachable past its own panel's tier, when they each
+ * checked the raw tier alone.
+ *
+ * Status polls do NOT use this rule: `panelTierGateResponseForPoll` judges a
+ * `starter` that has HELD tokens (`monthlyTokens > 0 || addonTokens > 0`) at
+ * `TRIAL_ACCESS_TIER` whatever its live balance, and a never-granted starter
+ * as `starter`; the resolver then skips its checks for a zero-cost
+ * `STATUS_CHECK_OPERATION`. A poll reads a job that was already paid for, and
+ * one generation can spend the whole grant.
+ */
+export function effectiveTier(tier: Tier, spendableTokens: number): Tier {
+  return tier === 'starter' && spendableTokens > 0 ? TRIAL_ACCESS_TIER : tier;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +141,24 @@ export function canAccessPanel(panelId: string, tier: Tier): boolean {
   const required = PANEL_TIER_REQUIREMENTS[panelId];
   if (required === undefined) return true;
   return tierAtLeast(tier, required);
+}
+
+/**
+ * The access answer for `panelId` BEFORE `/api/user/profile` resolves, when
+ * the client still holds the store defaults (`starter`, 0 tokens) and cannot
+ * tell a trial-eligible starter from one with nothing to spend.
+ *
+ * Only the tiers a trial can grant are ambiguous at that point: a starter's
+ * spendable tokens raise it to `TRIAL_ACCESS_TIER` and never above, so a
+ * panel requiring more than that is locked for every $0 account regardless of
+ * balance. Those panels stay locked until the profile loads (a paid account
+ * sees the lock for one render, which is the safe direction); panels the trial
+ * could open render unlocked rather than flash a lock in front of a trial
+ * account. Used by the editor's `withTierGate` and the Asset panel's AI menu
+ * (#7715 review round 3).
+ */
+export function canAccessPanelBeforeProfileLoad(panelId: string): boolean {
+  return canAccessPanel(panelId, TRIAL_ACCESS_TIER);
 }
 
 /**

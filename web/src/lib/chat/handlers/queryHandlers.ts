@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, parseArgs } from './types';
+import { ownEntry, zEntityId, parseArgs } from './types';
 
 export const queryHandlers: Record<string, ToolHandler> = {
   get_audio: async (args, { store }) => {
@@ -11,7 +11,7 @@ export const queryHandlers: Record<string, ToolHandler> = {
     if (!Object.hasOwn(store.entityAudio, p.data.entityId)) {
       return { success: true, result: { hasAudio: false } };
     }
-    return { success: true, result: { hasAudio: true, ...store.entityAudio[p.data.entityId] } };
+    return { success: true, result: { hasAudio: true, ...ownEntry(store.entityAudio, p.data.entityId) } };
   },
 
   query_play_state: async (_args, { store }) => {

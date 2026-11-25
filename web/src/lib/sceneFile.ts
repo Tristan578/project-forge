@@ -4,7 +4,15 @@
 
 import { safeLocalStorageSet, wouldExceedThreshold, evictOldAutoSaves } from '@/lib/storage/storageQuota';
 
-/** Maximum scene format version the web client supports. Must match engine. */
+/**
+ * Maximum scene format version the web client supports. Must match engine.
+ *
+ * Optional editor-side top-level keys the engine ignores on load and never
+ * writes — `prefabInstances`/`prefabDefinitions`, the music arrangement and
+ * `completionMode` (#9998) — do NOT bump this: their absence is their legacy
+ * value, and the engine rejects any version outside 1..=3. See
+ * `lib/scenes/sceneCompletionMode.ts`.
+ */
 export const CURRENT_FORMAT_VERSION = 3;
 
 // ---------------------------------------------------------------------------
@@ -148,8 +156,9 @@ export function getAutoSave(): { json: string; name: string; time: string } | nu
   try {
     const json = localStorage.getItem(AUTOSAVE_KEY);
     if (!json) return null;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored autosave name is unset; falls back to a display placeholder
     const name = localStorage.getItem(AUTOSAVE_NAME_KEY) || 'Untitled';
-    const time = localStorage.getItem(AUTOSAVE_TIME_KEY) || '';
+    const time = localStorage.getItem(AUTOSAVE_TIME_KEY) ?? '';
     return { json, name, time };
   } catch {
     return null;

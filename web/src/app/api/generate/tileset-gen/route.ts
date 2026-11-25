@@ -13,6 +13,7 @@ const POST_impl = createGenerationHandler<
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/tileset-gen',
+  panel: 'generate-sprite',
   provider: DB_PROVIDER.sprite,
   operation: 'tileset_generation',
   rateLimitKey: 'gen-tileset',

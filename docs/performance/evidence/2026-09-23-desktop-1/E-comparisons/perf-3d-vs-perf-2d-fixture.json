@@ -1,0 +1,16 @@
+{
+  "currentReportId": "perf-ade17f2c-ea00-440f-9c79-7889f3ab3d4b",
+  "baselineReportId": "perf-56f48ec9-d69c-4404-b738-19271165a727",
+  "compatible": false,
+  "claim": "incompatible-baseline",
+  "incompatibilities": [
+    {
+      "field": "fixtureChecksum",
+      "current": "5e285ced",
+      "baseline": "b620e09f",
+      "reason": "fixtureChecksum differs"
+    }
+  ],
+  "advisories": [],
+  "metrics": null
+}

@@ -7,8 +7,7 @@ import { notFound } from 'next/navigation';
 // price change cannot leave a competitor page behind.
 import { paidPriceRange } from '@/lib/billing/tierPlans';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 interface FeatureRow {
   feature: string;

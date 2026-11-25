@@ -27,8 +27,9 @@
 //! `PickingPlugin`+`InteractionPlugin`+`MeshPickingPlugin` because
 //! `ForgeGizmoPlugin` wraps `transform-gizmo-bevy`, whose systems read
 //! `PointerHits`/`RayMap`/`HoverMap` (normally supplied by `DefaultPlugins`'
-//! picking group); `ScenePlugin` because `bevy_rapier`'s async-collider
-//! systems read `Res<SceneSpawner>` unconditionally. None of this pulls in
+//! picking group); `WorldSerializationPlugin` (Bevy 0.19's rename of
+//! `ScenePlugin`) so `bevy_rapier`'s async-scene-collider system finds the
+//! `WorldInstanceSpawner` it reads, as it would under `DefaultPlugins`. None of this pulls in
 //! a renderer or window — confirmed by this test actually passing headless.
 //!
 //! Test-only: never compiled into the wasm build (see `parity_util`'s doc
@@ -50,7 +51,7 @@ use bevy::pbr::StandardMaterial;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::picking::{InteractionPlugin, PickingPlugin};
 use bevy::prelude::*;
-use bevy::scene::ScenePlugin;
+use bevy::world_serialization::WorldSerializationPlugin;
 use bevy::time::TimePlugin;
 
 use super::animation::AnimationPlugin;
@@ -78,10 +79,12 @@ use super::physics_2d_sim::Physics2dPlugin;
 use super::post_processing::PostProcessingPlugin;
 use super::project_type::ProjectType;
 use super::quality::QualitySettings;
+use super::render_errors::RenderErrorReportingPlugin;
 use super::scene_file::SceneName;
 use super::scene_graph::SceneGraphCache;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectsPlugin;
+use super::simulation_clock::SimulationClockPlugin;
 // Editor-only, matching the gate on the `add_plugins` call below.
 #[cfg(not(feature = "runtime"))]
 use super::snap::SnapPlugin;
@@ -171,7 +174,9 @@ const REGISTERED_PLUGINS: &[&str] = &[
     "Physics2dPlugin",
     "PhysicsPlugin",
     "PostProcessingPlugin",
+    "RenderErrorReportingPlugin",
     "ShaderEffectsPlugin",
+    "SimulationClockPlugin",
     "SnapPlugin",
 ];
 
@@ -298,9 +303,10 @@ fn build_full_app() -> App {
         PickingPlugin,
         InteractionPlugin,
         MeshPickingPlugin,
-        // bevy_rapier's async-collider-from-scene systems read `Res<SceneSpawner>`
-        // unconditionally; normally supplied by `DefaultPlugins`.
-        ScenePlugin,
+        // bevy_rapier's async-collider-from-scene system reads the
+        // `WorldInstanceSpawner` (0.19's `SceneSpawner`); normally supplied by
+        // `DefaultPlugins`.
+        WorldSerializationPlugin,
     ));
 
     // Some plugins reach into `Assets<T>` directly (custom_wgsl, shader_effects
@@ -311,6 +317,11 @@ fn build_full_app() -> App {
     app.init_asset::<Shader>();
     app.init_asset::<Mesh>();
     app.init_asset::<StandardMaterial>();
+    // Bevy 0.19's `GizmoPlugin` adds `SkinnedMeshBoundsGizmoPlugin`, whose
+    // `draw_skinned_mesh_bounds` reads `Res<Assets<SkinnedMeshInverseBindposes>>`.
+    // `bevy_mesh::MeshPlugin` registers it under `DefaultPlugins`; this harness
+    // registers `Mesh` by hand, so it registers the bind poses by hand too.
+    app.init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
 
     // Mirrors `bridge::SelectionPlugin::build`'s resource-init list minus the
     // bridge-private resources (`scripts::PlayTickCache`, `core_systems::PickBuffer`)
@@ -336,9 +347,21 @@ fn build_full_app() -> App {
         .init_resource::<TerrainChangeEvents>()
         .add_message::<SelectionChangedEvent>();
 
-    // The 16 `core::*` plugins that own `fn build`. Registration order
-    // mirrors `bridge::init_engine` so `.after(...)`/`.before(...)` edges
-    // resolve against the same set of already-declared systems/sets.
+    // Registered right after `DefaultPlugins` in `bridge::init_engine`. It
+    // adds resources only (the render-error handler and its tracker); its
+    // drain system lives in the wasm32-only bridge.
+    app.add_plugins(RenderErrorReportingPlugin);
+
+    // The `core::*` plugins that own `fn build` (sixteen here, plus the two
+    // editor-only ones below). Registration order mirrors
+    // `bridge::init_engine` so `.after(...)`/`.before(...)` edges resolve
+    // against the same set of already-declared systems/sets.
+    //
+    // `SimulationClockPlugin` (#10007) is registered on its own: Bevy
+    // implements `Plugins` for tuples of at most fifteen, and the tuple below
+    // is already full. Its only ordering edge is `.before(TimeSystems)`, which
+    // `TimePlugin` above has already declared, so the position is immaterial.
+    app.add_plugins(SimulationClockPlugin);
     app.add_plugins((
         AnimationPlugin,
         ForgeMaterialPlugin,
@@ -882,7 +905,7 @@ fn joint3d_appliers_are_chained_in_create_update_remove_order() {
 /// The skybox appliers must be registered as ONE chained group, creators first.
 ///
 /// `apply_set_skybox_requests` and `apply_custom_skybox_requests` insert
-/// `bevy::core_pipeline::Skybox` through deferred `Commands`;
+/// `bevy::light::Skybox` through deferred `Commands`;
 /// `apply_update_skybox_requests` and `apply_environment_updates` mutate it
 /// through an immediate `Query<&mut Skybox>`. Bevy gives a bare tuple no ordering
 /// edge and therefore no `ApplyDeferred` flush, and shared `EditorApplySet`

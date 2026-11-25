@@ -7,6 +7,8 @@ import {
   PUBLISH_LIMITS,
 } from '@/lib/billing/tierPlans';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
+import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
+import { SITE_URL } from '@/lib/constants';
 
 export const metadata: Metadata = {
   title: 'FAQ — SpawnForge',
@@ -17,8 +19,6 @@ export const metadata: Metadata = {
     description: 'Frequently asked questions about SpawnForge.',
   },
 };
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
 // The pricing answer is generated, not written. Hand-written, it named plans by
 // their internal billing keys ("Hobbyist", "Pro"), quoted a $99 top tier the
@@ -37,7 +37,7 @@ const faqs = [
   {
     question: 'Is SpawnForge free?',
     answer:
-      `Yes. The ${FREE.name} tier includes the full editor, local export, ${countLabel(PROJECT_LIMITS.starter, 'cloud project', 'cloud projects')}, and ${countLabel(PUBLISH_LIMITS.starter, 'published game', 'published games')} — everything except the AI features. AI starts on the ${ENTRY.name} plan at ${ENTRY.price}/month, which adds AI chat, asset generation, and bring-your-own-key support. Plans go up to ${TOP.price}/month (${TOP.name}), which reaches the platform AI keys without needing a token balance.`,
+      `Yes. The ${FREE.name} tier includes the full editor, local export, ${countLabel(PROJECT_LIMITS.starter, 'cloud project', 'cloud projects')}, and ${countLabel(PUBLISH_LIMITS.starter, 'published game', 'published games')} — plus a one-time grant of ${TRIAL_GRANT_TOKENS} AI tokens at signup, so you can try AI chat and generation before adding a card. Once the trial tokens are spent, ongoing AI access starts on the ${ENTRY.name} plan at ${ENTRY.price}/month, which adds a monthly AI token allowance and bring-your-own-key support. Plans go up to ${TOP.price}/month (${TOP.name}), which reaches the platform AI keys without needing a token balance.`,
   },
   {
     question: 'What browsers does SpawnForge support?',

@@ -35,6 +35,20 @@ describe('PF-854 regression: despawn_entity not in entityHandlers', () => {
   });
 });
 
+describe('PF-235 prototype-key safety', () => {
+  it.each(['__proto__', 'constructor', 'toString'])('reports %s as a missing entity', async (entityId) => {
+    const inherited = Object.create(null) as Record<string, unknown>;
+    inherited[entityId] = { entityId, name: 'Inherited phantom' };
+    const nodes = Object.create(inherited);
+
+    const { result } = await invokeHandler(entityHandlers, 'get_entity_details', { entityId }, {
+      sceneGraph: { nodes },
+    });
+
+    expect(result).toEqual({ success: false, error: `Entity not found: ${entityId}` });
+  });
+});
+
 // ===========================================================================
 // spawn_entity
 // ===========================================================================

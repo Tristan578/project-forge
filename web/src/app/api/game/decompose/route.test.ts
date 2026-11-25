@@ -63,10 +63,12 @@ function makeReq(body: unknown) {
 }
 
 function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>) {
-  // `makeUser`'s default tier is 'starter', which `assertTier` in the route
-  // rejects (['hobbyist', 'creator', 'pro']) with a 403 — override to a tier
-  // that actually has AI access so "success" fixtures don't accidentally
-  // exercise the tier-gate branch.
+  // The route gates with `assertAiAccess` (#7715), which treats a 'starter'
+  // account holding spendable trial tokens as hobbyist — `makeUser`'s default
+  // (tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0) would actually
+  // pass that gate. Pinned to 'hobbyist' explicitly anyway so "success"
+  // fixtures exercise the ordinary paid-tier path, not the trial one, and
+  // stay stable if makeUser's defaults ever change.
   const user = makeUser({ tier: 'hobbyist', ...overrides });
   vi.mocked(withApiMiddleware).mockResolvedValue({
     error: undefined,
@@ -252,7 +254,14 @@ describe('POST /api/game/decompose', () => {
   // gates createGenerationHandler routes get for free, so each one needs its
   // own coverage.
   it('returns 403 for a tier with no AI access (starter)', async () => {
-    mockMiddlewareSuccess({ tier: 'starter' });
+    // A starter account with a zero balance (no trial tokens left, never
+    // granted, or fully spent) has no effective AI access (#7715).
+    mockMiddlewareSuccess({
+      tier: 'starter',
+      monthlyTokens: 0,
+      monthlyTokensUsed: 0,
+      addonTokens: 0,
+    });
 
     const { POST } = await import('./route');
     const res = await POST(makeReq({ prompt: 'test', projectType: '3d' }));
@@ -260,6 +269,25 @@ describe('POST /api/game/decompose', () => {
     expect(res.status).toBe(403);
     expect(decomposeIntoSystems).not.toHaveBeenCalled();
     expect(resolveApiKey).not.toHaveBeenCalled();
+  });
+
+  // #7715 — a starter account still holding spendable trial tokens is
+  // treated as hobbyist by `assertAiAccess`, so it must reach the platform
+  // key resolver instead of being turned away at the tier gate.
+  it('lets a starter account with spendable trial tokens through the tier gate', async () => {
+    mockMiddlewareSuccess({
+      tier: 'starter',
+      monthlyTokens: 50,
+      monthlyTokensUsed: 0,
+      addonTokens: 0,
+    });
+    vi.mocked(decomposeIntoSystems).mockResolvedValue(MOCK_GDD as never);
+
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ prompt: 'test', projectType: '3d' }));
+
+    expect(res.status).not.toBe(403);
+    expect(resolveApiKey).toHaveBeenCalled();
   });
 
   it('returns 503 without deducting tokens when the provider kill switch is on', async () => {

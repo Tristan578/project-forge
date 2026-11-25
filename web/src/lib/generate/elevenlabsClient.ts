@@ -17,16 +17,16 @@ export interface ElevenLabsConfig {
 export interface GenerateSfxParams {
   prompt: string;
   durationSeconds?: number;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 export interface GenerateVoiceParams {
   text: string;
-  voiceId?: string;
-  stability?: number;
-  similarityBoost?: number;
-  style?: number;
-  signal?: AbortSignal;
+  voiceId?: string | undefined;
+  stability?: number | undefined;
+  similarityBoost?: number | undefined;
+  style?: number | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 /** Music composition inputs, optional provider controls and caller cancellation. */
@@ -38,7 +38,7 @@ export interface GenerateMusicParams {
   forceInstrumental?: boolean;
   /** ElevenLabs music model: 'music_v1' (default) or 'music_v2'. */
   modelId?: string;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 export interface AudioResult {
@@ -80,6 +80,7 @@ export class ElevenLabsClient {
   }
 
   async generateVoice(params: GenerateVoiceParams): Promise<AudioResult> {
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested voice id is unset; falls back to the default voice
     const voiceId = params.voiceId || 'JBFqnCBsd6RMkjVDRZzb'; // Default: George
     validateResourceId(voiceId);
 

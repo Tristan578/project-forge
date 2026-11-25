@@ -45,13 +45,13 @@ export interface GenerationProgressProps {
    * - Omit (or pass undefined) for indeterminate shimmer.
    * - Pass a number for the determinate progress-bar mode.
    */
-  progress?: number;
+  progress?: number | undefined;
 
   /**
    * Human-readable stage description shown beneath the progress bar.
    * If omitted, one is derived automatically from `operation` + `progress`.
    */
-  stage?: string;
+  stage?: string | undefined;
 
   /**
    * Called when the user presses the Cancel button.

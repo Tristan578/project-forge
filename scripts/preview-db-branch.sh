@@ -37,6 +37,14 @@
 #            next push, and its number is printed (evicted_pr=N) so the caller
 #            can say so on that PR rather than leave a preview URL that fails
 #            on its first query with no explanation.
+#            Preview jobs for different PRs run concurrently, and the eviction
+#            is not atomic with the create: two jobs can reclaim the SAME
+#            branch and only one create takes the freed slot (#10245). So when
+#            the create is still refused after an eviction, the next oldest is
+#            evicted and the create retried, up to $PREVIEW_DB_MAX_EVICTIONS
+#            evictions per run, each printed as its own evicted_pr= /
+#            evicted_branch= pair. Only past that bound is "still full" read
+#            as a branch this pipeline does not own.
 #       Prints branch_id= / branch_name= like neon-branch.sh create, plus
 #       swept_pr=N per closed-PR branch step 1 deleted and evicted_pr=N /
 #       evicted_branch=<id> when step 2 fired.
@@ -86,6 +94,9 @@
 #   GITHUB_REPOSITORY               owner/repo, as GitHub Actions sets it
 #   PREVIEW_DB_MIN_AGE_SECONDS      optional, default 1800 = the preview job's
 #                                   timeout-minutes. Never evict younger.
+#   PREVIEW_DB_MAX_EVICTIONS        optional, default 3: how many open-PR
+#                                   previews one run may evict before "still
+#                                   full" is treated as a foreign branch.
 #
 # EXIT CODES
 #   0   success
@@ -106,8 +117,11 @@ USAGE='usage: preview-db-branch.sh create <pr-number> --uri-out <path>
        preview-db-branch.sh name <pr-number>'
 
 : "${PREVIEW_DB_MIN_AGE_SECONDS:=1800}"
+: "${PREVIEW_DB_MAX_EVICTIONS:=3}"
 : "${GITHUB_REPOSITORY:=}"
 case "$PREVIEW_DB_MIN_AGE_SECONDS" in ''|*[!0-9]*) PREVIEW_DB_MIN_AGE_SECONDS=1800 ;; esac
+# Zero would mean "never evict", which is step 1 alone; the floor is one.
+case "$PREVIEW_DB_MAX_EVICTIONS" in ''|*[!0-9]*|0) PREVIEW_DB_MAX_EVICTIONS=3 ;; esac
 
 command -v jq >/dev/null 2>&1 || { echo "::error::preview-db-branch.sh requires jq" >&2; exit 3; }
 [ -f "$NEON" ] || { echo "::error::neon-branch.sh not found next to preview-db-branch.sh" >&2; exit 3; }
@@ -257,19 +271,34 @@ cmd_create() {
   [ "$rc" -eq 5 ] || exit "$rc"
 
   echo "::notice::still full after the closed-PR sweep; evicting the least recently built preview" >&2
-  evict_oldest "$name"; rc=$?
-  if [ "$rc" -eq 1 ]; then
-    echo "::error::Neon branch allowance is full and nothing is safe to reclaim: every other preview branch is younger than ${PREVIEW_DB_MIN_AGE_SECONDS}s, may belong to a running preview job, or has a PR whose state GitHub could not confirm. Close or merge some PRs, or raise the plan's branch allowance, then re-run this job." >&2
-    exit 5
-  fi
-  [ "$rc" -eq 0 ] || exit "$rc"
-  try_create "$name" "$uri_out"; rc=$?
-  [ "$rc" -ne 0 ] || return 0
-  if [ "$rc" -eq 5 ]; then
-    echo "::error::Neon still reports BRANCHES_LIMIT_EXCEEDED after reclaiming a branch. Something outside this pipeline is holding branches; audit with: bash scripts/neon-branch.sh list ''" >&2
-    exit 5
-  fi
-  exit "$rc"
+  # Evict-and-retry, bounded. A freed slot is a race between concurrent
+  # preview jobs (#10245): job A and job B both delete the oldest branch, and
+  # only one create lands. The loser must not conclude that a branch outside
+  # this pipeline is to blame while an eligible candidate remains. Every
+  # evict_oldest re-lists, so a branch another job already deleted is gone
+  # from the candidates rather than chosen twice.
+  local evictions=0
+  while :; do
+    evict_oldest "$name"; rc=$?
+    if [ "$rc" -eq 1 ]; then
+      if [ "$evictions" -eq 0 ]; then
+        echo "::error::Neon branch allowance is full and nothing is safe to reclaim: every other preview branch is younger than ${PREVIEW_DB_MIN_AGE_SECONDS}s, may belong to a running preview job, or has a PR whose state GitHub could not confirm. Close or merge some PRs, or raise the plan's branch allowance, then re-run this job." >&2
+      else
+        echo "::error::Neon branch allowance is still full after reclaiming ${evictions} branch(es) — a concurrent preview job may have taken the slot — and nothing else is safe to reclaim: every other preview branch is younger than ${PREVIEW_DB_MIN_AGE_SECONDS}s, may belong to a running preview job, or has a PR whose state GitHub could not confirm. Re-run this job; if it keeps happening, close or merge some PRs, or raise the plan's branch allowance." >&2
+      fi
+      exit 5
+    fi
+    [ "$rc" -eq 0 ] || exit "$rc"
+    evictions=$(( evictions + 1 ))
+    try_create "$name" "$uri_out"; rc=$?
+    [ "$rc" -ne 0 ] || return 0
+    [ "$rc" -eq 5 ] || exit "$rc"
+    if [ "$evictions" -ge "$PREVIEW_DB_MAX_EVICTIONS" ]; then
+      echo "::error::Neon still reports BRANCHES_LIMIT_EXCEEDED after reclaiming ${evictions} branch(es). Something outside this pipeline is holding branches; audit with: bash scripts/neon-branch.sh list ''" >&2
+      exit 5
+    fi
+    echo "::notice::still full after evicting ${evictions} of at most ${PREVIEW_DB_MAX_EVICTIONS}; a concurrent preview job may have taken the slot — evicting the next oldest" >&2
+  done
 }
 
 cmd_sweep() {

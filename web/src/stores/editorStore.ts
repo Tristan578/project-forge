@@ -1,3 +1,4 @@
+import { notifyCaptureWorkloadChange, observeCaptureCommand } from '@/lib/perf/captureStability';
 /**
  * Zustand store for editor state management.
  *
@@ -14,7 +15,7 @@ import { showError } from '@/lib/toast';
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
 import * as engineModule from '@/hooks/useEngine';
-import type { CommandResponse } from '@/hooks/useEngine';
+import type { BatchResult, CommandResponse } from '@/hooks/useEngine';
 
 // Import all slices
 import {
@@ -127,6 +128,20 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createOrchestratorSlice(...args),
 }));
 
+
+
+// Scene/project transitions can begin before the engine publishes its new graph.
+// Subscribe once, synchronously, so captures need no lazy-store-import window.
+useEditorStore.subscribe((state, previous) => {
+  if (state.projectId !== previous.projectId ||
+      state.projectRevision !== previous.projectRevision ||
+      state.sceneOperationRevision !== previous.sceneOperationRevision ||
+      state.activeSceneId !== previous.activeSceneId ||
+      state.engineMode !== previous.engineMode) {
+    notifyCaptureWorkloadChange();
+  }
+});
+
 // E2E store exposure (__EDITOR_STORE, __CHAT_STORE, __FORGE_DISPATCH) is done
 // in a SINGLE place — EditorLayout's post-hydration useEffect — so all three
 // globals appear atomically. A module-level fallback here would set only
@@ -199,11 +214,27 @@ const REJECTED_ACTION_LABELS: Readonly<Record<string, string>> = {
   save_scene: 'save the scene',
   spawn_entity: 'add the entity',
   delete_entity: 'delete the entity',
+  // A format refusal (`<command> refused: …`) is shown with its reason by
+  // assetSlice as well; this generic line covers every other rejection.
+  import_gltf: 'import the model',
+  load_texture: 'load the texture',
 };
 
-function rejectedActionMessage(command: string): string {
+/**
+ * The user-facing sentence for a command that did not go through.
+ *
+ * `threw` is the dispatcher reporting a CAUGHT throw from the engine call,
+ * not a refusal: the engine may already have acted, and for a scene command
+ * the store then shows "due to an engine error … reload" (#10202). Saying
+ * "rejected the change" right before that toast would contradict it, so the
+ * wording branches here while the console line and the Sentry report below
+ * carry the raw engine text unchanged either way (#10202 review, m4).
+ */
+function rejectedActionMessage(command: string, threw: boolean): string {
   const action = REJECTED_ACTION_LABELS[command] ?? 'complete that action';
-  return `Couldn't ${action}. The engine rejected the change.`;
+  return threw
+    ? `Couldn't ${action}. The engine ran into an error.`
+    : `Couldn't ${action}. The engine rejected the change.`;
 }
 
 /**
@@ -217,20 +248,49 @@ function rejectedActionMessage(command: string): string {
  * without touching a single caller.
  *
  * Monitoring must never break dispatch, so every step is guarded.
+ * @param threw Whether the answer was a caught throw (`CommandResponse.threw`)
+ *   rather than a refusal; only the notification wording reads it.
+ * @param notify Whether to show the generic toast at all. `false` when a
+ *   caller that CAN observe the answer is about to report it itself — see
+ *   {@link reportsItsOwnThrow}; the console line and the Sentry report are
+ *   unconditional.
  */
-function reportCommandRejected(command: string, error: string | undefined): void {
+function reportCommandRejected(
+  command: string,
+  error: string | undefined,
+  { threw = false, notify = true }: { threw?: boolean; notify?: boolean } = {},
+): void {
+  // A refusal is the person's input being turned away, not an engine fault.
+  // This applies to ANY command that answers with its own `<command> refused: `
+  // prefix, present and future; the generic toast and the Sentry exception
+  // are for faults, so neither fires here, only a breadcrumb for the session
+  // trail. The contract that comes with the prefix: the CALLER must surface
+  // the refusal itself, because nothing else will. Today assetSlice does so
+  // for `load_texture` and `import_gltf` (the file and the reason, on every
+  // refused file - #10396); a command that adopts the prefix without a caller
+  // showing it would be refused silently.
+  if (error?.startsWith(`${command} refused: `)) {
+    try {
+      addBreadcrumb({ category: 'engine.command.refused', message: `${command}: ${error}`, level: 'info' });
+    } catch {
+      /* monitoring is best-effort */
+    }
+    return;
+  }
   const engineError = error ?? 'no error message';
   console.error(`Engine rejected command '${command}': ${engineError}`);
 
   const firstRejection = !_reportedRejections.has(command);
   if (firstRejection) {
     _reportedRejections.add(command);
-    try {
-      // Product wording only: neither the internal command vocabulary nor the
-      // raw engine error belongs in a user-visible notification.
-      showError(rejectedActionMessage(command));
-    } catch {
-      /* notifications are best-effort — never let them break dispatch */
+    if (notify) {
+      try {
+        // Product wording only: neither the internal command vocabulary nor
+        // the raw engine error belongs in a user-visible notification.
+        showError(rejectedActionMessage(command, threw));
+      } catch {
+        /* notifications are best-effort — never let them break dispatch */
+      }
     }
   }
 
@@ -249,6 +309,73 @@ function reportCommandRejected(command: string, error: string | undefined): void
   } catch {
     /* monitoring is best-effort — never let it throw into the dispatch path */
   }
+}
+
+/**
+ * The commands that replace the whole scene. The engine answers each one as
+ * soon as it has QUEUED it, applies it on its next frame, and only then emits
+ * SCENE_LOADED (`apply_scene_load` / `apply_new_scene` in
+ * `engine/src/bridge/scene_io.rs`). Nothing else queues a scene replacement.
+ */
+const SCENE_REPLACING_COMMANDS: ReadonlySet<string> = new Set(['load_scene', 'new_scene']);
+
+/**
+ * Does the caller of this answer report it to the user itself, so the generic
+ * toast would be a second notice for one event?
+ *
+ * Only for a scene-replacing command whose engine call THREW. Those two
+ * commands are dispatched from exactly one place, `sceneSlice`'s
+ * `dispatchSceneCommand`, which re-raises a `threw` answer as
+ * `EngineDispatchThrewError` — so the slice sets the `ENGINE_LOAD_THREW` save
+ * lockout (`SceneLoadErrorNotice` shows it) and the caller's `catch` shows the
+ * one reload sentence (`ENGINE_THREW_RELOAD_GUIDANCE`). Toasting "Couldn't
+ * load the scene. The engine ran into an error." here as well put two
+ * notices on screen for one failure (#10202 review, round 2); the console
+ * line and the Sentry report still fire from here, because they are the
+ * record and the slice keeps none.
+ *
+ * A clean REFUSAL of the same commands keeps the generic toast: the slice
+ * returns `false` for it, and most of its callers (a cold open, a deferred
+ * replay) surface nothing of their own. Any other command keeps it for every
+ * answer, since nothing downstream can observe the response.
+ */
+function reportsItsOwnThrow(command: string, threw: boolean): boolean {
+  return threw && SCENE_REPLACING_COMMANDS.has(command);
+}
+
+/**
+ * Drop every game-component adjustment marker (PF-1148) once the engine has
+ * agreed to replace the scene.
+ *
+ * A marker says "this field holds X because you asked for Y", keyed by entity
+ * id. The outgoing scene's markers describe requests made of entities that are
+ * about to be despawned, and nothing else removes them: `GAME_COMPONENT_CHANGED`
+ * prunes only a marker whose field now holds a DIFFERENT value. Reloading the
+ * same scene file, restoring a checkpoint or loading a template with fixed ids
+ * brings the same id back holding the applied value, and the marker would then
+ * report a request nobody made of the scene on screen.
+ *
+ * Here, when the engine accepts the command, and NOT in the SCENE_LOADED
+ * handler. The scene is applied a frame later, and a caller can already have
+ * written the INCOMING scene's components by then: `create_scene_from_description`
+ * calls `newScene()` and adds its components in the same task. Clearing on
+ * SCENE_LOADED would erase exactly those markers, and they are true.
+ */
+function forgetOutgoingSceneAdjustments(): void {
+  if (Object.keys(useEditorStore.getState().gameComponentAdjustments).length === 0) return;
+  useEditorStore.setState({ gameComponentAdjustments: {} });
+}
+
+/**
+ * Did the engine itself, or a guard in front of it, refuse the command?
+ *
+ * An explicit `success: false`, and not one the dispatcher built from a
+ * CAUGHT throw (`threw`). Those have the same `success` and opposite meanings
+ * for a scene replacement: a refusal left the scene on screen, while a throw
+ * may have arrived after the engine had already queued the new one.
+ */
+function isEngineRefusal(response: CommandResponse | void): boolean {
+  return !!response && response.success === false && response.threw !== true;
 }
 
 // Command dispatcher type - will be set by useEngine hook.
@@ -278,12 +405,31 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
       reportCommandRejected(command, tooBig);
       return { success: false, error: tooBig };
     }
-    const response = dispatcher(command, payload);
+    let response: CommandResponse | void = undefined;
+    try {
+      response = dispatcher(command, payload);
+    } finally {
+      // Anything but the engine's own refusal may have replaced the scene, and
+      // a marker on a scene that may be gone is the false report this must not
+      // leave behind. A throw counts however it arrives: rethrown (`response`
+      // is still undefined here), or caught by the dispatcher and answered as
+      // `{ success: false, threw: true }`, which is what `useEngineEvents` —
+      // the dispatcher the editor registers — does. `handle_command` queues
+      // the replacement before it serializes its answer, and the `Err` it
+      // returns after dispatching comes from that serialization
+      // (`engine/src/bridge/mod.rs`).
+      if (SCENE_REPLACING_COMMANDS.has(command) && !isEngineRefusal(response)) {
+        forgetOutgoingSceneAdjustments();
+      }
+    }
     // Only an explicit `success: false` is a rejection. A dispatcher that
     // returns nothing (every test double, and any pre-PF-1098 caller) is not
     // reporting failure, and must not be treated as if it were.
     if (response && response.success === false) {
-      reportCommandRejected(command, response.error);
+      const threw = response.threw === true;
+      reportCommandRejected(command, response.error, { threw, notify: !reportsItsOwnThrow(command, threw) });
+    } else {
+      observeCaptureCommand(command);
     }
     return response;
   };
@@ -348,7 +494,29 @@ export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher | u
         results: commands.map(() => ({ success: false, error: tooBig })),
       };
     }
-    return dispatcher(commands);
+    let result: BatchResult | undefined;
+    try {
+      result = dispatcher(commands);
+      commands.forEach(({ command }, index) => {
+        // Successful items still invalidate a capture when another batch item fails.
+        if (result?.results[index]?.success !== false) observeCaptureCommand(command);
+      });
+      return result;
+    } finally {
+      // Item by item, on the item's own answer, EXCEPT when there is no answer
+      // to read because the engine call threw. `useEngineEvents` answers both a
+      // batch it never sent and a batch whose engine call threw with no
+      // results; only `threw` tells them apart, and they are opposite facts.
+      // A batch never sent replaced nothing. A thrown one may have replaced
+      // the scene: `handle_command_batch` runs every command, queueing any
+      // scene replacement, before it serializes the answers, and that
+      // serialization is the only `Err` it returns (`engine/src/bridge/mod.rs`).
+      // A rethrown throw leaves `result` undefined, and is read the same way.
+      const outcomeUnknown = result === undefined || result.threw === true;
+      const replaced = commands.some(({ command }, i) => SCENE_REPLACING_COMMANDS.has(command)
+        && (outcomeUnknown || result?.results[i]?.success === true));
+      if (replaced) forgetOutgoingSceneAdjustments();
+    }
   };
 }
 

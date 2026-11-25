@@ -55,7 +55,11 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
   run_tsc() {
     TSC_OUTPUT=$(set +e; "$TSC_BIN" --noEmit 2>&1; echo "___TSC_RC___:$?") || true
     TSC_EXIT=$(echo "$TSC_OUTPUT" | grep -o '___TSC_RC___:[0-9]*' | cut -d: -f2)
-    TSC_OUTPUT=$(echo "$TSC_OUTPUT" | grep -v '___TSC_RC___:')
+    # `|| true`: on a clean tsc run the marker is the ONLY line, so grep -v
+    # matches nothing and exits 1 — under set -e that killed the whole hook
+    # with exit 1 before eslint, the panelRegistry test and the lockfile check
+    # ever ran (found by the #8676 verification, pre-existing).
+    TSC_OUTPUT=$(echo "$TSC_OUTPUT" | grep -v '___TSC_RC___:' || true)
   }
 
   is_jit_segfault() {
@@ -94,6 +98,7 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
       BRANCH_ERRORS=""
       while IFS= read -r changed_file; do
         [ -z "$changed_file" ] && continue
+        # shellcheck disable=SC2016  # single quotes are intentional: a sed escape pattern, not a missed bash expansion
         ESCAPED_FILE=$(printf '%s' "$changed_file" | sed 's/[.[\*^$()+?{}|]/\\&/g')
         FILE_ERRORS=$(echo "$TSC_OUTPUT" | grep "^${ESCAPED_FILE}(" || true)
         if [ -n "$FILE_ERRORS" ]; then
@@ -113,16 +118,14 @@ fi
 # 2. ESLint on changed files only (fast, ~2-3s per file)
 # Filter to files that actually exist on disk (excludes deleted files in the diff)
 TS_FILES_RAW=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
-TS_FILES=""
+TS_FILES=()
 while IFS= read -r f; do
-  [ -n "$f" ] && [ -f "$WEB_DIR/$f" ] && TS_FILES="${TS_FILES} ${f}"
+  [ -n "$f" ] && [ -f "$WEB_DIR/$f" ] && TS_FILES+=("$f")
 done <<< "$TS_FILES_RAW"
-TS_FILES=$(echo "$TS_FILES" | xargs)
-if [ -n "$TS_FILES" ]; then
-  # shellcheck disable=SC2086
+if [ ${#TS_FILES[@]} -gt 0 ]; then
   ESLINT_BIN="$WEB_DIR/node_modules/.bin/eslint"
   if [ ! -x "$ESLINT_BIN" ]; then exit 0; fi
-  LINT_OUTPUT=$("$ESLINT_BIN" --max-warnings 0 $TS_FILES 2>&1) || {
+  LINT_OUTPUT=$("$ESLINT_BIN" --max-warnings 0 "${TS_FILES[@]}" 2>&1) || {
     echo "$LINT_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}ESLint warnings/errors found. "
   }

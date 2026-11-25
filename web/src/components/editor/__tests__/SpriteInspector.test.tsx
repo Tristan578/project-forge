@@ -8,6 +8,7 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import { SpriteInspector } from '../SpriteInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import type { SpriteData } from '@/stores/slices/types';
+import { expectEveryLabelForResolves } from './formControlA11y';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -116,6 +117,33 @@ describe('SpriteInspector', () => {
     const selects = screen.getAllByRole('combobox');
     expect(selects.length).toBeGreaterThan(0);
     expect(screen.getByText('player.png').textContent).toBe('player.png');
+  });
+
+  // HTML requires a label's `for` to name a labelable element in the tree.
+  // With no texture asset the select is replaced by the Upload button, so a
+  // `for` left pointing at the select would name nothing (#9677).
+  it('does not point the Texture label at the absent select when no assets exist', () => {
+    setupStore();
+    const { container } = render(<SpriteInspector />);
+    const label = screen.getByText('Texture').closest('label');
+    expect(label).not.toBeNull();
+    expect(label).not.toHaveAttribute('for');
+    expect(screen.queryAllByRole('combobox', { name: 'Texture' })).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Upload Texture' })).toBeInTheDocument();
+    expectEveryLabelForResolves(container);
+  });
+
+  it('names the texture select through the Texture label when assets exist', () => {
+    setupStore({
+      assetRegistry: {
+        'asset-1': { id: 'asset-1', name: 'player.png', kind: 'texture' },
+      },
+    });
+    const { container } = render(<SpriteInspector />);
+    const select = screen.getByRole('combobox', { name: 'Texture' });
+    expect(select).toHaveValue('__none__');
+    expect(screen.getByText('Texture').closest('label')).toHaveAttribute('for', select.id);
+    expectEveryLabelForResolves(container);
   });
 
   it('renders Draw Pixel Art button', () => {

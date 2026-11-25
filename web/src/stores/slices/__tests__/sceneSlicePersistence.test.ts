@@ -336,10 +336,10 @@ describe('sceneSlice scene persistence', () => {
     setSceneDispatcher(answeringDispatcher().dispatch);
     store.getState().createNewScene('Second');
     const target = store.getState().scenes.find((s) => s.name === 'Second');
-    const before = localStorage.getItem('forge-project-scenes');
+    const before = localStorage.getItem('forge-project-scenes:v2:unsaved');
     setSceneDispatcher(null);
     await store.getState().switchScene(target!.id);
-    expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(before);
   });
 
   /**

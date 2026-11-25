@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useCallback, useRef, useMemo, memo, type MouseEvent, type KeyboardEvent } from 'react';
+import { useState, useCallback, useRef, useMemo, useLayoutEffect, memo, type MouseEvent, type KeyboardEvent } from 'react';
 import { Layers, PackagePlus } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useEditorStore, getCommandDispatcher, type SceneGraph } from '@/stores/editorStore';
@@ -20,6 +20,11 @@ import { filterHierarchy } from '@/lib/hierarchyFilter';
 /**
  * Build a flat, depth-first list of visible entity IDs for keyboard navigation.
  * Respects expanded state and filter visibility.
+ * @param rootIds Root entity IDs in display order.
+ * @param graph Entity records and their ordered child references.
+ * @param expandedIds Entities whose descendants are expanded.
+ * @param visibleIds Optional filter membership; omitted means all existing nodes.
+ * @returns Existing visible entity IDs in depth-first display order.
  */
 export function flattenVisibleNodes(
   rootIds: string[],
@@ -45,6 +50,49 @@ export function flattenVisibleNodes(
   return result;
 }
 
+/**
+ * Compute the next roving-tabindex position for a navigation key, given the
+ * current index and the length of the flattened visible list.
+ *
+ * - ArrowDown / ArrowUp wrap around the ends.
+ * - Home jumps to the first visible node, End to the last.
+ * - Any other key returns null (caller should ignore it).
+ *
+ * Returns null when the list is empty.
+ * @param key Navigation key; other keys are ignored.
+ * @param currentIndex Current position, or -1 before the first focused row.
+ * @param length Number of visible rows.
+ * @returns The next wrapped/boundary index, or null for an empty list/other key.
+ */
+export function computeNavIndex(
+  key: string,
+  currentIndex: number,
+  length: number,
+): number | null {
+  if (length === 0) return null;
+  switch (key) {
+    case 'ArrowDown':
+      return currentIndex < length - 1 ? currentIndex + 1 : 0;
+    case 'ArrowUp':
+      return currentIndex > 0 ? currentIndex - 1 : length - 1;
+    case 'Home':
+      return 0;
+    case 'End':
+      return length - 1;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Renders the filtered scene tree with one roving row Tab stop (container only
+ * when empty), visible-row arrow navigation and entity keyboard commands.
+ * Inline rename owns its keys and restores row focus on completion/cancellation.
+ * Removing a focused row restores a visible row or the empty tree without
+ * stealing connected search/Inspector focus; V without Ctrl, Meta or Alt changes
+ * visibility (Shift+V is also accepted).
+ * @returns The named hierarchy tree, search and entity context menu.
+ */
 export const SceneHierarchy = memo(function SceneHierarchy() {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -54,6 +102,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   const selectEntity = useEditorStore((s) => s.selectEntity);
   const deleteSelectedEntities = useEditorStore((s) => s.deleteSelectedEntities);
   const duplicateSelectedEntity = useEditorStore((s) => s.duplicateSelectedEntity);
+  const toggleVisibility = useEditorStore((s) => s.toggleVisibility);
   const renameEntity = useEditorStore((s) => s.renameEntity);
   const reparentEntity = useEditorStore((s) => s.reparentEntity);
   const hierarchyFilter = useEditorStore((s) => s.hierarchyFilter);
@@ -92,6 +141,13 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
     return { ids, indexMap: map };
   }, [sceneGraph, effectiveExpandedIds, isFiltering, filterResult]);
 
+  // Roving tabindex target: the focused row if it is still visible, otherwise
+  // the first visible row. Exactly one row is in the tab order at a time.
+  const rovingActiveId =
+    focusedEntityId && indexMap.has(focusedEntityId)
+      ? focusedEntityId
+      : (flatNodeIds[0] ?? null);
+
   // Rename editing state (declared before handleKeyDown so F2 can reference it)
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
 
@@ -120,25 +176,71 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
     });
   }, []);
 
+  // Move DOM focus to a row by entity id. The target already exists in the DOM
+  // (it is only tabIndex=-1), so it is programmatically focusable even before
+  // React re-renders to flip its tabindex to 0.
+  const focusRow = useCallback((entityId: string) => {
+    const el = containerRef.current?.querySelector<HTMLElement>(
+      `[data-tree-entity-id="${CSS.escape(entityId)}"]`,
+    );
+    el?.focus();
+  }, []);
+
+  const lastTreeFocus = useRef<HTMLElement | null>(null);
+  const previousVisibleIds = useRef<string[]>([]);
+
+  // Restore only focus lost by removing a focused row/control. A connected
+  // search/Inspector target keeps its focus when filtering changes the tree.
+  useLayoutEffect(() => {
+    const previousIds = previousVisibleIds.current;
+    previousVisibleIds.current = flatNodeIds;
+    const previousFocus = lastTreeFocus.current;
+    if (!focusedEntityId || indexMap.has(focusedEntityId) || !previousFocus ||
+        previousFocus.isConnected || document.activeElement !== document.body) return;
+    const previousIndex = Math.max(0, previousIds.indexOf(focusedEntityId));
+    const nextId = flatNodeIds[Math.min(previousIndex, flatNodeIds.length - 1)];
+    if (nextId) {
+      // The native focus event updates the roving state through onRowFocus.
+      focusRow(nextId);
+    } else {
+      containerRef.current?.querySelector<HTMLElement>('[role="tree"]')?.focus();
+    }
+  }, [flatNodeIds, indexMap, focusedEntityId, focusRow]);
+
+  // Keep the roving index in sync when a row (or its icon-only control) is
+  // focused by pointer or Tab, so keyboard navigation resumes from there.
+  const handleRowFocus = useCallback((entityId: string) => {
+    lastTreeFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setFocusedEntityId((prev) => (prev === entityId ? prev : entityId));
+  }, []);
+
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (flatNodeIds.length === 0) return;
 
     const currentIndex = focusedEntityId ? (indexMap.get(focusedEntityId) ?? -1) : -1;
 
     switch (e.key) {
-      case 'ArrowDown': {
+      case 'ArrowDown':
+      case 'ArrowUp':
+      case 'Home':
+      case 'End': {
+        // Skip while an inline rename is active: moving DOM focus to another
+        // row via focusRow() below would blur the rename input and commit it
+        // with whatever partial text is currently typed.
+        if (editingEntityId) return;
         e.preventDefault();
-        const nextIndex = currentIndex < flatNodeIds.length - 1 ? currentIndex + 1 : 0;
-        setFocusedEntityId(flatNodeIds[nextIndex]);
-        break;
-      }
-      case 'ArrowUp': {
-        e.preventDefault();
-        const prevIndex = currentIndex > 0 ? currentIndex - 1 : flatNodeIds.length - 1;
-        setFocusedEntityId(flatNodeIds[prevIndex]);
+        const nextIndex = computeNavIndex(e.key, currentIndex, flatNodeIds.length);
+        if (nextIndex !== null) {
+          const nextId = flatNodeIds[nextIndex];
+          setFocusedEntityId(nextId);
+          focusRow(nextId);
+        }
         break;
       }
       case 'ArrowRight': {
+        // Same rename-in-progress guard as above: expanding to a child row
+        // would call focusRow() and blur the active rename input.
+        if (editingEntityId) return;
         e.preventDefault();
         if (focusedEntityId) {
           const node = sceneGraph.nodes[focusedEntityId];
@@ -146,14 +248,21 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
             // If collapsed, expand. If already expanded, move to first child
             if (!effectiveExpandedIds.has(focusedEntityId)) {
               toggleExpanded(focusedEntityId);
-            } else if (node.children.length > 0) {
-              setFocusedEntityId(node.children[0]);
+            } else {
+              const firstVisibleChild = node.children.find((id) => indexMap.has(id));
+              if (firstVisibleChild) {
+                setFocusedEntityId(firstVisibleChild);
+                focusRow(firstVisibleChild);
+              }
             }
           }
         }
         break;
       }
       case 'ArrowLeft': {
+        // Same rename-in-progress guard: moving focus to the parent row
+        // would call focusRow() and blur the active rename input.
+        if (editingEntityId) return;
         e.preventDefault();
         if (focusedEntityId) {
           const node = sceneGraph.nodes[focusedEntityId];
@@ -163,6 +272,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
           } else if (node?.parentId) {
             // Move to parent
             setFocusedEntityId(node.parentId);
+            focusRow(node.parentId);
           }
         }
         break;
@@ -185,6 +295,19 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         e.preventDefault();
         if (focusedEntityId) {
           setEditingEntityId(focusedEntityId);
+        }
+        break;
+      }
+      case 'v':
+      case 'V': {
+        // Keyboard path for the visibility toggle. The per-row eye button is
+        // tabIndex=-1 (single-tab-stop tree), so this is how keyboard users
+        // hide/show the focused entity. Skip while an inline rename is active
+        // so the keystroke goes to the text field, not the toggle.
+        if (editingEntityId || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (focusedEntityId) {
+          e.preventDefault();
+          toggleVisibility(focusedEntityId);
         }
         break;
       }
@@ -213,7 +336,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       default:
         return; // Don't prevent default for unhandled keys
     }
-  }, [flatNodeIds, indexMap, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId]);
+  }, [flatNodeIds, indexMap, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId, focusRow, toggleVisibility, editingEntityId]);
 
   // Drag state
   const [dragState, setDragState] = useState<{
@@ -409,11 +532,23 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       {/* Search input */}
       <HierarchySearch matchCount={isFiltering ? filterResult.matchCount : undefined} />
 
-      {/* Tree view */}
+      {/* Tree view.
+          role="tree" stays on this container even when the scene is empty. The
+          empty-scene and no-match UI is rendered as a SIBLING (below), never a
+          child, so an empty tree has zero non-treeitem children: axe treats an
+          empty tree as reviewable-incomplete (its aria-required-children
+          `reviewEmpty` list contains "tree"), not a critical
+          aria-required-children violation. Putting the EmptyState back inside
+          this node is what tripped that violation (#9875 review). */}
       <div
-        className="flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50"
+        className={`${hasEntities ? 'flex-1 ' : ''}overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]`}
         data-editor-region="hierarchy"
-        tabIndex={0}
+        tabIndex={flatNodeIds.length === 0 ? 0 : -1}
+        onFocus={(event) => {
+          if (event.target === event.currentTarget && flatNodeIds.length === 0) {
+            setFocusedEntityId(null);
+          }
+        }}
         role="tree"
         aria-label="Scene hierarchy"
         onClick={handleBackgroundClick}
@@ -422,7 +557,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         onDragOver={handleRootDragOver}
         onDrop={handleRootDrop}
       >
-        {hasEntities ? (
+        {hasEntities &&
           filterResult.filteredRootIds.map((rootId) => {
             const node = sceneGraph.nodes[rootId];
             if (!node) return null;
@@ -432,12 +567,19 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
                 node={node}
                 depth={0}
                 onContextMenu={handleContextMenu}
-                isEditing={editingEntityId === rootId}
+                editingEntityId={editingEntityId}
                 onEditComplete={(newName) => {
-                  if (newName && editingEntityId) {
-                    renameEntity(editingEntityId, newName);
+                  const editedId = editingEntityId;
+                  if (newName && editedId) {
+                    renameEntity(editedId, newName);
                   }
                   setEditingEntityId(null);
+                  // Return focus to the row so keyboard users are not dropped
+                  // back to the top of the document after an inline rename or
+                  // an Escape-cancel (Escape discards the unconfirmed edit).
+                  if (editedId) {
+                    requestAnimationFrame(() => focusRow(editedId));
+                  }
                 }}
                 isDragging={dragState.isDragging}
                 draggedEntityId={dragState.draggedEntityId}
@@ -453,10 +595,22 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
                 focusedEntityId={focusedEntityId}
                 onToggleExpand={toggleExpanded}
                 expandedIds={effectiveExpandedIds}
+                rovingActiveId={rovingActiveId}
+                onRowFocus={handleRowFocus}
               />
             );
-          })
-        ) : isFiltering ? (
+          })}
+
+        {/* Root drop zone indicator */}
+        {dragState.isDragging && dropTarget?.zone === 'root' && (
+          <div className="h-0.5 bg-blue-500 rounded-full mx-2 mt-2" />
+        )}
+      </div>
+
+      {/* Empty-scene / no-match states — siblings of the tree, never its
+          children, so they cannot trip aria-required-children on role="tree". */}
+      {!hasEntities &&
+        (isFiltering ? (
           <div className="flex flex-col items-center justify-center h-32 text-neutral-500 text-sm">
             <span>No matching entities</span>
           </div>
@@ -468,13 +622,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
               description="Add entities using the toolbar above, or ask AI to build a scene for you"
             />
           </div>
-        )}
-
-        {/* Root drop zone indicator */}
-        {dragState.isDragging && dropTarget?.zone === 'root' && (
-          <div className="h-0.5 bg-blue-500 rounded-full mx-2 mt-2" />
-        )}
-      </div>
+        ))}
 
       {/* Context Menu */}
       {contextMenu.isOpen && contextMenu.entityId && contextMenu.entityName && (

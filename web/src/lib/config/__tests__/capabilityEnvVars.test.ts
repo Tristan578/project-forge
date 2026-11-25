@@ -12,10 +12,12 @@ import {
   CAPABILITY_LABELS,
   CAPABILITY_REQUIRED_PROVIDERS,
   GATEWAY_CAPABILITIES,
+  RESOLVER_GATEWAY_CAPABILITIES,
   PROVIDER_CAPABILITIES,
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
   isCapabilityConfigured,
+  isResolverGatewayCapability,
   listUnconfiguredCapabilities,
   type ProviderCapability,
 } from '../providers';
@@ -82,6 +84,9 @@ describe('CAPABILITY_ENV_VARS', () => {
 describe('isCapabilityConfigured', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    for (const name of [...Object.values(PLATFORM_KEY_ENV), ...Object.values(GATEWAY_KEY_ENV)]) {
+      vi.stubEnv(name, '');
+    }
     vi.stubEnv('VERCEL', '');
     vi.stubEnv('VERCEL_ENV', '');
   });
@@ -155,11 +160,54 @@ describe('isCapabilityConfigured', () => {
     expect(isCapabilityConfigured('chat')).toBe(true);
     expect(isCapabilityConfigured('model3d')).toBe(false);
   });
+
+  // #10074 (lesson 1): the availability gate must agree with `resolveApiKey`
+  // for the resolver-gateway capabilities (image/embedding), which resolve
+  // AI_GATEWAY_API_KEY with NO fallback to PLATFORM_OPENAI_KEY. A gate that
+  // graded them green on the OpenAI key while the resolver 500s is exactly the
+  // drift this file exists to catch.
+  it('grades a resolver-gateway capability configured only when the resolver could serve it', () => {
+    // Sweep must not be vacuous.
+    expect(RESOLVER_GATEWAY_CAPABILITIES.length).toBeGreaterThan(0);
+    for (const cap of RESOLVER_GATEWAY_CAPABILITIES) {
+      // Nothing set, off Vercel → resolver throws → gate false.
+      expect(isCapabilityConfigured(cap), `${cap}: nothing set`).toBe(false);
+
+      // The OLD direct key alone must NOT flip it green: the resolver never
+      // falls back to it, so a green here would 500 on use.
+      vi.stubEnv(PLATFORM_KEY_ENV.openai, 'sk-openai');
+      expect(isCapabilityConfigured(cap), `${cap}: PLATFORM_OPENAI_KEY only`).toBe(false);
+      vi.stubEnv(PLATFORM_KEY_ENV.openai, '');
+
+      // The gateway key configures it, matching the resolver returning that key.
+      vi.stubEnv(GATEWAY_KEY_ENV.vercelGateway, 'gw');
+      expect(isCapabilityConfigured(cap), `${cap}: gateway key`).toBe(true);
+      vi.stubEnv(GATEWAY_KEY_ENV.vercelGateway, '');
+
+      // Vercel OIDC configures it with no explicit key, matching the resolver
+      // returning the empty OIDC key.
+      vi.stubEnv('VERCEL_ENV', 'production');
+      expect(isCapabilityConfigured(cap), `${cap}: Vercel OIDC`).toBe(true);
+      vi.stubEnv('VERCEL_ENV', '');
+    }
+  });
+
+  it('keeps chat configured on its direct backend key (chat is not resolver-gateway)', () => {
+    // chat is gateway-served but NOT resolver-gateway, so ANTHROPIC_API_KEY
+    // alone configures it — the resolver resolves that key for localize/pacing
+    // and does not throw (#10074).
+    expect(isResolverGatewayCapability('chat')).toBe(false);
+    vi.stubEnv(PLATFORM_KEY_ENV.anthropic, 'sk-ant');
+    expect(isCapabilityConfigured('chat')).toBe(true);
+  });
 });
 
 describe('listUnconfiguredCapabilities', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    for (const name of [...Object.values(PLATFORM_KEY_ENV), ...Object.values(GATEWAY_KEY_ENV)]) {
+      vi.stubEnv(name, '');
+    }
     vi.stubEnv('VERCEL', '');
     vi.stubEnv('VERCEL_ENV', '');
   });
@@ -179,6 +227,10 @@ describe('listUnconfiguredCapabilities', () => {
 
   it('is empty when every capability has a key', () => {
     for (const v of Object.values(PLATFORM_KEY_ENV)) vi.stubEnv(v, 'x');
+    // image/embedding are gateway-only on the platform path (#9523/#10074), so
+    // "every capability has a key" now includes the gateway key, not just the
+    // direct PLATFORM_* vars.
+    vi.stubEnv(GATEWAY_KEY_ENV.vercelGateway, 'x');
     expect(listUnconfiguredCapabilities()).toEqual([]);
   });
 
@@ -189,6 +241,8 @@ describe('listUnconfiguredCapabilities', () => {
   // moved to ElevenLabs), so stubbing every key leaves nothing unconfigured.
   it('reports nothing unconfigured when every platform key is set', () => {
     for (const v of Object.values(PLATFORM_KEY_ENV)) vi.stubEnv(v, 'x');
+    // Gateway-routed image/embedding need the gateway key too (#9523/#10074).
+    vi.stubEnv(GATEWAY_KEY_ENV.vercelGateway, 'x');
     expect(listUnconfiguredCapabilities()).toEqual([]);
   });
 });

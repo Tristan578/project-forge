@@ -227,20 +227,26 @@ describe('handlers2d sprite edge cases', () => {
 describe('handlers2d project2d edge cases', () => {
   describe('set_project_type', () => {
     it('sets 2D project type', async () => {
-      const { result, store } = await invoke('set_project_type', { type: '2d' });
+      const { result, store } = await invoke('set_project_type', { projectType: '2d' });
       expect(result.success).toBe(true);
       expect(store.setProjectType).toHaveBeenCalledWith('2d');
     });
 
     it('sets 3D project type', async () => {
-      const { result, store } = await invoke('set_project_type', { type: '3d' });
+      const { result, store } = await invoke('set_project_type', { projectType: '3d' });
       expect(result.success).toBe(true);
       expect(store.setProjectType).toHaveBeenCalledWith('3d');
     });
 
     it('rejects invalid type', async () => {
-      const { result } = await invoke('set_project_type', { type: 'vr' });
+      const { result } = await invoke('set_project_type', { projectType: 'vr' });
       expect(result.success).toBe(false);
+    });
+
+    it('rejects the old project_type spelling, so the manifest and handler must agree (#10357)', async () => {
+      const { result, store } = await invoke('set_project_type', { project_type: '2d' });
+      expect(result.success).toBe(false);
+      expect(store.setProjectType).not.toHaveBeenCalled();
     });
   });
 
@@ -923,6 +929,17 @@ describe('handlers2d sprite animation edge cases', () => {
       });
       expect(result.success).toBe(true);
       expect(store.setSpriteSheet).toHaveBeenCalled();
+    });
+
+    it('preserves an own __proto__ clip name through storage and JSON serialization', async () => {
+      const { result, store } = await invoke('slice_sprite_sheet', {
+        entityId: 'e1', assetId: 'tex-1', clips: [{ name: '__proto__', frames: [0], fps: 12 }],
+      });
+      const sheet = vi.mocked(store.setSpriteSheet).mock.calls[0][1];
+
+      expect(result.success).toBe(true);
+      expect(Object.hasOwn(sheet.clips, '__proto__')).toBe(true);
+      expect(JSON.parse(JSON.stringify(sheet.clips)).__proto__.name).toBe('__proto__');
     });
 
     it('fails without assetId', async () => {

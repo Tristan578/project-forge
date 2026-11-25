@@ -28,7 +28,7 @@ interface PixelArtParams {
   prompt: string;
   targetSize: number;
   palette: string;
-  customPalette?: string[];
+  customPalette?: string[] | undefined;
   dithering: string;
   ditheringIntensity: number;
   style: string;
@@ -51,11 +51,16 @@ const POST_impl = createGenerationHandler<
   }
 >({
   route: '/api/generate/pixel-art',
+  panel: 'generate-pixel-art',
   provider: () => 'replicate',
   operation: 'pixel_art_generation',
   rateLimitKey: 'gen-pixel-art',
   successStatus: 201,
   tokenCost: () => PRICING.pixel_art_replicate,
+  // #10262: pixel-art has no `generation_type` enum member and therefore no
+  // `asyncJob` (see pollProviderStatus.ts), but its status route still accepts
+  // a caller-supplied jobId and must bind ownership the same way.
+  jobIdForOwnership: (result) => result.jobId,
   validate: (body) => {
     const { prompt, targetSize, palette, customPalette, dithering, ditheringIntensity, style, provider } = body;
 

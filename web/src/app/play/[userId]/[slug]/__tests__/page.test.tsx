@@ -26,16 +26,31 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(async () => ({ get: headersGet })),
 }));
 
+// notFound() throws a control-flow signal in Next; the real one throws an error
+// carrying the NEXT_HTTP_ERROR_FALLBACK;404 digest. The mock reproduces the
+// throw so the page's non-null narrowing and short-circuit are exercised.
+const NOT_FOUND_SIGNAL = 'NEXT_NOT_FOUND';
+const notFoundMock = vi.fn((): never => {
+  throw new Error(NOT_FOUND_SIGNAL);
+});
+vi.mock('next/navigation', () => ({
+  notFound: () => notFoundMock(),
+}));
+
 vi.mock('@/lib/auth/safe-auth', () => ({
   safeAuth: vi.fn(async () => ({ userId: null })),
 }));
 
 // The page renders these; their internals are irrelevant to the nonce contract.
+// The happy-path tree asserts actual component elements and props; direct async
+// invocation does not render children, so mock invocation counts are not evidence.
+const gamePlayerMock = vi.fn((_props?: unknown) => null);
+const breadcrumbsMock = vi.fn((_props?: unknown) => null);
 vi.mock('@/components/play/GamePlayer', () => ({
-  GamePlayer: () => null,
+  GamePlayer: (props: unknown) => gamePlayerMock(props),
 }));
 vi.mock('@/components/marketing/Breadcrumbs', () => ({
-  Breadcrumbs: () => null,
+  Breadcrumbs: (props: unknown) => breadcrumbsMock(props),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -62,13 +77,16 @@ const GAME_ROW = {
 };
 const USER_ROW = { id: 'u1', displayName: 'Ada' };
 
-let limitResults: unknown[][] = [];
+let limitResults: Array<unknown[] | Error> = [];
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => ({
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
-    limit: vi.fn(() => Promise.resolve(limitResults.shift() ?? [])),
+    limit: vi.fn(() => {
+      const result = limitResults.shift() ?? [];
+      return result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
+    }),
   })),
   queryWithResilience: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
@@ -91,6 +109,20 @@ function findJsonLd(node: ReactNode): ReactElement | null {
   const el = node as ReactElement<{ type?: string; children?: ReactNode }>;
   if (el.type === 'script' && el.props?.type === 'application/ld+json') return el;
   return findJsonLd(el.props?.children);
+}
+
+/** Find a component element in returned JSX without pretending its body rendered. */
+function findComponent(node: ReactNode, component: ReactElement['type']): ReactElement | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findComponent(child, component);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const element = node as ReactElement<{ children?: ReactNode }>;
+  return element.type === component ? element : findComponent(element.props?.children, component);
 }
 
 async function renderPlayPage() {
@@ -141,5 +173,73 @@ describe('PlayPage nonce consumption (PF-1018)', () => {
 
     const script = findJsonLd(await renderPlayPage());
     expect((script!.props as { nonce?: string }).nonce).toBe('a-different-nonce');
+  });
+});
+
+/**
+ * A missing published game must produce a true HTTP 404, not a soft-404 (a 200
+ * with a "Game Not Found" title that crawlers index).
+ *
+ * Acceptance criterion (PF-1029): "Given a visitor requests a published game
+ * that does not exist, When the response is returned, Then its HTTP status is
+ * 404 rather than 200." The proxy returns a direct404 before streaming; this
+ * unit contract pins the page race guard, which terminates body construction
+ * when metadata disappears. Playwright separately proves literal document status.
+ */
+describe('PlayPage 404 on missing game (PF-1029)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    headersGet.mockReturnValue(null);
+  });
+
+  it('calls notFound() and renders no game body when the game is missing', async () => {
+    // User exists, but no published game matches the slug — the realistic
+    // missing/unpublished case getGameData collapses to null.
+    limitResults = [[USER_ROW], []];
+
+    // notFound() throws, so the component never reaches its return: the JSON-LD
+    // script and the GamePlayer/Breadcrumbs elements are never constructed.
+    await expect(renderPlayPage()).rejects.toThrow('NEXT_NOT_FOUND');
+    expect(notFoundMock).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it('404s when the user itself does not exist', async () => {
+    // First query (user lookup) is empty, so getGameData short-circuits to null
+    // before the game query — this path must 404 too, not render a shell.
+    limitResults = [[], []];
+
+    await expect(renderPlayPage()).rejects.toThrow('NEXT_NOT_FOUND');
+    expect(notFoundMock).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it.each(['author', 'game'])('propagates a %s database failure without declaring the game missing', async query => {
+    limitResults = query === 'author' ? [new Error('database unreachable')] : [[USER_ROW], new Error('database unreachable')];
+    await expect(renderPlayPage()).rejects.toThrow('database unreachable');
+    expect(notFoundMock).not.toHaveBeenCalled();
+    limitResults = query === 'author' ? [new Error('database unreachable')] : [[USER_ROW], new Error('database unreachable')];
+    const { generateMetadata } = await import('../page');
+    await expect(generateMetadata({ params: Promise.resolve({ userId: 'user_abc', slug: 'cave-escape' }) }))
+      .rejects.toThrow('database unreachable');
+  });
+
+  it('does NOT call notFound() when a published game exists', async () => {
+    // Guards the guard: proves the 404 is conditional on absence, not always on.
+    limitResults = [[USER_ROW], [GAME_ROW]];
+
+    const tree = await renderPlayPage();
+    const script = findJsonLd(tree);
+    expect(script, 'JSON-LD script did not render for a real game').not.toBeNull();
+    expect(notFoundMock).not.toHaveBeenCalled();
+    const { GamePlayer } = await import('@/components/play/GamePlayer');
+    const { Breadcrumbs } = await import('@/components/marketing/Breadcrumbs');
+    const player = findComponent(tree, GamePlayer);
+    const breadcrumb = findComponent(tree, Breadcrumbs);
+    expect(player).not.toBeNull();
+    expect(player!.props).toEqual({ userId: 'user_abc', slug: 'cave-escape', isAuthenticated: false });
+    expect(breadcrumb).not.toBeNull();
+    expect(breadcrumb!.props).toEqual({ items: [
+      { label: 'Community', href: '/community' },
+      { label: GAME_ROW.title, href: '/play/user_abc/cave-escape' },
+    ] });
   });
 });

@@ -10,6 +10,8 @@ import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { toast } from 'sonner';
 import { trackJob } from '@/lib/chat/handlers/generationHandlers';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -213,6 +215,32 @@ describe('GenerateMusicDialog', () => {
         expect.objectContaining({ bus: 'music', loopAudio: true, autoplay: true })
       );
       expect(trackJob).not.toHaveBeenCalled();
+    });
+
+    // #9854: generated output is handed to the shared arrangement as a clip,
+    // not left a play-only, standalone result.
+    it('adds the generated track to the music arrangement as a clip', async () => {
+      useMusicArrangementStore.setState({ arrangement: createEmptyArrangement() });
+      respondWith({ audioBase64: 'AAAA', durationSeconds: 42 });
+      generate('entity-1');
+
+      await waitFor(() => expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1));
+      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+      expect(clip).toMatchObject({ sourceUrl: 'music-tense dungeon theme', sourceDurationSeconds: 42 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+    });
+
+    it('falls back to the requested duration instead of a reported 0 (#10058)', async () => {
+      // A reported 0 is not a real duration for generated music — buildClip's
+      // clampTrimWindow treats sourceDurationSeconds:0 as "unknown" and floors
+      // trimEnd to 0.05s, leaving trimEnd > sourceDurationSeconds on the clip.
+      useMusicArrangementStore.setState({ arrangement: createEmptyArrangement() });
+      respondWith({ audioBase64: 'AAAA', durationSeconds: 0 });
+      generate('entity-1');
+
+      await waitFor(() => expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1));
+      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+      expect(clip.sourceDurationSeconds).toBe(30);
     });
 
     it.each([0, null])('lets a user with platform balance %s submit through the BYOK path', async (balance) => {

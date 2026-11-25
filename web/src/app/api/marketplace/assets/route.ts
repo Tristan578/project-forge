@@ -14,10 +14,13 @@ async function GET_impl(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const query = searchParams.get('q') || '';
+    const query = searchParams.get('q') ?? '';
     const category = searchParams.get('category');
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `sort` query param is the same as an omitted one, not a distinct value
     const sort = (searchParams.get('sort') || 'popular') as 'newest' | 'popular' | 'top_rated' | 'price_low' | 'price_high' | 'free';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `price` query param is the same as an omitted one, not a distinct value
     const priceFilter = (searchParams.get('price') || 'all') as 'all' | 'free' | 'paid';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `page` query param is the same as an omitted one, not a distinct value
     const page = parseInt(searchParams.get('page') || '1', 10);
     const { limit } = parsePaginationParams(new URL(req.url).searchParams);
 
@@ -108,6 +111,7 @@ async function GET_impl(req: NextRequest) {
       priceTokens: r.priceTokens,
       license: r.license,
       previewUrl: r.previewUrl,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored sellerName is unset, same as absent; falls back to a display placeholder
       sellerName: r.sellerName || 'Unknown',
       sellerId: r.sellerId,
       downloadCount: r.downloadCount,

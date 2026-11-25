@@ -29,11 +29,7 @@ fn handle_add_game_component(payload: serde_json::Value) -> super::CommandResult
 
     let properties_json = properties.to_string();
 
-    let request = GameComponentAddRequest {
-        entity_id,
-        component_type,
-        properties_json,
-    };
+    let request = GameComponentAddRequest::new(entity_id, component_type, properties_json);
 
     if queue_game_component_add_from_bridge(request) {
         Ok(())

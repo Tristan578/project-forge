@@ -45,7 +45,9 @@ command -v mktemp >/dev/null 2>&1 || { echo "FATAL: mktemp not found on host"; e
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 
 # --- the four known-dead taskboard ULIDs (mirror the script's banned set) -----
 DEAD_PROJECT="01KK974VMNC16ZAW7MW1NH3T3M"
@@ -73,10 +75,12 @@ ALLOW_DOC="docs/reviews/2026-06-02-agentic-toolkit-parity-review.md"
 ALLOW_CFG=".claude/hooks/github-sync-config.json"
 
 mkroot() { mktemp -d; }
+readonly -f mkroot
 run_guard() { # <root> → runs the REAL tripwire against the fixture tree
   local root="$1"
   STALE_ID_SCAN_ROOT="$root" bash "$GUARD"
 }
+readonly -f run_guard
 
 # =============================================================================
 echo "== tripwire: script exists and is executable =="

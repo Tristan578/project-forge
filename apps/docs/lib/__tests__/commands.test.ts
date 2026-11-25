@@ -225,9 +225,11 @@ describe('toParameterList', () => {
           required: ['entityType'],
         },
       }),
-    ).toEqual([
+    ).toStrictEqual([
       { name: 'entityType', type: 'string', required: true, description: 'Type of entity' },
-      { name: 'name', type: 'string', required: false, description: undefined },
+      // No `description` key at all — not `description: undefined`. toStrictEqual
+      // is what makes that distinction visible; toEqual would accept either.
+      { name: 'name', type: 'string', required: false },
     ]);
   });
 
@@ -256,7 +258,7 @@ describe('toParameterList', () => {
         category: 'scene',
         parameters: { properties: { mystery: {} } },
       }),
-    ).toEqual([{ name: 'mystery', type: 'unknown', required: false, description: undefined }]);
+    ).toStrictEqual([{ name: 'mystery', type: 'unknown', required: false }]);
   });
 
   it.each([

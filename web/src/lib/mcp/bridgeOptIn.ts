@@ -14,6 +14,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { MCP_TOKEN_PARAM } from './tokenParam';
 
 export const MCP_BRIDGE_DEFAULT_URL = 'ws://127.0.0.1:3001/api/mcp/ws';
 
@@ -28,7 +29,7 @@ export function mcpBridgeEnabled(): boolean {
 
 /** The token from `?mcp=<token>`, or null when the tab did not opt in. */
 export function mcpBridgeToken(search: string): string | null {
-  const token = new URLSearchParams(search).get('mcp');
+  const token = new URLSearchParams(search).get(MCP_TOKEN_PARAM);
   return token && token.length > 0 ? token : null;
 }
 

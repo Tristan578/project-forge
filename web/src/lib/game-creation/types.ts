@@ -132,7 +132,7 @@ export interface EntityBlueprint {
    * the decomposition prompt never contains that word, so the plural cannot come
    * back without a deliberate test change.
    */
-  behavior?: Behavior;
+  behavior?: Behavior | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ export interface EntityBlueprint {
 export interface AssetNeed {
   type: '3d-model' | 'texture' | 'sound' | 'music' | 'voice' | 'sprite';
   description: string;
-  entityRef?: string;
+  entityRef?: string | undefined;
   styleDirective: string;
   priority: 'required' | 'nice-to-have';
   fallback: string;
@@ -174,17 +174,22 @@ export interface OrchestratorGDD {
    * absent means the classic `win` default, preserving every GDD authored before
    * the field existed.
    *
-   * NOT YET WIRED. Nothing in this slice reads this field off a GDD or copies it
-   * anywhere: `ExecutorContext` exposes no `gdd`, so `sceneCreateExecutor` — the
-   * only code that builds a scene's `SceneGraph` — structurally cannot read it.
-   * Once the child issue (#9998) adds a `gdd` reference to `ExecutorContext` and
-   * wires `scene_create` to read it, this WILL be propagated to
-   * `SceneGraph.completionMode` so the shared Play/verify validator gates
-   * winnability by the creator's choice rather than demanding a win condition for
-   * sandbox/endless/narrative games. The mode will be chosen explicitly (manual
-   * control or typed AI op), never inferred from entity names.
+   * Set by the decomposer when the model states it (`zBriefContent` in
+   * `briefSchema.ts` validates it against `COMPLETION_MODES`, the same list the
+   * manual picker and the `set_completion_mode` tool use). Propagated by
+   * `scene_create`, which reads it through `ExecutorContext.gdd` and stages it
+   * on `newScene`, so it lands on `SceneGraph.completionMode` as native
+   * editable data (#9998). It also tells `planBuilder` not to invent a default
+   * win condition for an endless/sandbox/narrative brief. Chosen explicitly,
+   * never inferred from entity names.
+   *
+   * `| undefined` is deliberate (`exactOptionalPropertyTypes`): a validated
+   * `GameBrief` (#10174) infers the key as `mode | undefined`, and the brief
+   * has to be assignable here so the manual path feeds `buildPlan` the same
+   * object the AI path does. Readers already treat absence and `undefined`
+   * alike (`requiresWinCondition` reads both as `win`).
    */
-  completionMode?: CompletionMode;
+  completionMode?: CompletionMode | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +206,7 @@ export interface PlanStep {
   fallbackStepId?: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
   output?: Record<string, unknown>;
-  error?: OrchestratorStepError;
+  error?: OrchestratorStepError | undefined;
   userFacingErrorMessage?: string;
 }
 
@@ -290,7 +295,7 @@ export interface TokenEstimate {
   totalVarianceLow: number;
   userTier: string;
   sufficientBalance: boolean;
-  warningMessage?: string;
+  warningMessage?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +328,7 @@ export interface ExecutorContext {
    * either path to a single boolean.
    */
   dispatchCommand: (command: string, payload: unknown) => import('@/hooks/useEngine').CommandResponse | void;
-  dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
+  dispatchCommandBatch?: ((commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult) | undefined;
   /**
    * Reads the editor store LIVE at call time.
    *
@@ -397,6 +402,18 @@ export interface ExecutorContext {
    * an upgrade, never a hard dependency that could strand a caller.
    */
   observeEntity?: (entityId: string) => ObservedEntity | undefined;
+  /**
+   * The brief the plan was built from (#9998). Set by `runPipeline` from
+   * `plan.gdd`, so every executor in a run reads the same one; a caller's own
+   * value is replaced, exactly as the step resolvers are.
+   *
+   * Read-only by contract: executors take facts OFF the brief (today,
+   * `scene_create` reads `completionMode`); they never edit it. OPTIONAL so a
+   * context built outside `runPipeline` (unit tests, older callers) still
+   * type-checks — an executor must treat its absence as "the brief said
+   * nothing", which for the completion mode is the legacy `win`.
+   */
+  gdd?: Readonly<OrchestratorGDD>;
 }
 
 export interface ExecutorDefinition {
@@ -409,7 +426,7 @@ export interface ExecutorDefinition {
 export interface ExecutorResult {
   success: boolean;
   output?: Record<string, unknown>;
-  error?: OrchestratorStepError;
+  error?: OrchestratorStepError | undefined;
 }
 
 // ---------------------------------------------------------------------------

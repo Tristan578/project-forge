@@ -1,7 +1,7 @@
 # Incident Detected — Initial Alert Template
 
 > Use this template within **15 minutes** of detecting a P0 or P1 incident.
-> Post to: #incidents Slack channel + status page update.
+> Post to: the #incidents Slack channel, if one is configured. There is no manually updated status page; https://spawnforge.ai/health shows live service status on its own.
 
 ---
 
@@ -10,8 +10,7 @@
 **Status:** Investigating
 **Severity:** {P0 / P1 / P2}
 **Detected at:** {YYYY-MM-DD HH:MM UTC}
-**Incident Commander:** {NAME}
-**Bridge channel:** #{SLACK_INCIDENT_CHANNEL}
+**Owner:** {NAME} (the project owner, who handles the incident end to end)
 
 ---
 
@@ -43,25 +42,23 @@ We are actively investigating. Next update in **{15 / 30} minutes** or when we h
 
 ### Who should I contact?
 
-Do not contact individual engineers directly. Monitor this channel and the status page for updates.
+Updates will be posted here as they happen. If you have extra impact to report, or a billing or data question, email support@spawnforge.ai; replies may be slower while the incident is being worked on.
 
-Status page: https://status.spawnforge.ai
+Live service status (updates automatically from the health checks): https://spawnforge.ai/health
 
 ---
 
-## Internal Notes (not for status page)
+## Internal Notes (not for publication)
 
 **Incident ID:** INC-{YYYYMMDD}-{N}
-**Alert triggered by:** {monitoring alert / user report / engineer observation}
-**First responder:** {NAME}
-**Escalated to:** {NAME or N/A}
+**Alert triggered by:** {monitoring alert / user report / owner observation}
 
 ### Timeline
 
 | Time (UTC) | Event |
 |------------|-------|
 | {HH:MM} | Incident detected |
-| {HH:MM} | {first responder} begins investigation |
+| {HH:MM} | {NAME} begins investigation |
 
 ### Current hypotheses
 
@@ -71,6 +68,5 @@ Status page: https://status.spawnforge.ai
 ### Actions taken
 
 - [ ] {action}
-- [ ] Alert on-call engineer
-- [ ] Post status page update
-- [ ] Open incident bridge channel
+- [ ] Notify the project owner (no on-call/paging service — see `docs/operations/incident-response.md`)
+- [ ] Confirm https://spawnforge.ai/health reflects the incident

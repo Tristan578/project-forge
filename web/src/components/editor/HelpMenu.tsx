@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { HelpCircle, Keyboard, BookOpen, GraduationCap, RotateCcw, MessageSquareText } from 'lucide-react';
+import { HelpCircle, Keyboard, BookOpen, Compass, GraduationCap, RotateCcw, MessageSquareText } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
@@ -103,6 +103,13 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
     startTutorial('first-scene');
   };
 
+  // Highlight-only tour of AI building, Play and Export (#10171). It spends no
+  // tokens and does not count as finishing onboarding.
+  const handleCapabilitiesTour = () => {
+    close();
+    startTutorial('capabilities');
+  };
+
   const handleResetWelcome = () => {
     close();
     if (typeof localStorage !== 'undefined') {
@@ -167,6 +174,11 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
             disabled={!hasWorkspaceApi}
           />
           <div className="my-1 h-px bg-zinc-800" role="separator" />
+          <MenuItem
+            icon={<Compass size={14} />}
+            label="What can SpawnForge do?"
+            onClick={handleCapabilitiesTour}
+          />
           <MenuItem
             icon={<GraduationCap size={14} />}
             label="Restart Tutorial"

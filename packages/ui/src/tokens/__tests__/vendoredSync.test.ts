@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { THEME_DEFINITIONS } from '../themes';
 
 /**
  * Regression guard for #8742 / the Sentry vendored-staleness finding.
@@ -47,10 +49,17 @@ describe('vendored @spawnforge/ui is in sync with source tokens', () => {
     ).toEqual([]);
   });
 
-  it('vendored themes carry the WCAG --sf-accent-active token (#8742)', () => {
-    const validator = sfTokens(readFileSync(VENDORED_VALIDATOR, 'utf8'));
-    const themes = readFileSync(VENDORED_THEMES, 'utf8');
-    expect(validator.has('--sf-accent-active')).toBe(true);
-    expect(themes).toContain('--sf-accent-active');
+  it('vendored exported themes match every actual source theme token and value', () => {
+    // Evaluate only this trusted generated repository artifact. Strip its static
+    // catalog import and export markers; its definitions remain executable so
+    // dropping STATUS_COLORS spreads or changing values fails the comparison.
+    const generated = readFileSync(VENDORED_THEMES, 'utf8')
+      .replace(/^import .*;$/gm, '')
+      .replace(/^export /gm, '');
+    const vendored = runInNewContext(generated + '\nTHEME_DEFINITIONS') as typeof THEME_DEFINITIONS;
+    expect(Object.keys(vendored).sort()).toEqual(Object.keys(THEME_DEFINITIONS).sort());
+    for (const [theme, tokens] of Object.entries(THEME_DEFINITIONS)) {
+      expect(vendored[theme as keyof typeof THEME_DEFINITIONS], theme).toEqual(tokens);
+    }
   });
 });

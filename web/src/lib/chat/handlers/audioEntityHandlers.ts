@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, parseArgs } from './types';
+import { ownEntry, zEntityId, parseArgs } from './types';
 
 export const audioEntityHandlers: Record<string, ToolHandler> = {
   set_audio: async (args, { store }) => {
@@ -252,7 +252,7 @@ export const audioEntityHandlers: Record<string, ToolHandler> = {
     const preDelay = args.preDelay as number | undefined;
     const priority = args.priority as number | undefined;
 
-    const current = store.reverbZones[p.data.entityId];
+    const current = ownEntry(store.reverbZones, p.data.entityId);
     const shapeData = shape === 'sphere'
       ? { type: 'sphere' as const, radius: radius ?? 5 }
       : { type: 'box' as const, size: [sizeX ?? 10, sizeY ?? 5, sizeZ ?? 10] as [number, number, number] };

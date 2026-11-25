@@ -59,7 +59,8 @@ describe('applyCollisionShapeToLayers', () => {
   });
 
   it.each([undefined, [], ['none'] as CollisionShape[]])('preserves absent or partial metadata when none is already effective (%j)', (collisionShapes) => {
-    const layers = [{ ...layer(4), collisionShapes }];
+    // `undefined` means the key is absent: TilemapLayer.collisionShapes is exact.
+    const layers = [{ ...layer(4), ...(collisionShapes !== undefined && { collisionShapes }) }];
     const result = applyCollisionShapeToLayers(layers, [4, 1], 0, 3, 0, 'none');
     expect(result).toEqual({ layers, changed: false });
     expect(result.layers).toBe(layers);

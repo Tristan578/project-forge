@@ -16,8 +16,9 @@ This is enforced by hooks. All three contributors monitor progress via the share
 
 ## Taskboard Setup
 
-**Binary**: tcarac/taskboard (install via `go install github.com/tcarac/taskboard@latest`)
-**Start**: `cd project-forge && taskboard start --port 3010`
+**Binary**: tcarac/taskboard (install with `brew tap tcarac/taskboard && brew install taskboard`, a release binary from https://github.com/tcarac/taskboard/releases, or `make build` from a clone; set TASKBOARD_BIN if it is not on PATH. `go install github.com/tcarac/taskboard@latest` does not work: v0.6.0 has no main package at the module root, and `cmd/taskboard` embeds a `web/dist` the module does not ship.)
+**First run** (new machine, no taskboard database yet; once, instead of Start): `cd project-forge && node .claude/hooks/taskboard-launch.mjs init`, then `python3 .claude/hooks/github_project_sync.py pull`
+**Start**: `cd project-forge && node .claude/hooks/taskboard-launch.mjs start` (the launcher resolves and passes the shared DB path itself; never start the binary by hand)
 **Project ID**: `01KMM9ZA6SBZ7RKJZJTZS9VR4R` (prefix: PF)
 
 The session hooks will auto-start the server if the binary is found.

@@ -9,7 +9,7 @@ export interface CircuitBreakerOptions {
   /** Milliseconds in open state before transitioning to half-open. Default: 30000 */
   openTimeoutMs?: number;
   /** Callback fired on state transitions for observability (Sentry, logging). */
-  onTransition?: (from: CircuitState, to: CircuitState) => void;
+  onTransition?: ((from: CircuitState, to: CircuitState) => void) | undefined;
 }
 
 export class CircuitBreakerOpenError extends Error {
@@ -25,7 +25,7 @@ export class CircuitBreaker {
   private lastOpenedAt: number | null = null;
   private readonly failureThreshold: number;
   private readonly openTimeoutMs: number;
-  private readonly onTransition?: (from: CircuitState, to: CircuitState) => void;
+  private readonly onTransition?: ((from: CircuitState, to: CircuitState) => void) | undefined;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.failureThreshold = options.failureThreshold ?? 5;

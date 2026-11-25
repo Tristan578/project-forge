@@ -6,8 +6,12 @@ import {
   getRequiredTier,
   PANEL_TIER_REQUIREMENTS,
   TIER_LABELS,
+  TRIAL_ACCESS_TIER,
+  effectiveTier,
+  spendableTokensOf,
+  canAccessPanelBeforeProfileLoad,
 } from '../tierAccess';
-import type { Tier } from '@/stores/userStore';
+import type { Tier } from '@/lib/db/schema';
 
 // ---------------------------------------------------------------------------
 // tierAtLeast
@@ -223,5 +227,81 @@ describe('PANEL_TIER_REQUIREMENTS', () => {
     for (const panelId of corePanels) {
       expect(PANEL_TIER_REQUIREMENTS[panelId]).toBeUndefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trial access (#7715)
+// ---------------------------------------------------------------------------
+
+describe('effectiveTier', () => {
+  it('treats a starter account with spendable tokens as the trial access tier', () => {
+    expect(TRIAL_ACCESS_TIER).toBe('hobbyist');
+    expect(effectiveTier('starter', 50)).toBe('hobbyist');
+    expect(effectiveTier('starter', 1)).toBe('hobbyist');
+  });
+
+  it('leaves a starter account with nothing to spend as starter', () => {
+    expect(effectiveTier('starter', 0)).toBe('starter');
+    expect(effectiveTier('starter', -5)).toBe('starter');
+  });
+
+  it('never changes a paid tier, with or without tokens', () => {
+    for (const tier of ['hobbyist', 'creator', 'pro'] as Tier[]) {
+      expect(effectiveTier(tier, 0)).toBe(tier);
+      expect(effectiveTier(tier, 500)).toBe(tier);
+    }
+  });
+
+  it('opens exactly the hobbyist panels for a trial account, never creator or pro ones', () => {
+    const trial = effectiveTier('starter', 50);
+    expect(canAccessPanel('ai-chat', trial)).toBe(true);
+    expect(canAccessPanel('generate-texture', trial)).toBe(true);
+    expect(canAccessPanel('generate-model', trial)).toBe(false);
+    expect(canAccessPanel('playtest', trial)).toBe(false);
+    // and a spent trial opens none of them
+    expect(canAccessPanel('ai-chat', effectiveTier('starter', 0))).toBe(false);
+  });
+});
+
+describe('spendableTokensOf', () => {
+  it('is the unused monthly allocation plus add-ons, floored at zero', () => {
+    expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 })).toBe(50);
+    expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 20, addonTokens: 5 })).toBe(35);
+    expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 80, addonTokens: 5 })).toBe(5);
+    expect(spendableTokensOf({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 })).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canAccessPanelBeforeProfileLoad (#7715 review round 3)
+// ---------------------------------------------------------------------------
+
+describe('canAccessPanelBeforeProfileLoad', () => {
+  // Derived from the map, so a panel added or re-tiered later is covered
+  // without editing this test (lessons-learned #18).
+  const entries = Object.entries(PANEL_TIER_REQUIREMENTS) as [string, Tier][];
+
+  it('walks a non-empty requirement map', () => {
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.some(([, t]) => t === 'hobbyist')).toBe(true);
+    expect(entries.some(([, t]) => t === 'creator' || t === 'pro')).toBe(true);
+  });
+
+  it('is open exactly for panels the trial tier could reach, and locked above it', () => {
+    for (const [panelId, required] of entries) {
+      expect(canAccessPanelBeforeProfileLoad(panelId), panelId).toBe(tierAtLeast(TRIAL_ACCESS_TIER, required));
+    }
+  });
+
+  it('keeps creator- and pro-gated panels locked', () => {
+    expect(canAccessPanelBeforeProfileLoad('generate-model')).toBe(false);
+    expect(canAccessPanelBeforeProfileLoad('world-builder')).toBe(false);
+    expect(canAccessPanelBeforeProfileLoad('playtest')).toBe(false);
+  });
+
+  it('is open for hobbyist-gated and unmapped panels', () => {
+    expect(canAccessPanelBeforeProfileLoad('generate-texture')).toBe(true);
+    expect(canAccessPanelBeforeProfileLoad('scene-hierarchy')).toBe(true);
   });
 });

@@ -1,3 +1,4 @@
+/** Persisted inspector disclosure with a native toggle and independent header actions. */
 'use client';
 
 import { useState, useCallback, type ReactNode } from 'react';
@@ -31,6 +32,7 @@ function writeCollapsed(ids: Set<string>) {
   }
 }
 
+/** Section identity, content and optional sibling header controls. */
 interface CollapsibleSectionProps {
   /** Unique ID for localStorage persistence (e.g. "transform", "material") */
   id: string;
@@ -38,11 +40,18 @@ interface CollapsibleSectionProps {
   title: string;
   /** Optional right-side content (badges, buttons) */
   headerRight?: ReactNode;
+  /** Panel content retained in the DOM and hidden while collapsed. */
   children: ReactNode;
   /** Additional className on the outer wrapper */
   className?: string;
 }
 
+/**
+ * Renders a persisted disclosure; header actions are siblings of its toggle.
+ * Storage failures fall back to the local expanded state.
+ * @param props Unique persistence ID, title, content and optional header controls.
+ * @returns A keyboard-operable toggle and its associated content panel.
+ */
 export function CollapsibleSection({
   id,
   title,
@@ -71,23 +80,29 @@ export function CollapsibleSection({
 
   return (
     <div className={`border-t border-zinc-800 pt-3 mt-3 ${className}`}>
-      <button
-        type="button"
-        onClick={toggle}
-        className="flex w-full items-center gap-1.5 text-left group"
-        aria-expanded={!isCollapsed}
-        aria-controls={panelId}
-      >
-        {isCollapsed ? (
-          <ChevronRight className="w-3 h-3 text-zinc-400 group-hover:text-zinc-300" />
-        ) : (
-          <ChevronDown className="w-3 h-3 text-zinc-400 group-hover:text-zinc-300" />
-        )}
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 group-hover:text-zinc-400">
-          {title}
-        </h3>
-        {headerRight && <div className="ml-auto">{headerRight}</div>}
-      </button>
+      {/* The toggle button and headerRight are siblings — headerRight may
+          contain its own interactive controls (e.g. copy/paste), which must
+          not be nested inside the toggle button (WCAG 4.1.2 nested-interactive,
+          and an invalid <button> inside <button>). */}
+      <div className="flex w-full items-center gap-1.5">
+        <button
+          type="button"
+          onClick={toggle}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] rounded"
+          aria-expanded={!isCollapsed}
+          aria-controls={panelId}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="w-3 h-3 text-zinc-400 group-hover:text-zinc-300" />
+          ) : (
+            <ChevronDown className="w-3 h-3 text-zinc-400 group-hover:text-zinc-300" />
+          )}
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 group-hover:text-zinc-400">
+            {title}
+          </h3>
+        </button>
+        {headerRight && <div className="ml-auto flex items-center">{headerRight}</div>}
+      </div>
       <div id={panelId} className="mt-2" hidden={isCollapsed}>{children}</div>
     </div>
   );

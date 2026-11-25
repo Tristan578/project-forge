@@ -14,6 +14,8 @@ export type TaskAssignee = 'user' | 'ai';
 export interface EditorTask {
   id: string;
   title: string;
+  // Exact on purpose (#10306): `updateTask` merges with a bare spread, so an
+  // optional field here that admitted `undefined` would let a patch erase it.
   description?: string;
   status: TaskStatus;
   assignee: TaskAssignee;
@@ -48,7 +50,7 @@ export const useTaskStore = create<TaskState>()(
         const task: EditorTask = {
           id,
           title,
-          description,
+          ...(description !== undefined && { description }),
           status: 'todo',
           assignee,
           createdAt: now,

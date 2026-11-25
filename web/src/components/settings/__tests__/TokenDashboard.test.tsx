@@ -96,6 +96,40 @@ describe('TokenDashboard', () => {
     expect(screen.getByText('Monthly Remaining')).toBeDefined();
   });
 
+  // #7715: the free (`starter`) plan has no monthly allocation, so its
+  // balance must read as the one-time trial grant and never promise a refill.
+  describe('balance labelling by tier (#7715)', () => {
+    const REFILL = '2026-10-01T00:00:00.000Z';
+
+    it('labels a paid tier balance as monthly and shows the next refill', () => {
+      setupStore({
+        tokenBalance: { total: 300, monthlyRemaining: 300, addon: 0, nextRefillDate: REFILL },
+        tier: 'hobbyist',
+      });
+      render(<TokenDashboard />);
+      expect(screen.getByText('Monthly Remaining')).toBeInTheDocument();
+      expect(screen.getByText(/^Next refill:/)).toBeInTheDocument();
+      expect(screen.queryByText('Trial Remaining')).toBeNull();
+      expect(screen.queryByText(/One-time trial grant/)).toBeNull();
+    });
+
+    it('labels a starter balance as the one-time trial grant with no refill line', () => {
+      setupStore({
+        // A refill date can still be present (a cancelled plan's billing
+        // cycle); the free plan does not refill, so it must not be shown.
+        tokenBalance: { total: 50, monthlyRemaining: 50, addon: 0, nextRefillDate: REFILL },
+        tier: 'starter',
+      });
+      render(<TokenDashboard />);
+      expect(screen.getByText('Trial Remaining')).toBeInTheDocument();
+      expect(
+        screen.getByText('One-time trial grant — does not renew. Upgrade for a monthly allowance.'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Monthly Remaining')).toBeNull();
+      expect(screen.queryByText(/Next refill/)).toBeNull();
+    });
+  });
+
   it('renders addon tokens', () => {
     setupStore({
       tokenBalance: { total: 12345, monthlyRemaining: 8000, addon: 4345 },

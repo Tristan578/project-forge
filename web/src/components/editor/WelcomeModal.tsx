@@ -7,6 +7,7 @@ import { IdeaGeneratorModal } from './IdeaGeneratorModal';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useChatStore } from '@/stores/chatStore';
+import { revealChat } from '@/lib/chat/revealChat';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
 import { TUTORIALS } from '@/data/tutorials';
 import type { GameIdea } from '@/lib/ai/ideaGenerator';
@@ -72,6 +73,9 @@ export function WelcomeModal() {
       const mechanics = idea.mechanicCombo.mechanics.map((m) => m.name).join(', ');
       const prompt = `Create a game from this idea: "${idea.title}" — ${idea.description}. Genre: ${genres}. Mechanics: ${mechanics}.`;
       void sendMessage(prompt);
+      // The modal has just dismissed itself; without this the AI's reply
+      // streams into a chat nothing is showing, on either layout (#10166).
+      revealChat();
     },
     [handleDismiss, sendMessage]
   );

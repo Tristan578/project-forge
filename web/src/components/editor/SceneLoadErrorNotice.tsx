@@ -1,3 +1,4 @@
+/** Persistent save-lockout notice and reload guidance for untrusted scene viewports. */
 'use client';
 
 import { AlertTriangle } from 'lucide-react';
@@ -5,27 +6,12 @@ import { Button } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 
 /**
- * Explains a REJECTED scene load instead of leaving an empty viewport with no
- * account of itself (#10056).
- *
- * Before this, `loadScene` gained rejection paths that return without
- * dispatching, and the editor page discarded the boolean: the editor rendered
- * with an empty viewport, the project's name already in the title bar, and no
- * indication anything had gone wrong — so the next save wrote that empty scene
- * over the project. The banner is the visible half of the fix; the refusal in
- * every save path is the half that protects the data, and this text is what
- * tells the user why nothing is saving.
- *
- * Reads `sceneLoadError`, NOT `loadScene`'s boolean: that boolean is also false
- * on a healthy cold open (the engine dispatcher mounts after this page), so
- * gating on it would show this alert every time.
- *
- * `role="alert"` rather than the `role="status"` its sibling
- * `RemixQuarantineNotice` uses: a quarantine notice is informational, whereas
- * this one says the work in front of the user is not their project and cannot
- * be saved — assertive announcement is the correct urgency. For the same
- * reason it is NOT dismissible: dismissing would hide a condition that is still
- * true and still blocking every save.
+ * Explain a save lockout after rejection or a thrown scene dispatch.
+ * The viewport may be empty, incomplete, or corrupted. Save paths refuse to
+ * overwrite stored scene data while this non-dismissible alert remains active.
+ * Reads sceneLoadError rather than loadScene's boolean, so a healthy cold-open
+ * deferral does not show a warning. A confirmed trustworthy recovery clears it.
+ * @returns An assertive alert with reload guidance, or null without a lockout.
  */
 export function SceneLoadErrorNotice() {
   const sceneLoadError = useEditorStore((s) => s.sceneLoadError);
@@ -35,18 +21,45 @@ export function SceneLoadErrorNotice() {
   return (
     <div
       role="alert"
-      className="fixed left-1/2 top-3 z-[100] flex max-w-xl -translate-x-1/2 items-start gap-3 rounded-[var(--sf-radius-lg)] border border-[var(--sf-destructive)] bg-[var(--sf-bg-surface)] px-4 py-3 text-sm text-[var(--sf-text)] shadow-xl"
+      className="fixed inset-x-3 top-3 z-[100] mx-auto flex max-h-[calc(100dvh-1.5rem)] w-fit max-w-xl items-start gap-3 overflow-y-auto rounded-[var(--sf-radius-lg)] border border-[var(--sf-destructive)] bg-[var(--sf-bg-surface)] px-4 py-3 text-sm text-[var(--sf-text)] shadow-xl"
     >
       <AlertTriangle
         className="mt-0.5 shrink-0 text-[var(--sf-destructive)]"
         size={18}
         aria-hidden="true"
       />
-      <div className="flex flex-col gap-2">
-        <p>{sceneLoadError.reason}</p>
+      {/* Phone layout (measured in Chromium; pinned by
+          e2e/tests/scene-load-error-notice.spec.ts, since jsdom has no layout).
+          WIDTH: `inset-x-3 mx-auto w-fit` centres the notice inside a box 12px
+          in from each edge, so it can use the whole viewport minus 24px.
+          Centring with `left-1/2 -translate-x-1/2` left it only the half of the
+          screen to the right of `left`, so it was 188px wide at 375px and any
+          max width on it never applied.
+          HEIGHT: the reason can carry up to 512 characters of engine text, so
+          it scrolls inside its own capped box and the explanation and the
+          Reload button stay on screen. The notice is also capped at the
+          viewport height and scrolls, so a very short screen can still reach
+          the button. The reason box is focusable and named, so a keyboard
+          user can scroll it.
+          WRAPPING: an engine refusal can quote a long unbroken scene value.
+          `wrap-anywhere` (overflow-wrap: anywhere) lets that token count as
+          breakable when the browser sizes this fit-content notice;
+          `break-words` only wraps after sizing, so the notice grew to its max
+          width and ran off a phone screen. `min-w-0` lets the column shrink
+          inside the flex row. */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <div
+          role="region"
+          aria-label="Error details"
+          tabIndex={0}
+          className="max-h-[min(12rem,30dvh)] min-w-0 overflow-y-auto"
+          data-testid="scene-load-error-reason-scroll"
+        >
+          <p className="min-w-0 wrap-anywhere" data-testid="scene-load-error-reason">{sceneLoadError.reason}</p>
+        </div>
         <p className="text-[var(--sf-text-secondary)]">
-          Saving is turned off so this empty editor cannot overwrite your saved project.
-          Reload to try again, or start a new scene to re-enable saving.
+          Saving is turned off because the viewport may be incomplete or corrupted.
+          Your stored scene is protected. Reload to try again, or start a new scene to re-enable saving.
         </p>
         <div>
           <Button

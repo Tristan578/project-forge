@@ -9,7 +9,7 @@
 
 **Status:** Investigating
 **Last updated:** {YYYY-MM-DD HH:MM UTC}
-**Incident Commander:** {NAME}
+**Owner:** {NAME} (the project owner, who handles the incident end to end)
 **Time since detection:** {N hours N minutes}
 
 ---
@@ -24,7 +24,7 @@
 
 ### What we have ruled out
 
-<!-- List any hypotheses that have been eliminated. Helps users and responders understand your progress. -->
+<!-- List any hypotheses that have been eliminated. Helps users understand your progress. -->
 
 - {ruled out item}
 - {ruled out item}
@@ -52,11 +52,11 @@
 
 We will post the next update by **{HH:MM UTC}**, or sooner if the situation changes.
 
-Status page: https://status.spawnforge.ai
+Live service status (updates automatically from the health checks): https://spawnforge.ai/health
 
 ---
 
-## Internal Notes (not for status page)
+## Internal Notes (not for publication)
 
 ### Timeline (cumulative)
 
@@ -78,4 +78,4 @@ Status page: https://status.spawnforge.ai
 
 ### Resources needed
 
-- [ ] {additional engineer / tool / access}
+- [ ] {additional tool / access}

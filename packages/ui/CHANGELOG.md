@@ -1,5 +1,47 @@
 # @spawnforge/ui
 
+## 0.4.0
+
+### Minor Changes
+
+- [#10201](https://github.com/Tristan578/project-forge/pull/10201) [`689ac8d`](https://github.com/Tristan578/project-forge/commit/689ac8d7fb12cafdbbcdd295b74e90dbc562a906) Thanks [@Tristan578](https://github.com/Tristan578)! - Choose how a game counts as complete: Win, Endless, Sandbox or Narrative. Set it from the new Completion mode picker in Scene Settings (keyboard-accessible, with its own Undo and Redo), ask the in-app AI (`set_completion_mode`), or describe a sandbox, endless or story game when generating one. Only Win requires a win condition before Play and generated-game verification pass. A win condition the scene does have is still checked in every mode. Generated games no longer get an invented goal when their brief is Endless, Sandbox or Narrative.
+  
+  The mode is saved with the scene: `.forge` download, auto-save, cloud save, scene switching and checkpoints all carry it, and reopening restores it. Scenes saved before this change have no mode and still open as Win, with the same Play check as before.
+  
+  Completion-mode controls follow the active theme and use shared native radio controls with full-option touch targets. AI undo/redo can target completion-mode history explicitly.
+
+### Patch Changes
+
+- [#10232](https://github.com/Tristan578/project-forge/pull/10232) [`33116b2`](https://github.com/Tristan578/project-forge/commit/33116b25de2fe3f65b42720ffb278d2f10808b7d) Thanks [@Tristan578](https://github.com/Tristan578)! - Enable `exactOptionalPropertyTypes` in the three small TypeScript workspaces ([#7592](https://github.com/Tristan578/project-forge/issues/7592)).
+  
+  `apps/docs`, `mcp-server` and `packages/ui` now distinguish an omitted optional property from one set to `undefined`. The handful of sites that relied on the old equivalence build their objects and JSX props with conditional spread instead, so no serialized output gains a literal `undefined` key. The stateless MCP HTTP transport drops its explicit `sessionIdGenerator: undefined` (the SDK gates stateless mode on the option being falsy, so an absent key is identical). No runtime behaviour changes. `web` is not touched: it measures 320 errors across 165 files and is tracked separately.
+
+- [#10137](https://github.com/Tristan578/project-forge/pull/10137) [`7f4653b`](https://github.com/Tristan578/project-forge/commit/7f4653b46a0a10d16ec4b80095c7321a7c506540) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update runtime dependencies for AI providers, authentication, storage, monitoring, validation, and documentation. Refresh related development and test tooling.
+
+- [#10113](https://github.com/Tristan578/project-forge/pull/10113) [`d0f8cbc`](https://github.com/Tristan578/project-forge/commit/d0f8cbc915e7ffc579e09fbf03a88bacf435cf67) Thanks [@Tristan578](https://github.com/Tristan578)! - Use semantic theme colours for health status cards and documentation, with readable status indicators and accessible shared controls.
+
+## 0.3.0
+
+### Minor Changes
+
+- [#10068](https://github.com/Tristan578/project-forge/pull/10068) [`e70fe56`](https://github.com/Tristan578/project-forge/commit/e70fe5603bfe01be687965f4692e790be9457bee) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a token-driven `InlineAlert` primitive to `@spawnforge/ui` (warning / error / info variants, optional `id`, `role="alert"` for errors and `role="status"` for warnings and info) and migrate the editor's bespoke inline notice boxes to use it: the generation-unavailable notice, the feedback dialog error, the GDD panel error, the procedural-animation default-bones warning, and the engine init overlay's timeout and failure boxes. Notice colours now come from the shared theme tokens, so light/dark theming is handled once instead of per hardcoded amber/yellow Tailwind literal.
+
+### Patch Changes
+
+- [#10003](https://github.com/Tristan578/project-forge/pull/10003) [`27d81a8`](https://github.com/Tristan578/project-forge/commit/27d81a838d1aede06cd5ef58606f86745b782d55) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update the editor and documentation site to React 19.3.0 and Next.js 16.3.5, keeping React DOM and Next.js tooling aligned. Refresh the editor's docking, icons, translations and S3 dependencies, and the documentation site's Fumadocs dependencies. The shared UI package now requires React 19.3 or later within React 19.
+
+- [#10081](https://github.com/Tristan578/project-forge/pull/10081) [`5b2029b`](https://github.com/Tristan578/project-forge/commit/5b2029b37cde2bef16abc31e8ae00129d4ccdbf6) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a status-colour semantic (healthy / degraded / down / unknown) to the design-system tokens as verified foreground/background pairs, and migrate the public `/health` dashboard onto them. The overall-status banner and its Refresh/Retry actions now use `@spawnforge/ui` tokens and the `Button` primitive instead of raw Tailwind palette literals, so the status page participates in the theme system and both action buttons show a visible keyboard focus ring (WCAG 2.4.7). Every status variant clears the WCAG AA 4.5:1 contrast floor for normal text (healthy 5.02:1, degraded 10.95:1, down 6.47:1, unknown 7.73:1), verified per theme in the token tests.
+
+- [#10078](https://github.com/Tristan578/project-forge/pull/10078) [`9787c0c`](https://github.com/Tristan578/project-forge/commit/9787c0cc449fb07ed0e73fc646637000031f4521) Thanks [@Tristan578](https://github.com/Tristan578)! - Reverb Zone and Audio inspector controls now use the shared `@spawnforge/ui` design-library composites instead of bespoke local copies. The slider, vector-axis and numeric-field controls each carry a properly associated accessible name, so screen-reader users hear a distinct label for every control. A new `NumberField` composite replaces the duplicated `NumberInputRow` that both inspectors carried verbatim, and the Audio inspector's Loop, Spatial and Autoplay checkboxes gain the same label association the Reverb Zone inspector already had.
+
+- [#10051](https://github.com/Tristan578/project-forge/pull/10051) [`841f21a`](https://github.com/Tristan578/project-forge/commit/841f21ab7a5b90ffce197864e3220425ae7d82fc) Thanks [@Tristan578](https://github.com/Tristan578)! - Preserve saved prefab link metadata and its source definitions during scene changes, saves, recovery, and game export. Reject cyclic or incomplete imported graphs before writing them, retain stable nesting ids on scene reopen, and keep rejected scene switches attached to the original scene.
+  
+  The Prefabs panel can inspect saved links and overridden field names. Linked scene placement, nested entity creation, and propagation are unavailable; their controls are disabled and compatibility commands return explicit errors. Existing flat prefab copies remain available. This change does not complete the linked prefab engine workflow tracked in [#9811](https://github.com/Tristan578/project-forge/issues/9811).
+  
+  Tab navigation now moves keyboard focus with Arrow, Home, and End keys while preventing page scrolling. The Prefabs panel uses labeled, themed controls with readable tab states and mobile touch targets.
+  
+  A scene the editor cannot open now says so instead of leaving a blank editor, and every save path — manual save, cloud save, autosave, checkpoints, scene switch and duplicate, and game export — refuses while that rejection stands, so an empty editor can no longer overwrite the project it failed to open.
+
 ## 0.2.0
 
 ### Minor Changes

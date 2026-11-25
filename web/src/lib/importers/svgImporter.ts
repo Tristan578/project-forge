@@ -14,11 +14,11 @@ export interface SvgShape {
   /** Clockwise polygon points in viewBox coordinate space. */
   points: [number, number][];
   /** Raw CSS/SVG fill value, if present on the element. */
-  fill?: string;
+  fill?: string | undefined;
   /** Raw CSS/SVG stroke value, if present on the element. */
-  stroke?: string;
+  stroke?: string | undefined;
   /** Serialised transform string, if present on the element. */
-  transform?: string;
+  transform?: string | undefined;
 }
 
 export interface SvgViewBox {

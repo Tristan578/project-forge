@@ -6,7 +6,9 @@ CI_FILE="${CI_FILE:-$ROOT/.github/workflows/ci.yml}"
 FAILURES=0
 
 pass() { printf 'PASS: %s\n' "$1"; }
+readonly -f pass
 fail() { printf 'FAIL: %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 validate_wiring() {
   local file="$1" job step count
@@ -31,6 +33,7 @@ validate_wiring() {
   [ "$(grep -c '^        working-directory: web[[:space:]]*$' <<<"$step")" -eq 1 ] || return 1
   ! grep -qE '^        (continue-on-error|if):' <<<"$step" || return 1
 }
+readonly -f validate_wiring
 
 if validate_wiring "$CI_FILE"; then
   pass 'bundle-size gate has one blocking invocation in the Next.js build job'
@@ -52,6 +55,7 @@ assert_mutation_rejected() {
     pass "$name is rejected"
   fi
 }
+readonly -f assert_mutation_rejected
 
 assert_append_rejected() {
   local name="$1"
@@ -67,6 +71,7 @@ assert_append_rejected() {
     pass "$name is rejected"
   fi
 }
+readonly -f assert_append_rejected
 
 assert_mutation_rejected 'removed invocation' '/^        run: node scripts\/check-bundle-size\.js$/d'
 assert_append_rejected 'duplicate run key' '        run: echo bypassed'

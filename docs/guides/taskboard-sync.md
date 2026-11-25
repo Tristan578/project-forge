@@ -7,17 +7,25 @@ node .claude/hooks/taskboard-launch.mjs start
 python3 .claude/hooks/github_project_sync.py pull
 ~~~
 
+On a machine with no taskboard database yet, run `node .claude/hooks/taskboard-launch.mjs init` once instead of `start`. The launcher's `start`, `mcp`, `identity` and `doctor` commands, and `github_project_sync.py`'s `push`, `pull` and `status`, refuse a missing database and an empty one, so a client can never mint a second, empty board by accident (`db-path` only prints the resolved path and opens nothing); `init` is the one explicit path that creates the database at the resolved location and binds this repository's project. It refuses when a populated database already exists there or when a server is already running.
+
 On Windows use python when python3 is unavailable. The launcher detects either spelling; PYTHON can explicitly select an interpreter. TASKBOARD_BIN selects an installed binary when it is not on PATH. Worktrees resolve the main checkout through git's common directory, not a hard-coded directory name.
 
 HTTP, MCP and synchronization use the same runtime. Windows uses APPDATA/taskboard (restoring the standard Roaming path when a GUI host omits APPDATA); macOS uses Library/Application Support/taskboard; Linux uses XDG_CONFIG_HOME/taskboard or ~/.config/taskboard. TASKBOARD_DB is an explicit override that must be shared by every client. TASKBOARD_API defaults to http://localhost:3010/api. A mismatched API/database or failed integrity check stops synchronization before writes.
 
-The committed .mcp.json config runs the launcher. For Codex add this project-local block, preserving other configuration:
+The MCP server needs no setup of your own. The committed `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex, which does not read `.mcp.json`) declare the same `taskboard` server, and both start the launcher through a git alias:
 
 ~~~toml
 [mcp_servers.taskboard]
-command = "node"
-args = [".claude/hooks/taskboard-launch.mjs", "mcp"]
+command = "git"
+args = ["-c", "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs", "spawnforge-taskboard", "mcp"]
 ~~~
+
+git runs a `!` alias from the top-level directory of the repository it was started in (git-config(1), `alias.*`), so the relative launcher path resolves wherever in the checkout the session started: the root, a subdirectory such as `web/`, or a linked worktree, which gets its own copy of the launcher. A bare `node .claude/hooks/taskboard-launch.mjs` does not. A client starts a stdio server in the directory the session started in, so from `web/` node looks for `web/.claude/hooks/taskboard-launch.mjs` and the server fails its handshake. A relative `cwd` does not help, because Codex resolves it against that same start directory. `scripts/check-codex-port.sh` fails a server launched either way, and `scripts/__tests__/check-codex-port.test.sh` runs the committed command from a subdirectory.
+
+If an earlier version of this guide had you add a `[mcp_servers.taskboard]` block with an absolute path to your user-level `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows), remove it: a user-level server is started for every project you open. Do not add a second `[mcp_servers.taskboard]` table to the repository's `.codex/config.toml` either. A table defined twice is a TOML error, and Codex then refuses to load the configuration at all ("duplicate key").
+
+Observed with codex-cli 0.144.1 on Windows 11 on 2026-09-23, through `codex app-server` with an ephemeral thread and no model turn. Started in `web/src`, the committed entry reached `ready` and listed the board's 21 tools. The old `node .claude/hooks/taskboard-launch.mjs` entry failed its handshake from the same directory. Not observed: a logged-in Codex session calling a taskboard tool, or Claude Code starting the `.mcp.json` entry.
 
 Remove old client overrides pointing at .claude/taskboard.db. Reconnect already-running MCP sessions after changing their configuration. Never copy a SQLite database into a worktree or delete a database to resolve an identity mismatch.
 

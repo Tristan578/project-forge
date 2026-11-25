@@ -85,21 +85,19 @@ search_events(project="spawnforge-ai", query="release:<git-sha>")
 ## Cloudflare R2 CDN
 
 ### Verify CDN is serving WASM binaries
+The client only loads `<cdn>/<sha>/engine-pkg-*/` or `<cdn>/latest/engine-pkg-*/`
+(`getWasmBasePaths()` in `web/src/hooks/useEngine.ts`) — probe the deploy's prefix, never the bucket root:
 ```bash
-curl -I https://engine.spawnforge.ai/engine-pkg-webgpu/forge_engine_bg.wasm
+curl -sI https://engine.spawnforge.ai/<git-sha>/engine-pkg-webgpu/forge_engine_bg.wasm
+curl -sI https://engine.spawnforge.ai/latest/engine-pkg-webgpu/forge_engine_bg.wasm
 # Expect: HTTP 200 with content-type application/wasm
 # Expect: Access-Control-Allow-Origin: *  (set by Worker)
 ```
 
 ### Upload a new WASM build to R2
-```bash
-# Use the /deploy-engine skill which handles this automatically
-# Or manually:
-wrangler r2 object put spawnforge-engine/engine-pkg-webgpu/forge_engine_bg.wasm \
-  --file web/public/engine-pkg-webgpu/forge_engine_bg.wasm \
-  --remote \
-  --account-id 0b949ff499d179e24dde841f71d6134f
-```
+Use the `/deploy-engine` skill (`scripts/upload-wasm-to-r2.sh`), which writes both the
+`/<sha>/` and `/latest/` prefixes with the right content types. A manual upload to an
+unprefixed path is never read by the client.
 
 ### Check if Worker is deployed and healthy
 ```bash
@@ -130,7 +128,7 @@ cd web && npm run db:migrate
 ### Generate a migration after schema change
 ```bash
 cd web && npm run db:generate
-# Then review the generated file in web/src/lib/db/migrations/
+# Then review the generated file in web/drizzle/
 ```
 
 ---
@@ -155,7 +153,7 @@ curl -X POST "${UPSTASH_REDIS_REST_URL}/del/ratelimit:<ip-address>" \
 
 ### Forward Stripe events to local dev server
 ```bash
-stripe listen --forward-to http://spawnforge.localhost:1355/api/webhooks/stripe
+stripe listen --forward-to http://spawnforge.localhost:1355/api/stripe/webhook
 ```
 
 ### Trigger a test event

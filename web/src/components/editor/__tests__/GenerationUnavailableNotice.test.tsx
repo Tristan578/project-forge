@@ -17,6 +17,26 @@ describe('GenerationUnavailableNotice', () => {
     expect(el).toHaveTextContent('Unavailable. Music generation is not available yet.');
   });
 
+  // #9726: the notice renders through the shared InlineAlert warning primitive,
+  // so its colours come from --sf-* theme tokens — no hardcoded amber literals
+  // anywhere in the rendered subtree (the whole point of the extraction).
+  it('renders through the token-driven InlineAlert primitive with no amber literals', () => {
+    render(
+      <GenerationUnavailableNotice
+        id="x"
+        reason="Configure Meshy API key in Settings to enable 3D Model Generation."
+        unprovisionable={false}
+        byokConfigurable={true}
+      />,
+    );
+    const status = screen.getByRole('status');
+    expect(status.className).toContain('var(--sf-warning)');
+    const leaks = Array.from(document.querySelectorAll('[class]'))
+      .flatMap((el) => el.className.split(' '))
+      .filter((c) => /amber-|yellow-/.test(c));
+    expect(leaks, `Amber/yellow literals leaked: ${leaks.join(', ')}`).toHaveLength(0);
+  });
+
   it('falls back to a generic sentence when no reason is supplied', () => {
     render(<GenerationUnavailableNotice id="x" reason={undefined} />);
     expect(screen.getByRole('status')).toHaveTextContent('This generation feature is not available yet.');

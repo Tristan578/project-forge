@@ -11,6 +11,7 @@ import {
   MCP_BRIDGE_MAX_RECONNECTS,
   MCP_BRIDGE_FATAL_CLOSE_CODES,
 } from '../useEditorBridge';
+import { MCP_TOKEN_PARAM } from '../tokenParam';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -18,7 +19,7 @@ class FakeWebSocket {
   readonly OPEN = 1;
   readyState = 0;
   sent: string[] = [];
-  closedWith: { code?: number; reason?: string } | null = null;
+  closedWith: { code?: number | undefined; reason?: string | undefined } | null = null;
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -64,7 +65,7 @@ describe('useEditorBridge', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
     vi.stubEnv('NODE_ENV', 'development');
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    window.history.replaceState({}, '', '/editor?mcp=abc123');
+    window.history.replaceState({}, '', `/editor?${MCP_TOKEN_PARAM}=abc123`);
   });
   afterEach(() => {
     vi.unstubAllGlobals();

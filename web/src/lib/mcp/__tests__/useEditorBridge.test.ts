@@ -23,6 +23,7 @@ import {
 import { handleBridgeFrame } from '../bridgeFrame';
 import { getLastBridgeActivity, resetBridgeActivity } from '../bridgeActivity';
 import { mcpBridgeEnabled, mcpBridgeToken, mcpBridgeUrl, mcpBridgeRequested } from '../bridgeOptIn';
+import { MCP_TOKEN_PARAM } from '../tokenParam';
 
 const manifest = manifestJson as {
   commands: { name: string; category: string; requiredScope: string }[];
@@ -78,7 +79,7 @@ describe('bridge allowlist (#9293)', () => {
     }
   });
 
-  it('allows only the enumerated categories, and 306 of the 364 manifest commands', () => {
+  it('allows only the enumerated categories, and 325 of the 383 manifest commands', () => {
     const allowed = new Set(bridgeAllowedCommands());
     const deniedScopes = new Set(['ai:generate', 'project:manage']);
     for (const cmd of manifest.commands) {
@@ -87,8 +88,8 @@ describe('bridge allowlist (#9293)', () => {
     }
     // Pinned, not "greater than": the previous deny-list allowed 308, and a
     // ">250" assertion could not tell the two apart.
-    expect(manifest.commands.length).toBe(364);
-    expect(allowed.size).toBe(306);
+    expect(manifest.commands.length).toBe(383);
+    expect(allowed.size).toBe(325);
   });
 });
 
@@ -137,15 +138,15 @@ describe('opt-in gate', () => {
   it('needs ?mcp=<token> on the tab', () => {
     expect(mcpBridgeToken('')).toBeNull();
     expect(mcpBridgeToken('?foo=1')).toBeNull();
-    expect(mcpBridgeToken('?mcp=')).toBeNull();
-    expect(mcpBridgeToken('?mcp=abc123')).toBe('abc123');
+    expect(mcpBridgeToken(`?${MCP_TOKEN_PARAM}=`)).toBeNull();
+    expect(mcpBridgeToken(`?${MCP_TOKEN_PARAM}=abc123`)).toBe('abc123');
   });
 
   it('reports the tab as a bridge candidate only with both the build flag and the token', () => {
     vi.stubEnv('NODE_ENV', 'development');
     window.history.replaceState({}, '', '/editor');
     expect(mcpBridgeRequested()).toBe(false);
-    window.history.replaceState({}, '', '/editor?mcp=abc123');
+    window.history.replaceState({}, '', `/editor?${MCP_TOKEN_PARAM}=abc123`);
     expect(mcpBridgeRequested()).toBe(true);
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('NEXT_PUBLIC_MCP_BRIDGE', '');

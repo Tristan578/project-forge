@@ -175,6 +175,38 @@ describe('chatStore — server-side tool approval (PF-8860)', () => {
     expect(store.getState().messages[1].toolCalls?.[0].status).toBe('success');
   });
 
+  it('hands the model an object result as JSON, never "[object Object]" (#10143)', async () => {
+    executeToolCall.mockResolvedValue({
+      success: true,
+      result: { components: [{ type: 'health', health: { maxHp: 100 } }], count: 1 },
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        mockSSEResponse(
+          makeChatSSEEvents({ toolCalls: [{ id: 'tc-q', name: 'get_game_components', input: { entityId: 'e1' } }] }),
+        ),
+      )
+      .mockResolvedValue(mockSSEResponse(makeChatSSEEvents({ text: 'It has Health.' })));
+
+    const { useChatStore: store } = await import('../chatStore');
+    store.setState(INITIAL);
+
+    await store.getState().sendMessage('what is on e1?');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const { messages } = requestBody(fetchSpy, 1);
+    const toolMessage = messages.at(-1) as { role: string; content: Array<Record<string, unknown>> };
+    expect(toolMessage.role).toBe('tool');
+    expect(toolMessage.content).toContainEqual({
+      type: 'tool-result',
+      toolCallId: 'tc-q',
+      toolName: 'get_game_components',
+      output: { type: 'text', value: '{"components":[{"type":"health","health":{"maxHp":100}}],"count":1}' },
+    });
+    expect(JSON.stringify(toolMessage.content)).not.toContain('[object Object]');
+  });
+
   // -------------------------------------------------------------------------
   // Approve
   // -------------------------------------------------------------------------

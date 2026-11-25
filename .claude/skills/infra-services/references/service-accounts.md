@@ -79,7 +79,7 @@ CRITICAL: Read before any infrastructure work. Using the wrong account will depl
 ## Clerk (Authentication)
 
 - **Env vars**: `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- **Webhooks**: `POST /api/webhooks/clerk`
+- **Webhooks**: `POST /api/auth/webhook`
 - **CI/E2E**: Missing key = `safeAuth()` returns `{userId: null}`, auth is bypassed
 
 ---
@@ -88,7 +88,7 @@ CRITICAL: Read before any infrastructure work. Using the wrong account will depl
 
 - **Tiers**: starter (free), hobbyist, creator, pro
 - **Env vars**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (no publishable key — checkout redirects server-side to a Stripe-hosted page)
-- **Version pin**: `^20.4.1` — v21 has breaking changes (see `changelog-review` skill)
+- **Version**: see `web/package.json`; the API version literal in `web/src/lib/billing/stripe-client.ts` must match the installed SDK (see `.claude/rules/gotchas-ops.md`)
 
 ---
 

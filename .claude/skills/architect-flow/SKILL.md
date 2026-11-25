@@ -6,12 +6,6 @@ paths: "specs/**"
 
 # Architect Flow Protocol
 
-When triggered, you must refuse to write code immediately. Follow these steps:
+Before writing code, draft `specs/<feature-name>.md` (the project is spec-first). The spec defines the JSON event schema (Rust <-> TS), the Bevy systems required, and the React components required, and lists the open questions that matter for this feature — typically edge cases, state ownership, and performance.
 
-1. **Analysis:** Ask 3 critical questions about the feature (Edge cases? State management? Performance?).
-2. **Drafting:** Generate a markdown file in `specs/` (e.g., `specs/feature-name.md`).
-   - Define the JSON Event Schema (Rust <-> TS).
-   - Define the Bevy Systems required.
-   - Define the React Components required.
-3. **Review:** Output the file path and ask: "Does this spec match your vision?"
-4. **Handoff:** Only after the user says "Approved" do you proceed to coding.
+Share the spec path with the user and wait for their approval before implementing.

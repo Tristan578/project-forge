@@ -57,6 +57,32 @@ describe('sceneManager', () => {
       expect(project.scenes).toHaveLength(1);
       expect(project.scenes[0].name).toBe('Main');
     });
+
+    it('keeps project scene buffers isolated across an editor switch (regression for PF-375)', () => {
+      const first = createInitialProject();
+      first.scenes[0].name = 'Project A';
+      const second = createInitialProject();
+      second.scenes[0].name = 'Project B';
+
+      saveProjectScenes(first, 'project/A');
+      saveProjectScenes(second, 'project B');
+
+      expect(loadProjectScenes('project/A').scenes[0].name).toBe('Project A');
+      expect(loadProjectScenes('project B').scenes[0].name).toBe('Project B');
+      expect(storage['forge-project-scenes:v2:project:project%2FA']).toBeDefined();
+      expect(storage['forge-project-scenes:v2:project:project%20B']).toBeDefined();
+    });
+
+    it('migrates browser-global scenes only into the explicit unsaved scope', () => {
+      const legacy = createInitialProject();
+      legacy.scenes[0].name = 'Legacy local work';
+      storage['forge-project-scenes'] = JSON.stringify(legacy);
+
+      expect(loadProjectScenes('cloud-project').scenes[0].name).toBe('Main');
+      expect(storage['forge-project-scenes:v2:project:cloud-project']).toBeUndefined();
+      expect(loadProjectScenes().scenes[0].name).toBe('Legacy local work');
+      expect(storage['forge-project-scenes:v2:unsaved']).toBeDefined();
+    });
   });
 
   describe('Create', () => {
@@ -79,6 +105,46 @@ describe('sceneManager', () => {
       const project = createInitialProject();
       const { project: updated } = createScene(project, 'Level 2');
       expect(updated.scenes[1].isStartScene).toBe(false);
+    });
+  });
+
+  describe('Project type (#10227)', () => {
+    it('createScene states the type it is given as metadata.projectType', () => {
+      // A scene created in a 2D project is a 2D scene: the live type travels
+      // into the new scene so it is self-describing even on a cold open.
+      const project = createInitialProject();
+      const { project: twoD } = createScene(project, 'Level 2', '2d');
+      expect(twoD.scenes[1].data?.metadata?.projectType).toBe('2d');
+      const { project: threeD } = createScene(project, 'Level 3', '3d');
+      expect(threeD.scenes[1].data?.metadata?.projectType).toBe('3d');
+    });
+
+    it('createScene without a type leaves the key ABSENT, never a guessed 3d', () => {
+      // Absent means "keep the session's dimension" to the engine; a written
+      // '3d' would flip a 2D project to 3D on the first switch to the scene.
+      const { project: updated } = createScene(createInitialProject(), 'Level 2');
+      const metadata = updated.scenes[1].data?.metadata ?? {};
+      expect(metadata).toHaveProperty('name', 'Level 2');
+      expect(Object.keys(metadata)).not.toContain('projectType');
+    });
+
+    it('a legacy empty scene is normalised WITHOUT a project type', () => {
+      // The old producer's three-field shape, as an older editor stored it in
+      // a (possibly 2D) project. Normalisation runs when the project is read,
+      // before the engine has reported the session's type, so it must state
+      // none: the engine then keeps the session's dimension when the scene is
+      // switched to.
+      const project = createInitialProject();
+      project.scenes.push({
+        id: 'scene_legacy', name: 'Old Empty', isStartScene: false,
+        data: { formatVersion: 3, sceneName: 'Old Empty', entities: [] },
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      });
+      storage['forge-project-scenes:v2:unsaved'] = JSON.stringify(project);
+
+      const legacy = loadProjectScenes().scenes.find((s) => s.id === 'scene_legacy');
+      expect(legacy?.data?.metadata?.name).toBe('Old Empty');
+      expect(Object.keys(legacy?.data?.metadata ?? {})).not.toContain('projectType');
     });
   });
 

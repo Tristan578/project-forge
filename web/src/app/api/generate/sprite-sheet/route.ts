@@ -13,12 +13,13 @@ const POST_impl = createGenerationHandler<
   {
     prompt: string;
     frameCount: number;
-    style?: SpriteStyle;
+    style?: SpriteStyle | undefined;
     size: SpriteSize;
   },
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/sprite-sheet',
+  panel: 'generate-sprite',
   provider: DB_PROVIDER.sprite,
   operation: 'sprite_sheet_generation',
   rateLimitKey: 'gen-spritesheet',

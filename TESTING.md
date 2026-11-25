@@ -2,7 +2,7 @@
 
 Manual verification checklist for user-facing features. Run these after major changes to ensure end-to-end functionality.
 
-> **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 400 MCP tests (`cd mcp-server && npx vitest run`)
+> **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 520+ MCP tests (`cd mcp-server && npx tsc --noEmit && npx vitest run`)
 >
 > **Vitest pool:** The standalone `vitest.config.ts` uses `pool: 'threads'`. All test files must use `vi.stubEnv()` / `vi.unstubAllEnvs()` for env var mutations — do NOT mutate `process.env` directly, as threads share the same process object. The `vitest.config.jsdom.ts` workspace config still uses `pool: 'forks'` for jsdom compatibility.
 
@@ -166,6 +166,29 @@ These checks cover authored metadata. Runtime tilemap colliders remain unimpleme
 - [ ] Enter Play mode → verify physics simulation starts
 - [ ] Pause → verify simulation frozen
 - [ ] Stop → verify scene restored to edit state
+
+### Runtime input replay (#9902, #10007)
+Playtest panel → "Runtime replay". Needs a 2D scene with a player (character controller, `move_right` bound to a key), one collectible with `destroy_on_collect`, and the player selected.
+- [ ] Enter Play, click Record, hold the move key for a few seconds, click Stop Recording → Replay becomes enabled.
+- [ ] Click Replay → the progress line reads "Pinning the engine clock…" at once, then "Replaying tick N of M on the pinned clock"; the player moves without any key held; the verdict shows "Replay passed · N ticks · pinned 60 Hz" and both assertions (`qa.FR-1.OP-01`, `qa.FR-1.OP-03`) green.
+- [ ] Replay the same recording twice from a freshly stopped scene → the two end positions agree to within 0.01 world units.
+- [ ] Click Pause during a replay → "Pausing at tick N…" then "Paused at tick N of M; input released"; the game is paused and the player stops; the Resume control is offered. The replay must NOT be cancelled by its own pause.
+- [ ] Click Resume → the key is pressed again, the replay runs to a verdict with the full tick count.
+- [ ] Click Cancel (while paused and while running) → "Replay cancelled after N ticks. Input was released; no verdict was recorded."; the game keeps running; no key stays held (the player does not keep moving).
+- [ ] Click Stop (leave Play) mid-replay → the replay is cancelled immediately with the same message, not two seconds later with an error.
+- [ ] Remove the move binding (Input panel), keep the player and collectible, replay → the verdict is "Replay failed" with `qa.FR-1.OP-01` red; the heuristic AI Playtest rating does not change it.
+- [ ] AI parity: with Play active and the player selected, click Run Playtest → an "AI bot runtime replay" verdict appears under the heuristic report; ask the chat "replay a speedrunner strategy on the player" → the `replay_input_trace` tool card shows the same kind of verdict, and the same request in Edit mode is refused with "Replay requires Play mode…".
+
+### Completion Modes (#9998)
+Leave these unchecked until exercised in a running editor.
+- [ ] Scene Settings → Completion mode: pick each of Win / Endless / Sandbox / Narrative with the keyboard (Tab to the group, arrow keys). Verify the screen reader reads each option's consequence and the status line announces the change.
+- [ ] On a scene with a player and no win condition: Sandbox → Play starts; Win → Play refuses with the NO_WIN_CONDITION message in chat.
+- [ ] Undo / Redo buttons next to the heading step through mode changes, including back to the unsaved legacy default.
+- [ ] Ask the AI "make this a sandbox" → it calls `set_completion_mode`; the picker shows Sandbox. Ask it for an unknown mode → it reports the same error text the store action returns.
+- [ ] Set a mode by hand, then ask the AI to rename or move an entity → the mode is unchanged.
+- [ ] Save (.forge download, and cloud save), reload the tab, reopen the project → the chosen mode is back; Play behaves as before the reload.
+- [ ] Open a `.forge` file saved before this change → the picker shows Win with the "not saved with this scene yet" note; re-download it and verify the file gained no `completionMode` key.
+- [ ] Generate a game from "a sandbox toy where I roll a ball around" → the plan has no invented win condition, verification passes, the picker shows Sandbox.
 
 ### Game Templates
 - [ ] Create new project from Platformer template → verify entities and scripts loaded

@@ -49,7 +49,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 SKIPS=0
 # Shared platform contract (#9611). A case the HOST cannot represent — never one
 # we chose not to run — is only ever reachable behind a capability PROBE, never
@@ -131,8 +133,11 @@ stub_reset() {
   printf '{}' > "$TMPDIR_T/stub/body.default"
   printf '200' > "$TMPDIR_T/stub/status.default"
 }
+readonly -f stub_reset
 stub_body()   { cat > "$TMPDIR_T/stub/body.$1"; }
+readonly -f stub_body
 stub_status() { printf '%s' "$2" > "$TMPDIR_T/stub/status.$1"; }
+readonly -f stub_status
 
 # Run the helper against the stub; echo "<exit>|<output>".
 # NEON_CURL_CMD is set ONLY on this child process — never exported into the
@@ -146,6 +151,7 @@ run_helper() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_helper
 
 # Same, plus one extra VAR=value on the child only (NEON_DATABASE / NEON_ROLE).
 run_helper_env() {
@@ -161,8 +167,10 @@ run_helper_env() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_helper_env
 
 requests() { cat "$TMPDIR_T/stub.log"; }
+readonly -f requests
 
 echo "=== neon-branch.sh: create (the pre-migration snapshot) ==="
 
@@ -931,6 +939,7 @@ assert_usage() {
   rc="${res%%|*}"
   if [ "$rc" = "64" ]; then pass "$label is a usage error (exit 64)"; else fail "$label should exit 64, got $rc"; fi
 }
+readonly -f assert_usage
 assert_usage "no subcommand" ""
 assert_usage "unknown subcommand" bogus
 assert_usage "create with no name" create
@@ -1012,6 +1021,7 @@ scan_dir() {
     pass "seam scan: NEON_CURL_CMD / BASH_ENV not wired in $label"
   fi
 }
+readonly -f scan_dir
 scan_dir "$REPO_ROOT/.github/workflows" workflows
 scan_dir "$REPO_ROOT/.github/actions" "composite actions"
 

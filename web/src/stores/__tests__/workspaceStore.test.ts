@@ -411,6 +411,26 @@ describe('workspaceStore', () => {
       });
     });
 
+    it('docks Music Arrangement alongside the asset browser like Audio Mixer, not into the Viewport (#10058)', () => {
+      // Without 'music-arrangement' in the bottom-panel list, this panel fell
+      // through the same else-if chain #8933 fixed for the right-dock panels
+      // and landed inside the Viewport group instead of the bottom dock.
+      const assets = { id: 'asset-browser', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'asset-browser' ? assets : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('music-arrangement');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'music-arrangement',
+        position: { direction: 'within', referencePanel: assets },
+      }));
+    });
+
     it('should get open panel IDs', () => {
       const mockApi = {
         ...createMockApi(),

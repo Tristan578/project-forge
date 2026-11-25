@@ -119,7 +119,7 @@ async function jsonRpcSse(
 
 describe('startHttpTransport', () => {
   let running: RunningHttpServer | null = null;
-  let savedUpstash: { url?: string; token?: string } = {};
+  let savedUpstash: { url?: string | undefined; token?: string | undefined } = {};
 
   // startHttpTransport switches to a real Upstash Redis limiter whenever
   // UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN are set, so on any

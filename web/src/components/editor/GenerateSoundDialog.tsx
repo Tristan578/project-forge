@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
@@ -15,13 +15,17 @@ import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 interface GenerateSoundDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  entityId?: string;
+  entityId?: string | undefined;
 }
 
 type SoundType = 'sfx' | 'voice';
 type VoiceStyle = 'neutral' | 'friendly' | 'sinister' | 'excited' | 'calm';
 
 export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSoundDialogProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [soundType, setSoundType] = useState<SoundType>('sfx');
   const [sfxPrompt, setSfxPrompt] = useState('');
   const [duration, setDuration] = useState(5);
@@ -199,10 +203,11 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-300">
+                <label htmlFor={fieldId('duration')} className="mb-1 block text-xs font-medium text-zinc-300">
                   Duration: {duration.toFixed(1)}s
                 </label>
                 <input
+                  id={fieldId('duration')}
                   type="range"
                   min={0.5}
                   max={22}
@@ -239,8 +244,9 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+                <label htmlFor={fieldId('style')} className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
                 <select
+                  id={fieldId('style')}
                   value={voiceStyle}
                   onChange={(e) => setVoiceStyle(e.target.value as VoiceStyle)}
                   disabled={isSubmitting || gate.blocked}
@@ -268,6 +274,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                 className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
               />
               <label htmlFor="attach" className="text-xs text-zinc-300">
+                {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank primary entity name is unset; falls back to a display placeholder */}
                 Auto-attach to <span className="font-medium">{primaryName || 'selected entity'}</span>
               </label>
             </div>

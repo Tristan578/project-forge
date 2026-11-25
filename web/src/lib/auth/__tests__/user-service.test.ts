@@ -98,7 +98,13 @@ vi.mock('@/lib/db/schema', () => ({
   generationJobs: { userId: 'userId' },
 }));
 
-vi.mock('drizzle-orm', () => ({
+// `eq` is stubbed so the where-clause assertions below stay literal. The rest
+// of drizzle-orm is REAL: the schema-driven FK pin in the deleteUserAccount
+// block imports the actual schema.ts, whose `graph_nodes` partial index is
+// built with drizzle's `sql` tag inside a lazily-evaluated table callback —
+// a bare `{ eq }` mock would make that evaluation throw on `sql`.
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   eq: vi.fn((_col: unknown, _val: unknown) => 'WHERE_CLAUSE'),
 }));
 
@@ -548,6 +554,93 @@ describe('deleteUserAccount', () => {
 
     expect(byGame).toBeLessThan(games);
     expect(byReporter).toBeLessThan(users);
+  });
+
+  /**
+   * provider_job_owners.user_id -> users.id is NOT NULL with no ON DELETE
+   * CASCADE (#10262), and createGenerationHandler writes one row per async
+   * generation. Miss this delete and the final `DELETE FROM users` violates
+   * the FK: the whole transaction rolls back and account deletion (both
+   * /api/user/delete and the Clerk `user.deleted` webhook) fails for anyone
+   * who ever generated an asset. Same shape as the game_reports pin above.
+   */
+  it('deletes the user\'s provider_job_owners bindings before the users row (#10262)', async () => {
+    mockSelect.mockImplementation(() => buildSelectChain([]));
+
+    await deleteUserAccount('user-uuid-1');
+
+    const sqlText = mockNeonSql.mock.calls.map((c) => (c[0] as TemplateStringsArray).join('?'));
+    const indexOf = (needle: string): number => {
+      const i = sqlText.findIndex((t) => t.replace(/\s+/g, ' ').includes(needle));
+      expect(i, `expected a statement containing "${needle}"`).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+
+    const owners = indexOf('DELETE FROM provider_job_owners WHERE user_id = ?');
+    const users = indexOf('DELETE FROM users');
+
+    expect(owners).toBeLessThan(users);
+  });
+
+  /**
+   * Schema-driven: derive, from schema.ts itself, every column that references
+   * users.id WITHOUT `onDelete: 'cascade'`, and require a matching
+   * `DELETE FROM <table> WHERE <column> = ?` statement ahead of the users
+   * delete. The two per-table pins above guard the tables someone already
+   * forgot once; this one guards the NEXT table, which nobody has forgotten
+   * yet. The walk is asserted non-empty (lessons-learned #9/#11): a schema
+   * import that silently yielded zero tables would otherwise pass vacuously.
+   */
+  it('issues a DELETE for EVERY table whose FK to users.id lacks ON DELETE CASCADE, before the users row', async () => {
+    const schema = await vi.importActual<typeof import('@/lib/db/schema')>('@/lib/db/schema');
+    const { getTableConfig, PgTable } = await import('drizzle-orm/pg-core');
+
+    const required: Array<{ table: string; column: string }> = [];
+    for (const exported of Object.values(schema)) {
+      if (!(exported instanceof PgTable)) continue;
+      const config = getTableConfig(exported);
+      if (config.name === 'users') continue;
+      for (const fk of config.foreignKeys) {
+        const ref = fk.reference();
+        if (getTableConfig(ref.foreignTable).name !== 'users') continue;
+        if (fk.onDelete === 'cascade') continue;
+        for (const column of ref.columns) {
+          required.push({ table: config.name, column: column.name });
+        }
+      }
+    }
+    // Non-vacuous: the walk found real tables, including the one this round
+    // added, and skipped the cascading ones the transaction need not touch.
+    expect(required.length).toBeGreaterThan(0);
+    expect(required).toContainEqual({ table: 'provider_job_owners', column: 'user_id' });
+    expect(required).toContainEqual({ table: 'game_reports', column: 'reporter_id' });
+    expect(required.map((r) => r.table)).not.toContain('graph_nodes');
+
+    // One game, one project, no marketplace assets: the projects delete is
+    // conditional on the projects read, so an empty stub would hide it.
+    let call = 0;
+    mockSelect.mockImplementation(() => {
+      call++;
+      if (call === 1) return buildSelectChain([{ id: 'game-uuid-1' }]);
+      if (call === 2) return buildSelectChain([{ id: 'proj-1' }]);
+      return buildSelectChain([]);
+    });
+
+    await deleteUserAccount('user-uuid-1');
+
+    const sqlText = mockNeonSql.mock.calls.map((c) =>
+      (c[0] as TemplateStringsArray).join('?').replace(/\s+/g, ' '),
+    );
+    const usersIdx = sqlText.findIndex((t) => t.includes('DELETE FROM users'));
+    expect(usersIdx).toBeGreaterThanOrEqual(0);
+
+    const missing: string[] = [];
+    for (const { table, column } of required) {
+      const idx = sqlText.findIndex((t) => t.includes(`DELETE FROM ${table} WHERE ${column} = ?`));
+      if (idx < 0) missing.push(`${table}.${column} (no DELETE statement)`);
+      else if (idx > usersIdx) missing.push(`${table}.${column} (after DELETE FROM users)`);
+    }
+    expect(missing, 'every non-cascading FK to users.id needs a DELETE in deleteUserAccount').toEqual([]);
   });
 
   it('the user DELETE statement is last in the transaction', async () => {

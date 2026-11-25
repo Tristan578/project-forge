@@ -116,6 +116,56 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "arrangement_add_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_add_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_delete_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_delete_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_move_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_rename_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_loop",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_tempo",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_track_muted",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_trim_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "array_entity",
       "category": "mesh",
       "requiredScope": "scene:write"
@@ -176,6 +226,16 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "cancel_performance_capture",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "capture_performance_report",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
       "name": "clear_selection",
       "category": "scene",
       "requiredScope": "scene:read"
@@ -194,6 +254,11 @@
       "name": "combine_meshes",
       "category": "mesh",
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "compare_performance_reports",
+      "category": "query",
+      "requiredScope": "performance:read"
     },
     {
       "name": "compile_shader",
@@ -686,6 +751,11 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "get_performance_report",
+      "category": "query",
+      "requiredScope": "performance:read"
+    },
+    {
       "name": "get_performance_stats",
       "category": "performance",
       "requiredScope": "performance:read"
@@ -1021,6 +1091,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "pin_frame_rate",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "place_asset",
       "category": "asset",
       "requiredScope": "scene:write"
@@ -1236,6 +1311,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "replay_input_trace",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "resize_tilemap",
       "category": "tilemap",
       "requiredScope": "scene:write"
@@ -1361,6 +1441,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "set_completion_mode",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_coordinate_mode",
       "category": "editor",
       "requiredScope": "scene:write"
@@ -1474,6 +1559,11 @@
       "name": "set_particle_preset",
       "category": "particles",
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_performance_baseline",
+      "category": "performance",
+      "requiredScope": "performance:write"
     },
     {
       "name": "set_performance_budget",
@@ -1713,6 +1803,11 @@
     {
       "name": "undo",
       "category": "history",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "unpin_frame_rate",
+      "category": "runtime",
       "requiredScope": "scene:write"
     },
     {

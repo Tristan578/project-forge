@@ -7,7 +7,56 @@
  */
 
 import { StateCreator } from 'zustand';
-import type { SceneGraph, SceneNode, EntityType, TerrainDataState } from './types';
+import type { SceneGraph, SceneNode, EntityType, TerrainDataState, CompletionMode } from './types';
+import { validateCompletionMode } from '@/lib/playMode/completionMode';
+import { takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+import { invalidateSceneCache } from '@/lib/ai/cachedContext';
+
+/**
+ * Undo depth kept for completion-mode edits. The value is one short string, so
+ * this is about bounding a pathological session, not memory pressure.
+ */
+export const COMPLETION_MODE_HISTORY_LIMIT = 100;
+
+/**
+ * Undo/redo stacks for `sceneGraph.completionMode`. Each entry is a whole
+ * previous value, `undefined` included — undoing back to "no mode set" must
+ * restore the legacy absence, not an explicit `win` the file never had.
+ */
+export interface CompletionModeHistory {
+  past: Array<CompletionMode | undefined>;
+  future: Array<CompletionMode | undefined>;
+}
+
+/** Outcome of `setCompletionMode`. `error` is the shared validator's text. */
+export type SetCompletionModeResult =
+  | { ok: true; mode: CompletionMode; changed: boolean }
+  | { ok: false; error: string };
+
+/** A history with no steps in either direction; also what a scene boundary resets to. */
+export function emptyCompletionModeHistory(): CompletionModeHistory {
+  return { past: [], future: [] };
+}
+
+/**
+ * The completion-mode half of the `SCENE_LOADED` boundary (#9998): the
+ * incoming scene's mode, taken from the staging `dispatchSceneLoad`/`newScene`
+ * wrote, and a fresh history. Nothing staged means a legacy scene, i.e.
+ * `undefined` (`win`). Take-once: calling this consumes the staging.
+ *
+ * One function so that the event handler and anything standing in for the
+ * engine in a test apply the SAME rule, instead of a test restating it.
+ * @param sceneGraph The graph as it stands when the boundary is crossed.
+ * @returns The two store fields the boundary sets.
+ */
+export function completionModeAtSceneBoundary(
+  sceneGraph: SceneGraph,
+): { sceneGraph: SceneGraph; completionModeHistory: CompletionModeHistory } {
+  return {
+    sceneGraph: { ...sceneGraph, completionMode: takeStagedSceneCompletionMode() },
+    completionModeHistory: emptyCompletionModeHistory(),
+  };
+}
 
 /** Partial node properties that may be changed in-place. */
 export interface SceneNodeChanges {
@@ -66,6 +115,40 @@ export interface SceneGraphSlice {
     newParentId: string | null,
     insertIndex?: number
   ) => void;
+
+  /**
+   * Undo/redo stacks for the completion mode. Reset at every scene boundary
+   * (the `SCENE_LOADED` handler), because a previous scene's mode is not a
+   * step anyone can meaningfully undo back to in this one.
+   */
+  completionModeHistory: CompletionModeHistory;
+  /**
+   * Set the scene's completion mode (idea.FR-1.OP-04, #9998).
+   *
+   * The ONE write path for both the manual picker and the `set_completion_mode`
+   * chat tool, so validation and error text are identical by construction:
+   * `mode` is `unknown` on purpose and goes through `validateCompletionMode`
+   * here, not in either caller. A change is recorded for
+   * `undoCompletionMode`, marks the scene modified (so the periodic export
+   * persists it) and invalidates the AI's cached scene context.
+   *
+   * The engine's Ctrl+Z stack (`UndoableAction`) only holds what the engine
+   * owns; this value is frontend-only, so it carries its own history — the
+   * same arrangement the music arrangement store uses (#10058).
+   */
+  setCompletionMode: (mode: unknown) => SetCompletionModeResult;
+  /** Step back one completion-mode edit. Returns false when there is none. */
+  undoCompletionMode: () => boolean;
+  /** Re-apply the edit the last `undoCompletionMode` reverted. Returns false when there is none. */
+  redoCompletionMode: () => boolean;
+  /**
+   * Adopt a mode read from persisted project data as the starting point: no
+   * undo step, and not an unsaved edit. The caller has already validated it
+   * (`readCompletionModeFromSceneData`). Used by the editor page's cold open,
+   * whose `loadScene` defers before the engine exists and so never reaches the
+   * `SCENE_LOADED` handoff — the same guarantee it gives the music arrangement.
+   */
+  hydrateCompletionMode: (mode: CompletionMode | undefined) => void;
 }
 
 /**
@@ -109,6 +192,8 @@ export const createSceneGraphSlice: StateCreator<
       terrainData?: Partial<TerrainDataState>,
       name?: string,
     ) => string | undefined;
+    /** Owned by sceneSlice; a completion-mode edit is an unsaved scene edit. */
+    sceneModified?: boolean;
   },
   [],
   [],
@@ -117,6 +202,7 @@ export const createSceneGraphSlice: StateCreator<
   // Initial state
   sceneGraph: { nodes: {}, rootIds: [] },
   nodeCount: 0,
+  completionModeHistory: emptyCompletionModeHistory(),
 
   // ---------------------------------------------------------------------------
   // Full graph operations
@@ -376,5 +462,66 @@ export const createSceneGraphSlice: StateCreator<
         insertIndex,
       });
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Completion mode (idea.FR-1.OP-04, #9998) — frontend-only, no dispatch.
+  // ---------------------------------------------------------------------------
+
+  setCompletionMode: (mode) => {
+    const validation = validateCompletionMode(mode);
+    if (!validation.ok) return validation;
+    const { sceneGraph, completionModeHistory } = get();
+    const previous = sceneGraph.completionMode;
+    // `undefined -> 'win'` IS a change: both play the same, but only one of
+    // them writes the key to the saved file, and the creator asked for it.
+    if (previous === validation.mode) return { ok: true, mode: validation.mode, changed: false };
+    set({
+      sceneGraph: { ...sceneGraph, completionMode: validation.mode },
+      completionModeHistory: {
+        past: [...completionModeHistory.past, previous].slice(-COMPLETION_MODE_HISTORY_LIMIT),
+        future: [],
+      },
+      sceneModified: true,
+    });
+    // The AI's scene context states the mode; a cached copy would contradict
+    // the choice that was just made.
+    invalidateSceneCache();
+    return { ok: true, mode: validation.mode, changed: true };
+  },
+
+  undoCompletionMode: () => {
+    const { sceneGraph, completionModeHistory } = get();
+    const { past, future } = completionModeHistory;
+    if (past.length === 0) return false;
+    set({
+      sceneGraph: { ...sceneGraph, completionMode: past[past.length - 1] },
+      completionModeHistory: { past: past.slice(0, -1), future: [sceneGraph.completionMode, ...future] },
+      sceneModified: true,
+    });
+    invalidateSceneCache();
+    return true;
+  },
+
+  redoCompletionMode: () => {
+    const { sceneGraph, completionModeHistory } = get();
+    const { past, future } = completionModeHistory;
+    if (future.length === 0) return false;
+    set({
+      sceneGraph: { ...sceneGraph, completionMode: future[0] },
+      completionModeHistory: { past: [...past, sceneGraph.completionMode], future: future.slice(1) },
+      sceneModified: true,
+    });
+    invalidateSceneCache();
+    return true;
+  },
+
+  hydrateCompletionMode: (mode) => {
+    set({
+      sceneModified: false,
+      sceneGraph: { ...get().sceneGraph, completionMode: mode },
+      completionModeHistory: emptyCompletionModeHistory(),
+    });
+    invalidateSceneCache();
   },
 });
