@@ -248,10 +248,13 @@ describe('PixelArtEditor', () => {
     );
     fireEvent.click(screen.getByText('Apply to Sprite'));
     expect(mockLoadTexture).toHaveBeenCalledWith(
-      'mockbase64', // base64 extracted from data URL
+      // The data URL whole: its header is how the engine learns the format.
+      'data:image/png;base64,mockbase64',
       expect.stringContaining('pixel-art-'),
       'ent-1',
-      'base_color',
+      // The sprite's own slot: `base_color` looked for a material a sprite
+      // does not have, so Apply to Sprite changed nothing (#10399).
+      'sprite',
     );
     expect(onClose).toHaveBeenCalledOnce();
   });

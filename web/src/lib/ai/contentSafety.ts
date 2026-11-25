@@ -28,9 +28,9 @@ export interface ContentSafetyResult {
   /** Whether the content is considered safe */
   safe: boolean;
   /** Human-readable reason when unsafe */
-  reason?: string;
+  reason?: string | undefined;
   /** The filtered/sanitized version of the input */
-  filtered?: string;
+  filtered?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,21 @@ describe('cloudSave', () => {
     });
   });
 
+  it('carries the completion mode the export folded in through the arrangement merge (#9998)', async () => {
+    // The SCENE_EXPORTED handler puts `completionMode` on the JSON; this PUT is
+    // what a reopen reads back, so the merge must not drop it.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('', { status: 200 }),
+    );
+
+    await saveSceneToCloud('proj-1', 'My Scene', '{"entities":[],"completionMode":"sandbox"}');
+
+    const body = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body)) as {
+      sceneData: Record<string, unknown>;
+    };
+    expect(body.sceneData.completionMode).toBe('sandbox');
+  });
+
   it('returns error for invalid JSON', async () => {
     const result = await saveSceneToCloud('proj-1', 'Scene', '{bad json');
     expect(result.ok).toBe(false);

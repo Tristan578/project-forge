@@ -1,13 +1,13 @@
 # Command Reference
 
-Reference for all 379 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
+Reference for all 383 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
 
 ## Categories
 
-- [Scene](#scene) (30 commands)
+- [Scene](#scene) (31 commands)
 - [Materials](#materials) (11 commands)
 - [Lighting](#lighting) (2 commands)
 - [Environment](#environment) (5 commands)
@@ -16,7 +16,7 @@ Reference for all 379 registered MCP commands. Registration does not imply that 
 - [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
 - [Query](#query) (18 commands)
-- [Runtime](#runtime) (12 commands)
+- [Runtime](#runtime) (15 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
 - [Audio](#audio) (38 commands)
@@ -643,6 +643,28 @@ Scope: `scene:write` | Token cost: 0
 
 ---
 
+### `set_completion_mode`
+
+Set how the open scene's game counts as complete. "win" (what a scene with no mode plays as) lets Play start only when at least one win condition the player can complete exists; "endless", "sandbox" and "narrative" let a game with no win condition play and pass verification. A win condition the scene does have is still validated in every mode. Saved with the scene file and undoable from Scene Settings. Set it when the creator asks for a sandbox, endless or story game; never infer it from entity names.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mode` | `"win"` \| `"endless"` \| `"sandbox"` \| `"narrative"` | Yes | win: requires a completable win condition. endless: score or survival, no final win. sandbox: a toy with no goal. narrative: ends through authored story progression. |
+
+**Example:**
+```json
+{
+  "command": "set_completion_mode",
+  "params": {
+    "mode": "win"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
 ### `validate_scene`
 
 Validate a serialized .forge SceneFile with the engine decoder without applying or saving it. Internal checkpoint preflight.
@@ -761,7 +783,7 @@ Update PBR material properties on an entity. Supports core PBR, UV transform, pa
 | `diffuseTransmission` | number | No |  |
 | `ior` | number | No | Index of refraction (1.0=air, 1.33=water, 1.5=glass, 2.42=diamond) |
 | `thickness` | number | No | Optical depth for transmission |
-| `attenuationDistance` | number | No | Distance light travels before being attenuated. Use null for infinity. |
+| `attenuationDistance` | number,null | No | Distance light travels before being attenuated: a finite number >= 0. Send null for infinity (no attenuation), which is the default. |
 | `attenuationColor` | number[3] | No | [r, g, b] 0-1 attenuation tint |
 
 **Example:**
@@ -1360,14 +1382,14 @@ Switch between 2D and 3D project modes
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `project_type` | `"2d"` \| `"3d"` | Yes | Project type |
+| `projectType` | `"2d"` \| `"3d"` | Yes | Project type |
 
 **Example:**
 ```json
 {
   "command": "set_project_type",
   "params": {
-    "project_type": "2d"
+    "projectType": "2d"
   }
 }
 ```
@@ -1484,7 +1506,11 @@ Scope: `scene:read` | Token cost: 0
 
 ### `undo`
 
-Undo the last action
+Undo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
@@ -1500,7 +1526,11 @@ Scope: `scene:write` | Token cost: 0
 
 ### `redo`
 
-Redo the last undone action
+Redo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
@@ -1900,6 +1930,67 @@ Scope: `scene:write` | Token cost: 0
 
 ---
 
+### `replay_input_trace`
+
+Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and, for a recorded trace, whether exactly one collectible was collected. A strategy run asserts movement only (the bot's plan does not aim for a collectible) and reports collectiblesCollected without asserting it. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `playerEntityId` | string | Yes | Entity whose displacement proves input reached the runtime |
+| `collectibleEntityIds` | string[] | No | Collectibles expected to be collected. Defaults to every entity carrying a collectible component. |
+| `trace` | object | No | A recorded input trace: { version: 1, fixtureId, actionNames, durationMs, frames: [{ tick, actions: { <name>: { pressed, axis? } } }] } |
+| `strategy` | `"explorer"` \| `"speedrunner"` \| `"completionist"` \| `"random"` \| `"cautious"` | No | AI gameplay-bot strategy to plan and replay instead of a recorded trace |
+
+**Example:**
+```json
+{
+  "command": "replay_input_trace",
+  "params": {
+    "playerEntityId": "my_playerEntityId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `pin_frame_rate`
+
+Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock. Stop releases a pin that is in force during Play; a pin made in Edit, or queued in the frame Play stops, stays until unpin_frame_rate. Physics tracks the pin only at hz >= 60 (Rapier caps its step at 1/60 s); below that, gameplay systems step 1/hz per frame while physics steps 1/60.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `hz` | number | No | Simulation rate in Hz (ticks per second of game time), integer 4-240 (default 60). The engine always advances exactly one tick per rendered frame; hz sets how long that tick is. 4 Hz (a 250 ms tick) is the floor because Bevy clamps any longer step to 250 ms. |
+
+**Example:**
+```json
+{
+  "command": "pin_frame_rate",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `unpin_frame_rate`
+
+Return the simulation clock to the wall clock after pin_frame_rate; the next frame is measured from now. Stop does this for a pin in force during Play; a pin made in Edit stays until this command.
+
+**Example:**
+```json
+{
+  "command": "unpin_frame_rate",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
 ### `get_mode`
 
 Get current engine mode (edit, play, or paused)
@@ -2117,7 +2208,7 @@ Import a glTF/GLB 3D model file (base64-encoded data) into the asset registry an
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dataBase64` | string | Yes | Base64-encoded glTF/GLB file data |
+| `dataBase64` | string | Yes | Base64-encoded glTF/GLB file data (a data:model/gltf-binary;base64, header is accepted). A model whose images are KTX2 or Basis Universal (KHR_texture_basisu), or that is not a readable glTF/GLB, is refused with the reason; use PNG or JPEG textures. |
 | `name` | string | Yes | Display name for the imported model |
 
 **Example:**
@@ -2141,7 +2232,7 @@ Load a texture image and assign it to a material slot on an entity
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dataBase64` | string | Yes | Base64-encoded image data (PNG/JPG) |
+| `dataBase64` | string | Yes | Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64, which is typed by its first bytes: a PNG signature is image/png, a JPEG marker is image/jpeg, and anything else is refused. Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named. |
 | `name` | string | Yes | Display name for the texture |
 | `entityId` | string | Yes | Entity to apply texture to |
 | `slot` | `"base_color"` \| `"normal_map"` \| `"metallic_roughness"` \| `"emissive"` \| `"occlusion"` | Yes | Material texture slot |
@@ -5213,7 +5304,7 @@ Add a pre-built game component (e.g., CharacterController, Health, Collectible) 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Type of game component to add |
+| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Type of game component to add |
 | `properties` | object | No | Optional property overrides (uses defaults if omitted) |
 
 **Example:**
@@ -5238,8 +5329,8 @@ Update properties of an existing game component. Only the named properties chang
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Type of game component to update |
-| `properties` | object | Yes | Property values to update |
+| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Type of game component to update |
+| `properties` | object | Yes | Property values to update; unnamed properties keep their current values |
 
 **Example:**
 ```json
@@ -5263,7 +5354,7 @@ Remove a game component from an entity
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentName` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Name of component to remove |
+| `componentName` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Name of component to remove |
 
 **Example:**
 ```json

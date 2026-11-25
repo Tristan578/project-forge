@@ -1,11 +1,11 @@
 ---
 name: builder
-description: Specialized implementation agent optimized for Rust/WASM coding speed and accuracy.
+description: Cross-layer implementation agent (Rust engine, web, MCP, tests) that builds an approved spec in an isolated worktree; dispatched per ticket via /dispatch-builder.
 model: sonnet
 effort: high
 memory: user
 isolation: worktree
-skills: [arch-validator, rust-engine, frontend, mcp-commands, testing, next-best-practices, tdd, neon-postgres, shadcn]
+skills: [arch-validator, rust-engine, frontend, mcp-commands, testing, next-best-practices, tdd, neon-postgres]
 hooks:
   PreToolUse:
     - matcher: Edit|Write
@@ -90,22 +90,22 @@ Every feature MUST address:
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Bevy | 0.18 | wgpu 27, WebGPU primary |
-| bevy_rapier3d/2d | 0.34 | Physics |
+| Bevy | 0.19 | wgpu 29, WebGPU primary |
+| bevy_rapier3d/2d | 0.35 | Physics |
 | wasm-bindgen | 0.2.127 | Pinned — must match Cargo.lock |
 | Next.js | 16.x | Turbopack build |
 | React | 19.x | Via Next.js |
 | Zustand | 5.x | Slice-based store |
-| TypeScript | 5.x | Strict mode |
+| TypeScript | 6.x | Strict mode |
 | Tailwind | 4.x | zinc-* scale |
-| Vitest | 4.x | Unit testing |
+| Vitest | 5.x | Unit testing |
 
 ## Quality Bar
 
 Before declaring implementation complete:
 1. `bash .claude/tools/validate-rust.sh check` — zero violations
 2. `bash .claude/tools/validate-frontend.sh quick` — zero warnings, zero type errors, all tests pass
-3. `bash .claude/tools/validate-mcp.sh full` — manifests in sync, MCP tests pass
+3. `bash .claude/tools/validate-mcp.sh full` — manifests in sync, MCP type-checks, MCP tests pass
 4. Test file exists for every new store slice, event handler, and chat handler
 5. MCP manifest entries in both locations
 

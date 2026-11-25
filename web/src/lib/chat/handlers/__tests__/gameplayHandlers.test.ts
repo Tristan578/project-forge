@@ -1164,8 +1164,16 @@ describe('export_game', () => {
     await invokeHandler(gameplayHandlers, 'export_game', { title: 'TestGame' }, { sceneName: 'G' });
     expect(mockDownloadBlob).toHaveBeenCalledTimes(1);
     const [, filename] = mockDownloadBlob.mock.calls[0] as [Blob, string];
-    expect(filename).toContain('TestGame');
-    expect(filename).toMatch(/\.html$/);
+    expect(filename).toBe('TestGame.html');
+  });
+
+  // exportGame returns a zip archive in zip mode, so the download and the name
+  // reported back to the chat must say .zip, not .html.
+  it('names a zip-mode export .zip, in the download and in the result', async () => {
+    const { result } = await invokeHandler(gameplayHandlers, 'export_game', { title: 'TestGame', mode: 'zip' }, { sceneName: 'G' });
+    const [, filename] = mockDownloadBlob.mock.calls[0] as [Blob, string];
+    expect(filename).toBe('TestGame.zip');
+    expect((result.result as { filename: string }).filename).toBe('TestGame.zip');
   });
 
   it('resets isExporting=false even on export failure', async () => {
@@ -1260,6 +1268,19 @@ describe('save_material_to_library', () => {
     expect(data.id).toBe('custom_red');
     expect(data.name).toBe('Red Material');
     expect(mockSaveCustomMaterial).toHaveBeenCalledWith('Red Material', mat);
+  });
+
+  it('treats a blank entityId from the model as not given and saves the selected entity (#9565)', async () => {
+    const mat = { baseColor: [0, 1, 0, 1] };
+    mockSaveCustomMaterial.mockReturnValue({ id: 'custom_green', name: 'Green' });
+    const { result } = await invokeHandler(
+      gameplayHandlers,
+      'save_material_to_library',
+      { name: 'Green', entityId: '' },
+      { primaryId: 'ent-1', primaryMaterial: mat },
+    );
+    expect(result.success).toBe(true);
+    expect(mockSaveCustomMaterial).toHaveBeenCalledWith('Green', mat);
   });
 });
 

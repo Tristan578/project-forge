@@ -58,7 +58,7 @@ To check the platform keys as the app sees them rather than as you hope they are
 | Variable | Source | Description |
 |----------|--------|-------------|
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash console → Database → REST API | Auth token for Upstash REST API. Paired with `UPSTASH_REDIS_REST_URL`. |
-| `STRIPE_WEBHOOK_SECRET` | Stripe dashboard → Webhooks → endpoint secret | Verifies Stripe webhook signatures at `/api/webhooks/stripe`. Without this, all webhooks are rejected. |
+| `STRIPE_WEBHOOK_SECRET` | Stripe dashboard → Webhooks → endpoint secret | Verifies Stripe webhook signatures at `/api/stripe/webhook`. Without this, all webhooks are rejected. |
 | `CLERK_WEBHOOK_SECRET` | Clerk dashboard → Webhooks → endpoint secret | Verifies Clerk webhook signatures. Without this, user-lifecycle syncs are rejected. |
 | `STRIPE_PRICE_STARTER` / `_CREATOR` / `_STUDIO` | Stripe dashboard → Products | Subscription price IDs. Checkout for a tier fails without its ID. |
 

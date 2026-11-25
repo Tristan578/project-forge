@@ -24,8 +24,8 @@ export interface PhaseStatus {
   phase: InitPhase;
   duration: number;
   status: 'done' | 'active' | 'pending';
-  message?: string;
-  error?: string;
+  message?: string | undefined;
+  error?: string | undefined;
 }
 
 export interface EngineStatus {

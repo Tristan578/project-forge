@@ -13,6 +13,7 @@ require() {
     exit 1
   fi
 }
+readonly -f require
 require git
 require grep
 require python3
@@ -26,6 +27,7 @@ assert_exit() {
     FAILURES=$((FAILURES + 1))
   fi
 }
+readonly -f assert_exit
 
 make_fixture_repo() {
   local dir
@@ -33,6 +35,7 @@ make_fixture_repo() {
   git -C "$dir" init -q
   echo "$dir"
 }
+readonly -f make_fixture_repo
 
 # 1. Real repo, run from repo root: engine/src exists and is clean.
 (cd "$REPO_ROOT" && bash "$HOOK" >/dev/null 2>&1)

@@ -119,7 +119,7 @@ jobs:
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we
-          # maintain for Bevy 0.18, not merely vendored code. Matching only
+          # maintain for Bevy 0.19, not merely vendored code. Matching only
           # '^engine/' meant a PR editing just the fork set engine=false, skipped
           # Quality Gates / WASM Build entirely, and was first compiled by CD on
           # main AFTER merge -- so a fork edit that failed to build reddened main
@@ -127,7 +127,11 @@ jobs:
           # that too.
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
-          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
+          # The four tsconfig.json files are here because the job that pins their
+          # exactOptionalPropertyTypes (#7592, #10230, scripts/__tests__/exact-
+          # optional-property-types.test.mjs, CI Self-Defense Tests) runs on
+          # needs-ci. A PR deleting only that flag would otherwise skip its own pin.
+          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui|web)/tsconfig\.json$' && ci=true
           # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
           # the ONLY check comparing the canonical MCP manifest against its two
           # derived copies. The canonical dir and the apps/docs copy were listed;
@@ -163,7 +167,7 @@ jobs:
           # them, which carries a hash per mirrored file and so changes with every
           # skill or agent text edit; matching it would put the ~27-minute Windows
           # job on every SKILL.md change.
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/workflows/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
           # Any package.json at ANY depth (web/, mcp-server/, apps/*, packages/*,
           # root) or the single root lockfile → run the lockfile-sync gate. Kept
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained
@@ -198,7 +202,7 @@ jobs:
           # a .codex/ file exists, and dies when a wired hook script is missing.
           # Without them, renaming a rule file merges green and the NEXT, unrelated
           # PR that touches a skill goes red for someone else's change.
-          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$|^\.claude/skills/|^\.claude/agents/|^\.claude/settings\.json$|^\.claude/rules/|^\.claude/hooks/|^\.claude/tools/|^\.claude/CLAUDE\.md$|^\.github/|^\.agents/skills/|^\.codex/|^\.mcp\.json$|^scripts/check-codex-port\.sh$|^scripts/__tests__/check-codex-port\.test\.sh$' && agentic=true
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$|^\.claude/skills/|^\.claude/agents/|^\.claude/settings\.json$|^\.claude/rules/|^\.claude/hooks/|^\.claude/tools/|^\.claude/CLAUDE\.md$|^\.github/|^\.agents/skills/|^\.codex/|^\.mcp\.json$|^scripts/check-codex-port\.sh$|^scripts/__tests__/check-codex-port\.test\.sh$|^scripts/check-copilot-hooks\.sh$|^scripts/__tests__/check-copilot-hooks\.test\.sh$|^scripts/copilot-arch-check\.sh$' && agentic=true
           # Taskboard onboarding-hygiene tripwire (scripts/check-taskboard-onboarding-hygiene.sh).
           # Fires whenever a CONTRIBUTOR-FACING ONBOARDING SURFACE changes — the
           # surfaces where a rotated taskboard project/team ULID or a forbidden
@@ -320,7 +324,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -370,7 +374,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -415,7 +419,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -479,7 +483,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -544,10 +548,13 @@ jobs:
   # `.claude/hooks/` inherited 62 failing assertions that had nothing to do with
   # its change.
   #
-  # So the trade is explicit: cheap PRs, and whoever next edits a hook pays the
-  # accumulated debt. If that becomes the common case, the fix is a scheduled
-  # run (5 min/week) rather than moving to every-PR — see #9606 for the
-  # discussion.
+  # So the gate stays, but it is no longer the only thing running these suites:
+  # `.github/workflows/hook-tests-scheduled.yml` runs them every Monday, and
+  # opens a tracking issue if they fail. That is roughly 5 minutes a week to
+  # bound the blast radius — rot is found by the schedule rather than by
+  # whoever happens to edit a hook months later. Do not remove one without
+  # reconsidering the other; together they are the reason a skipped run here is
+  # safe to ignore.
   hook-tests:
     name: Hook Tests
     needs: [ci-gate]
@@ -588,6 +595,9 @@ jobs:
           # definitions stay invisible to the analysis. The tree is also clean
           # under plain shellcheck (every dynamic `source` carries a line-level
           # SC1091 disable), so a local run without -x agrees with this gate.
+          # The version is the runner's, not pinned: a newer local shellcheck can
+          # pass where this one fails (#10334), so name it in the log.
+          shellcheck --version
           shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 
   # ---- Skills Lint ----
@@ -613,12 +623,23 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    # Raised from 30 after review measured 26:52 on this branch — ~3 minutes
-    # of headroom on a job that is in ci-success's needs:, so a tip-over blocks
-    # every PR rather than one. The delta against main's ~22 minutes is mostly
-    # runner variance rather than any single suite, which is the argument for
-    # headroom rather than for hunting a culprit.
-    timeout-minutes: 45
+    # The job is in ci-success's needs:, so a tip-over blocks every PR rather
+    # than one. Raised from 30 to 45 after review measured 26:52 on a branch,
+    # about 3 minutes of headroom; main then took about 22 minutes.
+    # Raised from 45 to 60 (#10285): on 2026-09-24 main measured 36:54 with
+    # 66 suites, then 36:53 and 39:04 with 70, against about 22 on 2026-09-15.
+    # That growth is not runner variance. The job runs every bash suite one
+    # after another under Git Bash, where process spawns are slow. #10229
+    # added the 71st suite, check-fn-freeze, and its case count grew across
+    # that PR's heads. In a 41:22 run of the final head on 2026-09-26 (job
+    # 108460157387), check-ci-success alone took 553 s, and check-fn-freeze
+    # took 92 s at 175 cases against about 8 s on Linux. Earlier heads
+    # measured it at 44 s with 144 cases (job 108440510702) and 52 s with 151
+    # (job 108446401974, whole job 30:38), so re-measure it from this job
+    # after the suite changes. 60 is headroom while #10290 finds and cuts
+    # where the time goes; raise it again only with that issue's
+    # measurements, not in its place.
+    timeout-minutes: 60
     permissions:
       contents: read
     defaults:
@@ -717,7 +738,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -806,6 +827,16 @@ jobs:
   # It IS in the required `CI Success` aggregate, asserted by that verifier's
   # `check_unconditional` — there is no ci-gate trigger to map it to, and a gate
   # outside the aggregate reports rather than gates.
+  #
+  # The same job runs scripts/check-symlinks.sh, the other half of "the checkout
+  # works for everyone": every path git records as a symlink must resolve to a
+  # tracked file inside the repository. Skills and references are shared by
+  # symlink so each has one source, and a link to a moved, untracked or
+  # out-of-repo target breaks every fresh clone the same silent way. It is
+  # unconditional for the same reason: an edit anywhere (a renamed .agents skill,
+  # a deleted rule) can break a link. On this Linux runner every link is checked
+  # out as a real symlink; the stub case (core.symlinks=false) is caught at
+  # session start by on-session-start.sh, which runs the same script.
   portable-paths:
     name: Portable Paths
     runs-on: ubuntu-latest
@@ -829,6 +860,15 @@ jobs:
 
       - name: Check for machine-local absolute paths in tracked files
         run: bash scripts/check-portable-paths.sh
+
+      - name: Test the symlinks gate's decision logic
+        run: bash scripts/__tests__/check-symlinks.test.sh
+
+      - name: Shellcheck the symlinks gate and its suite
+        run: shellcheck -x scripts/check-symlinks.sh scripts/__tests__/check-symlinks.test.sh
+
+      - name: Check that every tracked symlink resolves to a tracked file
+        run: bash scripts/check-symlinks.sh
 
   # ---- Agentic Config Sync ----
   # Runs when the single source of truth (tools/agentic-sync/canonical.json), the
@@ -856,7 +896,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -865,6 +905,9 @@ jobs:
 
       - name: Check the generated Codex CLI surface is in sync with .claude/
         run: bash scripts/check-codex-port.sh
+
+      - name: Check the Copilot hook files (events, end-of-turn scripts, script paths, double runs with .claude/settings.json)
+        run: bash scripts/check-copilot-hooks.sh
 
   # ---- Taskboard Onboarding Hygiene ----
   # The negative guard the parity review called for: greps the WHOLE tree and
@@ -937,6 +980,85 @@ jobs:
 
       - name: Reject a committed permissive Codex config profile
         run: bash scripts/check-codex-config-safety.sh
+
+  # ---- actionlint ----
+  # Lints ci.yml, cd.yml and quality-gates.yml for shellcheck findings in embedded
+  # `run:` blocks and for GitHub Actions expression errors (#8719). A ratchet:
+  # the pre-existing findings were cleaned in the PR that added this job, so any
+  # NEW finding in these files fails the PR. Gated on needs-ci (which already
+  # fires on ^\.github/workflows/) and wired into the required ci-success
+  # aggregate, so it is required when it runs and skips cleanly otherwise.
+  #
+  # Scoped to the three named files on purpose, NOT `.github/workflows/*.yml`:
+  # that glob also matches the gh-aw `*.lock.yml` files (compiler-generated,
+  # un-editable, guarded by gh-aw Lock Sync) and the other workflows still carry
+  # out-of-scope findings. Widening the gate is its own change.
+  #
+  # actionlint is NOT on the runner image (unlike jq and shellcheck), so it is
+  # installed pinned to a fixed version — an unpinned install could surface new
+  # checks from a future release and break the ratchet on a PR that changed
+  # nothing. actionlint uses the runner's preinstalled shellcheck for SCxxxx.
+  # The release tarball is downloaded directly and verified against a sha256
+  # PINNED below (taken from the release's actionlint_<ver>_checksums.txt and
+  # cross-checked by hashing the asset independently) before it is extracted
+  # or executed; a mismatch fails the job. Bumping ACTIONLINT_VERSION means
+  # bumping ACTIONLINT_SHA256 in the same edit — the upstream
+  # download-actionlint.bash script is NOT used, because it fetches from a
+  # mutable tag and performs no integrity check of the tarball.
+  #
+  # Step-level parallel keys (`background:` / `wait:` / `wait-all:` /
+  # `cancel:`, GitHub changelog 2026-06-25) are NOT understood by any released
+  # actionlint (rhysd/actionlint#694 is open; 1.7.11 reports `unexpected key
+  # "background"` plus `step must run script with "run" section or run action
+  # with "uses" section` for a bare `- wait:` step). Adopting them in these
+  # three files under #8861 therefore hard-fails this required gate. Path
+  # forward: bump the pinned actionlint once #694 ships. Do NOT paper over it
+  # with -ignore — the second message is generic and would also hide a
+  # genuinely malformed step.
+  #
+  # `jobs.<id>.result` inside a workflow_call `outputs.<name>.value`
+  # (quality-gates.yml) is valid, documented reusable-workflow syntax that
+  # actionlint's expression checker does not model. It is suppressed by the
+  # EXACT message via -ignore so a genuine typo elsewhere (whose message names a
+  # different property) still fails.
+  actionlint:
+    name: actionlint
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Install actionlint (pinned)
+        env:
+          ACTIONLINT_VERSION: "1.7.11"
+          # sha256 of actionlint_1.7.11_linux_amd64.tar.gz. Must change together
+          # with ACTIONLINT_VERSION.
+          ACTIONLINT_SHA256: "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a"
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          # Fail closed: sha256sum -c exits non-zero on a mismatch, and set -e
+          # stops the step before anything from the tarball is extracted or run.
+          (cd "${RUNNER_TEMP}" && echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum -c -)
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" actionlint
+          "${RUNNER_TEMP}/actionlint" -version
+          shellcheck --version
+
+      - name: Lint workflow files
+        run: |
+          "${RUNNER_TEMP}/actionlint" \
+            -ignore 'property "result" is not defined' \
+            .github/workflows/ci.yml \
+            .github/workflows/cd.yml \
+            .github/workflows/quality-gates.yml
 
   # ---- gh-aw Lock Sync ----
   # Fails the PR when a GitHub Agentic Workflow source (.github/workflows/*.md) or
@@ -1122,7 +1244,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -1136,6 +1258,7 @@ jobs:
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
             scripts/check-codex-port.sh scripts/__tests__/check-codex-port.test.sh \
+            scripts/check-copilot-hooks.sh scripts/__tests__/check-copilot-hooks.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
@@ -1143,6 +1266,7 @@ jobs:
             scripts/install-playwright-ci.sh scripts/__tests__/install-playwright-ci.test.sh \
             scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
+            scripts/__tests__/cargo-audit-ignores.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
             scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
@@ -1178,7 +1302,9 @@ jobs:
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
+            scripts/assert-e2e-db-host.sh scripts/__tests__/assert-e2e-db-host.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
+            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -1190,7 +1316,10 @@ jobs:
       - name: Verify executable cache and coverage artifact contracts
         run: |
           bash scripts/__tests__/install-vercel-cli.test.sh
-          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs scripts/__tests__/exact-optional-property-types.test.mjs
+
+      - name: Verify scheduled hook-test contracts
+        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
@@ -1200,6 +1329,9 @@ jobs:
 
       - name: Run Codex CLI surface gate test suite
         run: bash scripts/__tests__/check-codex-port.test.sh
+
+      - name: Run Copilot CLI hook gate test suite
+        run: bash scripts/__tests__/check-copilot-hooks.test.sh
 
       - name: Run post-compaction rule-digest hook suite (here because a .claude/rules/ edit fires this job, not hook-tests)
         run: bash .claude/hooks/__tests__/inject-post-compact.test.sh
@@ -1226,6 +1358,13 @@ jobs:
 
       - name: Run npm-audit allowlist gate test suite
         run: bash scripts/__tests__/check-npm-audit.test.sh
+
+      # The cargo-audit ignore list (engine/.cargo/audit.toml) is the Rust
+      # counterpart of the npm allowlist: an id there silences an advisory on
+      # every run, so the list is pinned to an exact set and every entry must
+      # say why it is unfixable, what the exposure is, and when to lift it.
+      - name: Run cargo-audit ignore-list test suite
+        run: bash scripts/__tests__/cargo-audit-ignores.test.sh
 
       - name: Run security-alerts gate test suite
         run: bash scripts/__tests__/check-security-alerts.test.sh
@@ -1265,6 +1404,11 @@ jobs:
 
       - name: Run preview-database branch-policy test suite
         run: bash scripts/__tests__/preview-db-branch.test.sh
+      # The guard that keeps test-e2e-engine-journeys on the database it
+      # provisioned (#10161): drives scripts/assert-e2e-db-host.sh with foreign
+      # hosts and pins that the guard step precedes db:migrate in that job.
+      - name: Run E2E database host-guard test suite
+        run: bash scripts/__tests__/assert-e2e-db-host.test.sh
 
       # Executes the ci-gate `Detect changed paths` step body extracted from this
       # very file. Rides needs-ci, which every ci.yml edit sets, so the filters
@@ -1347,6 +1491,19 @@ jobs:
         # gate is distinguishable from a genuine finding.
         run: bash scripts/check-pin-strength.sh
 
+      - name: Run function-freeze gate test suite
+        run: bash scripts/__tests__/check-fn-freeze.test.sh
+
+      - name: Run function-freeze gate
+        # Every function a bash self-defense suite defines must be frozen with
+        # `readonly -f` directly after its definition (PF-1076 / #9125): a
+        # bash function resolves by name at call time, so one inserted
+        # `fail() { :; }` otherwise turns every FAIL into silence and the suite
+        # exits 0 having checked nothing. Same pairing as the two gates above:
+        # the gate's own suite runs first so a broken gate is distinguishable
+        # from a genuine finding.
+        run: bash scripts/check-fn-freeze.sh
+
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
   # a local build. Only runs when VERCEL_DEPLOY_ENABLED is set and web/mcp files changed.
@@ -1386,7 +1543,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -1468,7 +1625,7 @@ jobs:
           evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | tr '\n' ' ' | sed 's/ *$//')"
           if [ -n "$evicted_pr" ]; then
             echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
-            # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+            # shellcheck disable=SC2086 # a space-separated list, split on purpose
             for p in $evicted_pr; do
               echo "Reclaimed the preview database of #${p} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
             done
@@ -1506,7 +1663,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           # One notice per evicted PR (the output is space-separated).
-          # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+          # shellcheck disable=SC2086 # a space-separated list, split on purpose
           for pr in $EVICTED_PR; do
             gh pr comment "$pr" --repo "$REPO" \
               --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
@@ -1623,7 +1780,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -1725,7 +1882,7 @@ jobs:
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: blob-report-${{ strategy.job-index }}
           path: web/blob-report/
@@ -1744,7 +1901,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -1775,7 +1932,7 @@ jobs:
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: blob-report-api
           path: web/blob-report/
@@ -1813,7 +1970,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -1880,7 +2037,7 @@ jobs:
 
       - name: Upload auth-journey report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-auth-report
           path: web/auth-results/summary.json
@@ -1916,7 +2073,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -1997,16 +2154,20 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
+      # VERCEL_GIT_COMMIT_SHA reaches the `next start` webServer (it inherits
+      # this step's env), so /api/health reports this run's commit instead of
+      # 'local' (#10157). Runtime-only: nothing reads it at build time.
       - name: Run strict interactive-journey gate
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
           E2E_STRICT_STORES: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
         run: npx playwright test --config playwright.journey.config.ts
 
       - name: Upload journey report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-journey-report
           path: web/playwright-report/
@@ -2015,10 +2176,19 @@ jobs:
   # Engine smoke gate (#8602 F10). The FIRST per-PR job that actually boots the
   # WASM engine: it builds ONLY the WebGL2 variant, serves it same-origin, and
   # runs the curated `@engine-smoke` set under ANGLE/SwiftShader software WebGL2
-  # — two specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
-  # -> export, the breadth check) and `pipeline-live-engine.spec.ts` (the real
+  # — five specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
+  # -> export, the breadth check), `pipeline-live-engine.spec.ts` (the real
   # game-creation pipeline -> real Play button -> engineMode === 'play', the
-  # depth check). NOT `--disable-gpu`,
+  # depth check), `journey-evidence-canary.spec.ts` (a /dev release journey
+  # whose evidence record the post-run check requires, #10157),
+  # `engine/inputReplay.spec.ts` (a 120-tick input trace replayed through the
+  # real input path on a PINNED simulation clock, then paused / cancelled /
+  # restarted within 0.01 world units — the interaction check, #10007; the pin
+  # is what makes a traversal assertion deterministic under SwiftShader's
+  # variable frame rate) and `e2e/engine/referenceGames.spec.ts` (each
+  # versioned reference game built through real engine commands and checked
+  # against its expected-state record before Play, #10159) — plus the
+  # `@engine-ui` tests (#9586). NOT `--disable-gpu`,
   # which leaves wgpu with no GL context and hangs `init_engine` (the exact reason
   # every other CI Playwright config can only run store-less @ui/@journey specs).
   #
@@ -2061,7 +2231,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -2160,6 +2330,20 @@ jobs:
             exit 1
           fi
 
+      # Hand the engine this job just proved present to test-e2e-engine-journeys
+      # (#10161), which `needs:` this job and downloads it instead of restoring
+      # the cache (a miss there would mean a SECOND cargo build of the same
+      # tree) or rebuilding. Same run, same tree, same bytes: the journeys gate
+      # tests exactly the binary the smoke gate did. One day is plenty — the
+      # consumer runs in this workflow run.
+      - name: Upload the WebGL2 engine for the journeys gate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: engine-webgl2-pkg
+          path: engine/pkg-webgl2/
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Copy WASM into web/public (same-origin)
         run: |
           mkdir -p web/public/engine-pkg-webgl2
@@ -2215,31 +2399,329 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
-      # Runs the curated @engine-smoke set (two specs — see the job comment
+      # Runs the curated @engine-smoke set (five specs — see the job comment
       # above), under SwiftShader software WebGL2. Launch flags and testMatch
       # live in playwright.engine.config.ts, which also carries the 90s DEFAULT
-      # per-test budget (E2E_TIMEOUT_ENGINE_FULL_MS) that engine-smoke.spec.ts
-      # runs under; only pipeline-live-engine.spec.ts raises its own describe
-      # block to 180s via `test.describe.configure({ timeout:
-      # E2E_TIMEOUT_PIPELINE_LIVE_MS })`. Both numbers are defined in
+      # per-test budget (E2E_TIMEOUT_ENGINE_FULL_MS) that engine-smoke.spec.ts,
+      # journey-evidence-canary.spec.ts and referenceGames.spec.ts run under;
+      # pipeline-live-engine.spec.ts and engine/inputReplay.spec.ts raise their
+      # own describe blocks to 180s via `test.describe.configure({
+      # timeout: E2E_TIMEOUT_PIPELINE_LIVE_MS })`. Both numbers are defined in
       # e2e/constants.ts — no spec may inline a timeout literal — so raising a
       # budget for this gate means editing the config default or the spec's
       # configure call, not this workflow. The editor fixture's load() seeds
       # localStorage['forge:preferred-backend'] = 'webgl2' so loadWasm never
       # probes WebGPU, which SwiftShader cannot drive.
+      #
+      # Journey evidence (#10157). The `next start` webServer inherits this
+      # step's env, so VERCEL_GIT_COMMIT_SHA makes /api/health report this
+      # run's commit rather than 'local'; the journey fixture records that
+      # alongside GITHUB_SHA (on a pull_request event, the merge ref) and the
+      # PR head, which GitHub expands to '' on push and dispatch runs.
       - name: Run engine smoke gate
+        id: engine-smoke-run
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npx playwright test --config playwright.engine.config.ts
 
       - name: Upload engine-smoke report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-engine-smoke-report
           path: web/playwright-report/
           retention-days: 14
+
+      # One record per @release-journey test plus every attempt's trace and
+      # video, written by e2e/lib/journeyEvidenceReporter.ts. Uploaded before
+      # the check below so a failing check still leaves the evidence to read.
+      # if-no-files-found: error — an absent directory means the reporter
+      # never ran, which must not upload as an empty success. Both evidence
+      # steps skip only when the Playwright step itself never ran (an earlier
+      # step failed and the job is already red), so they add no second error.
+      - name: Upload journey evidence
+        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: journey-evidence
+          path: web/journey-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      # The post-run check: exactly one valid record per journey-tagged test
+      # the run selected (never zero), every attempt's trace and video present,
+      # GITHUB_SHA and the PR head equal to this run's, and /api/health's
+      # commit equal to GITHUB_SHA's first 8 characters. A journey test whose
+      # record was never attached fails the job here even though Playwright
+      # reported it green. Rules: web/e2e/lib/journeyEvidenceCheck.ts.
+      - name: Check journey evidence
+        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
+        working-directory: web
+        env:
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npx tsx scripts/check-journey-evidence.ts journey-evidence --min-journeys 1 --expect-github-sha "$GITHUB_SHA" --expect-pr-head-sha "$JOURNEY_PR_HEAD_SHA"
+
+  # DB-backed engine journeys gate (#10161). Journeys 3 and 4 of #9723 — save a
+  # game and reopen it in a fresh session; publish it and play it signed out —
+  # need a database, and test-e2e-engine-smoke drives /dev, which bypasses the
+  # database by design. This job serves the same hooks-flag production build
+  # against a Postgres CREATED FOR THIS RUN, migrated with the real
+  # `db:migrate`, drift-checked with the real `db:drift`, and reached by the
+  # real neon HTTP driver through Neon's documented local proxy. No secret and
+  # no Neon branch, so it runs identically on same-repo, fork and Dependabot
+  # PRs. The decision and the two rejected options:
+  # docs/decisions/2026-10-05-engine-journeys-database.md.
+  #
+  # SELECTOR for the journeys that will land here (#10152, #10153, #10154):
+  # tag the test `@engine-journey`. playwright.journeys.config.ts greps for
+  # that tag and nothing else; the @ui jobs never select it (uiSuiteReporter
+  # requires @ui) and the smoke config greps @engine-smoke|@engine-ui. Today
+  # the only member is engine-journeys-health.spec.ts, which asserts
+  # /api/health reports the per-run database `connected` through the proxy.
+  #
+  # ENGINE: downloaded from the artifact test-e2e-engine-smoke uploads after
+  # proving it present, so this job never compiles the engine and tests
+  # exactly the bytes the smoke gate did. The `needs:` on that job is the
+  # price: measured on run 37406582728 the chain (583 s smoke, then this job)
+  # stays under the 1087 s WASM Build that bounds the run anyway.
+  #
+  # Anti-tamper: mapped to needs-web AND needs-engine in
+  # scripts/check-ci-success.sh (both arms of the if: below), exactly as
+  # test-e2e-engine-smoke is.
+  test-e2e-engine-journeys:
+    name: E2E Engine Journeys Gate
+    needs: [ci-gate, test-e2e-engine-smoke]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-engine == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # Build-time flag, job-level for the same two reasons as engine-smoke:
+      # the Next.js build-cache key reads it through `env`, and it is what
+      # opens e2eHooksEnabled() so the driver honours E2E_NEON_HTTP_ENDPOINT
+      # (web/src/lib/db/e2eNeonEndpoint.ts). A production build without it
+      # ignores that variable — pinned by e2eNeonEndpoint.test.ts.
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
+      # The per-run database. `postgres`/`postgres` are the service
+      # container's throwaway credentials: nothing outside this runner can
+      # reach them, and the guard step below refuses any host but localhost.
+      # The neon HTTP driver never connects to this URL's host — it POSTs each
+      # query to E2E_NEON_HTTP_ENDPOINT with the URL in a header, and the proxy
+      # connects to Postgres through its own PG_CONNECTION_STRING.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/spawnforge_journeys
+      E2E_NEON_HTTP_ENDPOINT: http://localhost:4444/sql
+    services:
+      # Postgres 17 with pgvector: migration 0010
+      # (web/drizzle/0010_graph_retrieval_nodes_edges.sql) runs CREATE EXTENSION
+      # vector, which the stock postgres image does not ship. Pinned by digest like
+      # every action in this file (scripts/check-actions-pinned.sh does not
+      # read `image:`, so this pin is held by review).
+      postgres:
+        image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: spawnforge_journeys
+        ports:
+          - 5432:5432
+        # The runner waits for a healthy service before the first step runs,
+        # which is what lets the proxy step below connect on its first try.
+        options: >-
+          --health-cmd "pg_isready -U postgres -d spawnforge_journeys"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      # Same silent-drop guard as test-e2e-ui (npm/cli#4828 class, PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      # --- Database: guard, provision, migrate, drift ------------------------
+      # Before anything touches the database: the host in DATABASE_URL and the
+      # proxy endpoint must be the loopback this run provisioned. A foreign
+      # host would otherwise be migrated and served with every check green.
+      # scripts/__tests__/assert-e2e-db-host.test.sh drives the guard with a
+      # foreign host and pins that this step precedes db:migrate.
+      - name: Guard DATABASE_URL against any host but this run's
+        run: bash scripts/assert-e2e-db-host.sh
+
+      # Neon's documented local proxy for the serverless driver
+      # (neon.com/guides/local-development-with-neon, which the driver docs'
+      # "Developing locally" section points at): Neon's own `proxy` binary,
+      # built from neondatabase/neon at release-proxy-8853 with its postgres
+      # auth backend, behind a Caddy listener on :4444. Started as a STEP, not
+      # a second service: its start.sh runs psql once at boot to create the
+      # control-plane table the proxy reads on every connection, and services
+      # start concurrently, so as a service it could race the database. Host
+      # networking so `localhost:5432` inside the container is the service's
+      # published port and :4444 lands on the runner. Pinned by digest — the
+      # image's only tag is `main`.
+      - name: Start the Neon HTTP proxy for the per-run database
+        run: |
+          docker run -d --name neon-http-proxy --network host \
+            -e PG_CONNECTION_STRING="$DATABASE_URL" \
+            ghcr.io/timowilhelm/local-neon-http-proxy:main@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null -X POST "$E2E_NEON_HTTP_ENDPOINT" \
+                 -H "Neon-Connection-String: $DATABASE_URL" \
+                 -H 'Content-Type: application/json' \
+                 -d '{"query":"SELECT 1","params":[]}' 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+      # The probe sends the request shape the driver itself sends — the
+      # connection string in `Neon-Connection-String`, raw text output, array
+      # mode — and asserts the ROW, not a status code (lessons-learned #1 and
+      # #14: a 200 with the wrong body is how a contract break reads as
+      # health). On failure the proxy's log is the diagnosis, so it is
+      # printed here rather than discovered later. The body carries no
+      # credential: command, rowCount, rows, fields.
+      - name: Probe the proxy with the driver's own request shape
+        run: |
+          body="$(curl -sS -X POST "$E2E_NEON_HTTP_ENDPOINT" \
+            -H "Neon-Connection-String: $DATABASE_URL" \
+            -H 'Neon-Raw-Text-Output: true' \
+            -H 'Neon-Array-Mode: true' \
+            -H 'Content-Type: application/json' \
+            -d '{"query":"SELECT 1 AS one","params":[]}')" || body="(curl failed)"
+          if grep -q '"rows":\[\["1"\]\]' <<<"$body"; then
+            echo "Neon HTTP proxy answered SELECT 1 through $E2E_NEON_HTTP_ENDPOINT: $body"
+          else
+            echo "::error::the Neon HTTP proxy did not return the expected row for SELECT 1 — body: $body" >&2
+            docker logs neon-http-proxy 2>&1 | tail -50 || true
+            exit 1
+          fi
+
+      # Real migrate, real drift, no substitution. A migration that cannot
+      # apply fails HERE, naming the migration, before Playwright starts
+      # (apply-migrations.ts prints the cause and exits non-zero). The tsx
+      # scripts reach the proxy through the same E2E_NEON_HTTP_ENDPOINT
+      # override: a tsx process is not a production build, so the gate is
+      # open there even without the hooks flag.
+      - name: Migrate the per-run database
+        working-directory: web
+        run: npm run db:migrate
+
+      - name: Assert the migrated schema matches schema.ts (db:drift)
+        working-directory: web
+        run: npm run db:drift
+
+      # --- Engine: the smoke gate's artifact, never a rebuild -----------------
+      - name: Download the WebGL2 engine built for the smoke gate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: engine-webgl2-pkg
+          path: engine/pkg-webgl2
+
+      # The same assertion the smoke gate makes before trusting its own copy.
+      - name: Assert the WebGL2 engine is present
+        run: |
+          if [ ! -s engine/pkg-webgl2/forge_engine_bg.wasm ]; then
+            echo "::error::engine/pkg-webgl2/forge_engine_bg.wasm is missing or empty after downloading engine-webgl2-pkg" >&2
+            ls -la engine/pkg-webgl2 2>&1 || true
+            exit 1
+          fi
+
+      - name: Copy WASM into web/public (same-origin)
+        run: |
+          mkdir -p web/public/engine-pkg-webgl2
+          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
+
+      # --- Playwright ---------------------------------------------------------
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          # Same single-root-lockfile key as test-e2e-ui (#8589).
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh browsers
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh deps
+
+      # Same key as the smoke gate: both build with NEXT_PUBLIC_E2E_HOOKS=true,
+      # so the two jobs share one build cache rather than each warming its own.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
+      - name: Build for engine-journeys E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx next build
+
+      # Runs the @engine-journey selection under the same SwiftShader flags as
+      # the smoke gate (playwright.journeys.config.ts). SKIP_ENV_VALIDATION on
+      # THIS step: the `next start` webServer inherits the invoking step's env,
+      # not the build's (scripts/__tests__/e2e-tag-routing.test.sh pins it).
+      # VERCEL_GIT_COMMIT_SHA makes /api/health report this run's commit, as
+      # in the smoke gate, for the journeys that will attach evidence here
+      # (#10157). The journey-evidence reporter and its post-run check are NOT
+      # wired yet: check-journey-evidence.ts refuses --min-journeys below 1 by
+      # design, and no journey lives here until #10153 — that PR registers
+      # the reporter in playwright.journeys.config.ts and adds the upload and
+      # check steps exactly as test-e2e-engine-smoke has them.
+      - name: Run engine journeys gate
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npx playwright test --config playwright.journeys.config.ts
+
+      - name: Upload engine-journeys report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: e2e-engine-journeys-report
+          path: web/playwright-report/
+          retention-days: 14
+
+      # --- Teardown -----------------------------------------------------------
+      # The service container is destroyed by the runner when the job ends;
+      # the proxy was started by a step, so a step stops it. Its log is
+      # printed first on a failed job: it is the only record of a refused
+      # connection or a failed control-plane query.
+      - name: Print the proxy log (failure only)
+        if: ${{ failure() }}
+        run: docker logs neon-http-proxy 2>&1 | tail -200 || true
+
+      - name: Tear down the Neon HTTP proxy
+        if: ${{ always() }}
+        run: docker rm -f neon-http-proxy >/dev/null 2>&1 || true
 
   # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
   # been declared in playwright.config.ts for months and executed by nothing:
@@ -2284,7 +2766,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -2308,16 +2790,28 @@ jobs:
           # report cache-hit and skip the Firefox/WebKit install (#9610).
           key: playwright-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
+      # Three engines' apt deps make this the slowest install in CI: on
+      # 2026-10-01 a slow runner needed 445s for the deps step alone, and nine
+      # job runs failed when the 660s default budget ran out while a timed-out
+      # attempt's orphaned apt-get was still finishing the install. The job's
+      # 30-minute timeout has room for a larger budget. Keep the budget on the
+      # step: scripts/__tests__/install-playwright-ci.test.sh checks that each
+      # step's budget + 45s (15s kill grace + 30s step startup) fits its
+      # timeout-minutes, and fails on a budget set at job or workflow level.
       - name: Install Playwright browsers (chromium, firefox, webkit)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 12
+        timeout-minutes: 18
         working-directory: web
+        env:
+          PLAYWRIGHT_INSTALL_BUDGET_SECONDS: '1020'
         run: bash ../scripts/install-playwright-ci.sh browsers chromium firefox webkit
 
       - name: Install Playwright OS deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 12
+        timeout-minutes: 18
         working-directory: web
+        env:
+          PLAYWRIGHT_INSTALL_BUDGET_SECONDS: '1020'
         run: bash ../scripts/install-playwright-ci.sh deps chromium firefox webkit
 
       - name: Build for cross-browser E2E
@@ -2345,7 +2839,7 @@ jobs:
 
       - name: Upload cross-browser report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-crossbrowser-report-${{ matrix.project }}
           path: web/playwright-report-crossbrowser/
@@ -2371,7 +2865,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -2382,7 +2876,7 @@ jobs:
       - name: Download blob reports
         # Must match the upload-artifact major version used for blob-report-*
         # above (@v4) — mixing artifact action majors is a documented gotcha.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: web/all-blob-reports
           pattern: blob-report-*
@@ -2393,7 +2887,7 @@ jobs:
         run: npx playwright merge-reports --reporter=html ./all-blob-reports
 
       - name: Upload merged report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-report
           path: web/playwright-report/
@@ -2414,7 +2908,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -2463,7 +2957,7 @@ jobs:
 
       - name: Upload docs Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: docs-playwright-report
           path: apps/docs/playwright-report/
@@ -2504,6 +2998,7 @@ jobs:
       - taskboard-onboarding-guard
       - codex-config-guard
       - ghaw-lock-sync
+      - actionlint
       - openapi-route-sync
       - actions-pin-check
       # Unconditional jobs, asserted by `check_unconditional` rather than mapped
@@ -2517,6 +3012,7 @@ jobs:
       - test-e2e-auth
       - test-e2e-journey
       - test-e2e-engine-smoke
+      - test-e2e-engine-journeys
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

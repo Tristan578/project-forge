@@ -2,7 +2,13 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { waitForEngineFrame } from './engineDispatch';
-import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { createScene, loadProjectScenes, saveProjectScenes, snapshotStoredProjectScenes } from '@/lib/scenes/sceneManager';
+import type { NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import {
+  ENGINE_THREW_RELOAD_GUIDANCE,
+  EngineDispatchThrewError,
+  engineThrewMessage,
+} from '@/lib/scenes/engineDispatchThrew';
 
 /**
  * World configuration used to live here and no longer does — it moved to the
@@ -29,6 +35,37 @@ const inputSchema = z.object({
   name: z.string().min(1).max(200).optional().default('Untitled Scene'),
   purpose: z.string().max(500).optional().default(''),
 });
+
+/**
+ * The step error's diagnostic line for a `newScene()` that answered `false`,
+ * by cause. The boolean is also `false` when there is no engine attached and
+ * when browser storage refused the registry write that precedes the dispatch
+ * — neither is the engine refusing, and a step log that said "Engine refused"
+ * for them sent the reader to the wrong component (#10202 review).
+ */
+function newSceneRefusalDiagnostic(refusal: NewSceneRefusal | null): string {
+  switch (refusal) {
+    case 'engine_not_attached':
+      return 'No engine was attached to clear the starter scene, so new_scene was never dispatched';
+    case 'registry_not_cleared':
+      return 'Browser storage refused to clear the prefab-instance registry, so new_scene was never dispatched';
+    case 'engine_refused':
+    case null:
+      return 'Engine refused new_scene while clearing the starter scene';
+  }
+}
+
+/**
+ * What the user reads when `newScene()` threw inside the engine. The step's
+ * generic `userFacingErrorMessage` ends "Please try again", which is the wrong
+ * advice here: the throw can have arrived after the engine began despawning, the
+ * viewport may be half-applied, and the store has locked saving. So this says
+ * the engine failed and then the shared reload guidance — the sentence every
+ * other scene surface shows (`sceneDispatchThrewResult`) — so the wording cannot
+ * drift from them. The engine's own text stays in the step's diagnostic
+ * `message`, not on this line (#10202).
+ */
+const ENGINE_THREW_USER_MESSAGE = `The engine failed while creating the scene. ${ENGINE_THREW_RELOAD_GUIDANCE}`;
 
 export const sceneCreateExecutor: ExecutorDefinition = {
   name: 'scene_create',
@@ -73,8 +110,31 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // spawns real geometry, so every step reaching this executor is a real scene
     // creation (PF-1138).
     const projectId = ctx.getStore().projectId;
+    // What was stored and what the editor listed before this step, taken before
+    // anything is written (#10380). A project with no stored registry yet loads
+    // as a placeholder, so the stored bytes, not the loaded project, are what a
+    // failed step must put back.
+    const restoreStoredRegistry = snapshotStoredProjectScenes(projectId);
+    const editorScenesBefore = ctx.getStore().scenes ?? [];
+    const editorActiveSceneBefore = ctx.getStore().activeSceneId ?? null;
     const project = loadProjectScenes(projectId);
-    const { project: withScene, sceneId } = createScene(project, name);
+    // `ctx.projectType` is the GDD's statement of the game's dimension — the
+    // scene is created FOR that game, so it states that type (#10227). The
+    // store's mirror may still be at its 3D default this early in the
+    // pipeline, which is why the plan's value is the right one here.
+    const { project: withScene, sceneId } = createScene(project, name, ctx.projectType);
+    // The registry as it was before this step wrote to it, so a `newScene()` that
+    // throws or is refused can put it back (#10380): the engine never created the
+    // scene, so the registry must not keep an entry for it.
+    const rollbackRegistry = (): void => {
+      try {
+        restoreStoredRegistry();
+        ctx.getStore().setScenes(editorScenesBefore, editorActiveSceneBefore);
+      } catch {
+        // Best effort: the step is already failing, and its own error is the one
+        // the user needs. A refused restore must not replace it.
+      }
+    };
     saveProjectScenes({ ...withScene, activeSceneId: sceneId }, projectId);
     ctx.getStore().setScenes(
       withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
@@ -102,11 +162,54 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // then stacks the generated game on top of Ground/Player/Sun. Fail the step
     // instead — the same false-success class this campaign's acceptance
     // criterion 3 targets (#10056).
-    if (ctx.getStore().newScene() === false) {
+    //
+    // The brief's completion mode (#9998) rides on this call: `new_scene`
+    // emits the SCENE_LOADED that sets the incoming scene's mode, so the mode
+    // is staged for it here rather than written to the store before it (where
+    // that same event would wipe it). No brief, or a brief with no mode, opens
+    // a legacy `win` scene — never whatever the previous scene had.
+    //
+    // The store names WHY it answered `false` (`newSceneRefusal()`, read
+    // synchronously right after the call); the step error carries that cause
+    // rather than blaming the engine for a storage refusal or an engine that
+    // has not attached yet (#10202 review).
+    //
+    // `newScene()` THROWS `EngineDispatchThrewError` when the engine call
+    // threw — after the store has locked every save path, because the throw can
+    // arrive once the engine has already begun despawning (#10202). That is not
+    // a refusal and it is not retryable: `planBuilder` gives this step
+    // `maxRetries: 1`, so letting it escape to the pipeline runner's generic
+    // catch (`retryable: true`) dispatched `new_scene` a second time against an
+    // engine that had already thrown mid-apply, with saves locked. Fail the step
+    // typed and non-retryable instead — the chat tools' `new_scene` narrows the
+    // same way. Anything else `newScene()` throws (a storage write refused, a
+    // subscriber that threw) set no lockout and is no engine report, so it is
+    // rethrown to the runner's catch unchanged.
+    const store = ctx.getStore();
+    let cleared: boolean;
+    try {
+      cleared = store.newScene({ completionMode: ctx.gdd?.completionMode });
+    } catch (error) {
+      // Only the engine's own throw says the scene was never created. Any other
+      // throw can come after the engine accepted it (a subscriber, a storage
+      // write), so the registry entry stays to match the engine (#10380).
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      rollbackRegistry();
+      return failResult(
+        makeStepError(
+          'ENGINE_DISPATCH_THREW',
+          engineThrewMessage('A new scene could not be created', error),
+          ENGINE_THREW_USER_MESSAGE,
+          false,
+        ),
+      );
+    }
+    if (cleared === false) {
+      rollbackRegistry();
       return failResult(
         makeStepError(
           'COMMAND_FAILED',
-          'Engine refused new_scene while clearing the starter scene',
+          newSceneRefusalDiagnostic(store.newSceneRefusal()),
           this.userFacingErrorMessage,
         ),
       );

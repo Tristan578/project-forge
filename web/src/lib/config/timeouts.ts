@@ -85,6 +85,23 @@ export const WASM_FETCH_TIMEOUT_MS = 60_000;
 export const ENGINE_GLOBAL_TIMEOUT_MS = 30_000;
 
 /**
+ * Per-origin deadline for the `/play` engine loader's GLUE import (#7580).
+ *
+ * `/play` tries the engine CDN and then same-origin. Each origin's glue import
+ * (a few KB) gets this budget so a CDN that stalls rather than fails still
+ * leaves time for the same-origin fallback: two of these fit under
+ * ENGINE_GLOBAL_TIMEOUT_MS. The ~23 MiB binary is NOT bounded per origin — it
+ * runs under the global budget alone, as it did before the CDN was tried
+ * first, so a slow-but-working link keeps the time it always had.
+ *
+ * The "two fit" arithmetic assumes the WebGPU adapter probe, which runs inside
+ * the same global budget with its own GPU_INIT_TIMEOUT_MS cap, answers
+ * promptly (it does on every browser measured); a probe that takes seconds
+ * eats the slack.
+ */
+export const PLAY_ENGINE_ORIGIN_TIMEOUT_MS = 12_000;
+
+/**
  * Deadline for the published-game metadata fetch on `/play`.
  *
  * Bounds the "Loading game..." spinner. Deliberately much shorter than the

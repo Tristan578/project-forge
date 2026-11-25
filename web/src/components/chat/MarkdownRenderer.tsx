@@ -88,7 +88,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         return <>{children}</>;
       },
       code({ className, children, ...props }) {
-        const langMatch = /language-(\w+)/.exec(className || '');
+        const langMatch = /language-(\w+)/.exec(className ?? '');
         // Detect fenced code blocks: they have a language class OR contain newlines
         const childStr = String(children);
         const isBlock = !!langMatch || childStr.includes('\n');
@@ -104,6 +104,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           );
         }
 
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank fenced-code language capture means none was specified
         const language = langMatch?.[1] || 'text';
         return (
           <div className="my-2 overflow-x-auto rounded-md border border-zinc-700 bg-zinc-900">
@@ -113,7 +114,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
               </span>
             </div>
             <pre className="overflow-x-auto p-3">
-              <code className={`text-[12px] leading-relaxed ${className || ''}`} {...props}>
+              <code className={`text-[12px] leading-relaxed ${className ?? ''}`} {...props}>
                 {children}
               </code>
             </pre>

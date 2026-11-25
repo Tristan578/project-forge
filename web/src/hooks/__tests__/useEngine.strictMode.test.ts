@@ -21,6 +21,7 @@
  * passed against the unfixed hook.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import { act, cleanup, configure, renderHook, waitFor } from '@testing-library/react';
 
 vi.mock('@/lib/initLog', () => ({ logInitEvent: vi.fn() }));
@@ -73,7 +74,7 @@ beforeEach(() => {
   glDownload.mockResolvedValue(undefined);
   localStorage.removeItem('forge:preferred-backend');
   delete window.__SKIP_ENGINE;
-  addCanvas('forge-canvas');
+  addCanvas(EDITOR_CANVAS_ID);
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })));
   vi.stubGlobal('navigator', {
     gpu: { requestAdapter: vi.fn(async () => ({ requestDevice: async () => ({ destroy: vi.fn() }) })) },
@@ -100,7 +101,7 @@ describe('useEngine initialization ownership (#10208)', () => {
     gpuDownload.mockImplementation(() => held.gate);
     const onReady = vi.fn();
 
-    const { result } = renderHook(() => engine.useEngine('forge-canvas', { onReady }));
+    const { result } = renderHook(() => engine.useEngine(EDITOR_CANVAS_ID, { onReady }));
     // Setup, cleanup and the replayed setup have all run; the module has not
     // arrived, so nothing may have started yet.
     expect(gpuInit).not.toHaveBeenCalled();
@@ -109,7 +110,7 @@ describe('useEngine initialization ownership (#10208)', () => {
     await waitFor(() => expect(result.current.isReady).toBe(true));
 
     expect(gpuInit).toHaveBeenCalledTimes(1);
-    expect(gpuInit).toHaveBeenCalledWith('forge-canvas');
+    expect(gpuInit).toHaveBeenCalledWith(EDITOR_CANVAS_ID);
     expect(onReady).toHaveBeenCalledTimes(1);
     // The replay reused the one in-flight load rather than starting a second.
     expect(gpuDownload).toHaveBeenCalledTimes(1);
@@ -120,7 +121,7 @@ describe('useEngine initialization ownership (#10208)', () => {
     gpuDownload.mockImplementation(() => held.gate);
     const onReady = vi.fn();
 
-    const { unmount } = renderHook(() => engine.useEngine('forge-canvas', { onReady }));
+    const { unmount } = renderHook(() => engine.useEngine(EDITOR_CANVAS_ID, { onReady }));
     unmount();
     await act(async () => { held.release(); });
     // Let the continuation run to completion.
@@ -136,7 +137,7 @@ describe('useEngine initialization ownership (#10208)', () => {
     addCanvas('second-canvas');
 
     const { result, rerender } = renderHook(({ id }) => engine.useEngine(id), {
-      initialProps: { id: 'forge-canvas' },
+      initialProps: { id: EDITOR_CANVAS_ID },
     });
     rerender({ id: 'second-canvas' });
     await act(async () => { held.release(); });
@@ -149,7 +150,7 @@ describe('useEngine initialization ownership (#10208)', () => {
   it('never starts a second attempt once Bevy owns a canvas', async () => {
     addCanvas('second-canvas');
     const { result, rerender } = renderHook(({ id }) => engine.useEngine(id), {
-      initialProps: { id: 'forge-canvas' },
+      initialProps: { id: EDITOR_CANVAS_ID },
     });
     await waitFor(() => expect(result.current.isReady).toBe(true));
     expect(gpuInit).toHaveBeenCalledTimes(1);
@@ -170,7 +171,7 @@ describe('useEngine initialization ownership (#10208)', () => {
     addCanvas('second-canvas');
 
     const { result, rerender } = renderHook(({ id }) => engine.useEngine(id, { onError }), {
-      initialProps: { id: 'forge-canvas' },
+      initialProps: { id: EDITOR_CANVAS_ID },
     });
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect(onError).toHaveBeenCalledTimes(1);

@@ -198,7 +198,7 @@ function findMarkerAttempts(title: string): MarkerAttempt[] {
 
 export interface ListingAnnotation {
   type: string;
-  description?: string;
+  description?: string | undefined;
   location?: { file: string; line: number; column: number };
 }
 

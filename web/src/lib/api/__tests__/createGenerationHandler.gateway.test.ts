@@ -138,6 +138,7 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     let capturedKey: string | undefined;
     const handler = createGenerationHandler({
       route: '/api/generate/image-test',
+      panel: 'generate-texture',
       provider: 'openai',
       capability: 'image',
       operation: 'image_generation',
@@ -161,6 +162,7 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     let capturedKey: string | undefined;
     const handler = createGenerationHandler({
       route: '/api/generate/embedding-test',
+      panel: 'ai-chat',
       provider: 'openai',
       capability: 'embedding',
       operation: 'embedding_generation',
@@ -186,6 +188,7 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     vi.stubEnv('PLATFORM_ELEVENLABS_KEY', '');
     const handler = createGenerationHandler({
       route: '/api/generate/sfx-test',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       capability: 'sfx',
       operation: 'sfx_generation',

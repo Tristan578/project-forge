@@ -216,6 +216,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
           {/* Target entity */}
           <div className="rounded border border-zinc-800 bg-zinc-850 p-2 text-xs text-zinc-400">
+            {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank primary entity name is unset; falls back to a display placeholder */}
             Apply to: <span className="font-medium text-zinc-300">{primaryName || 'Selected entity'}</span>
           </div>
 

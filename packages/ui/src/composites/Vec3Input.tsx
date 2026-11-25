@@ -223,8 +223,8 @@ export function Vec3Input({
             onChange={(v) => handleChange(axis, v)}
             step={step}
             precision={precision}
-            min={min}
-            max={max}
+            {...(min !== undefined && { min })}
+            {...(max !== undefined && { max })}
             disabled={disabled}
             ariaLabel={`${label} ${AXIS_LABELS[axis]}`}
           />

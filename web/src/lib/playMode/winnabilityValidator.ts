@@ -29,25 +29,10 @@
  */
 
 import type { SceneGraph, GameComponentData, WinConditionData, CompletionMode } from '@/stores/slices/types';
-
-/**
- * Whether a completion mode demands at least one satisfiable win condition.
- *
- * Only `endless`, `sandbox` and `narrative` are exempt. EVERYTHING else returns
- * true — that deliberately includes `undefined` (a legacy scene written before
- * the field existed) and any unexpected string that a hand-edited or older
- * `.forge` file might carry. The pre-play gate therefore stays fail-CLOSED by
- * default: absence of the field, or a value we do not recognise, is treated as
- * `win`, never as "no win condition needed". The mode is never inferred from
- * entity names (issue #9901).
- */
-function requiresWinCondition(completionMode: CompletionMode | undefined): boolean {
-  return (
-    completionMode !== 'endless' &&
-    completionMode !== 'sandbox' &&
-    completionMode !== 'narrative'
-  );
-}
+// Fail-closed: absent or unrecognised modes are `win`. Shared with the plan
+// builder's default-goal guarantee so the two cannot disagree (#9998). The
+// mode is never inferred from entity names (issue #9901).
+import { requiresWinCondition } from '@/lib/playMode/completionMode';
 
 /**
  * Neutralize a scene-supplied identifier before interpolating it into a message
@@ -227,7 +212,10 @@ export function validateWinnability(
       winnable: false,
       issues: [{
         code: 'NO_WIN_CONDITION',
-        message: 'This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items.',
+        // The last sentence (#9998): the Play toast and the AI tool result both
+        // carry this text, and it is where a creator of a goal-free game first
+        // learns the requirement is a choice, not a rule.
+        message: 'This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items. If the game is not meant to be won, set its completion mode to endless, sandbox or narrative instead.',
       }],
     };
   }

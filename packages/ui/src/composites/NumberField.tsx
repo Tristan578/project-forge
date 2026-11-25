@@ -12,9 +12,9 @@ export interface NumberFieldProps
   /** Receives finite edits clamped to the optional bounds. */
   onChange: (value: number) => void;
   /** Optional inclusive lower bound. */
-  min?: number;
+  min?: number | undefined;
   /** Optional inclusive upper bound. */
-  max?: number;
+  max?: number | undefined;
   /** Native number-input increment; defaults to 0.1. */
   step?: number;
 }

@@ -18,14 +18,15 @@ const POST_impl = createGenerationHandler<
   {
     text: string;
     textLength: number;
-    voiceId?: string;
-    stability?: number;
-    similarityBoost?: number;
-    style?: number;
+    voiceId?: string | undefined;
+    stability?: number | undefined;
+    similarityBoost?: number | undefined;
+    style?: number | undefined;
   },
   { audioBase64: string; durationSeconds: number; provider: string }
 >({
   route: '/api/generate/voice',
+  panel: 'generate-sound',
   provider: DB_PROVIDER.voice,
   operation: 'voice_generation',
   rateLimitKey: 'gen-voice',

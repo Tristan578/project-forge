@@ -36,21 +36,21 @@ export interface NarrativeScene {
   name: string;
   description: string;
   dialogue: DialogueLine[];
-  choices?: Choice[];
-  nextSceneId?: string;
+  choices?: Choice[] | undefined;
+  nextSceneId?: string | undefined;
 }
 
 export interface DialogueLine {
   speaker: string;
   text: string;
-  emotion?: string;
+  emotion?: string | undefined;
 }
 
 export interface Choice {
   text: string;
   consequence: string;
   nextSceneId: string;
-  affectsEnding?: string;
+  affectsEnding?: string | undefined;
 }
 
 export interface Character {
@@ -141,7 +141,7 @@ export const NARRATIVE_PRESETS: Record<string, NarrativePreset> = {
 // ============================================================================
 
 export interface NarrativeGenerationOptions {
-  preset?: string;
+  preset?: string | undefined;
   actCount?: number;
 }
 
@@ -590,7 +590,7 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
   // Set firstNodeId from the first scene
   for (const act of arc.acts) {
     for (const scene of act.scenes) {
-      if (!firstNodeId) firstNodeId = sceneEntryNodeMap.get(scene.id) ?? null;
+      firstNodeId ??= sceneEntryNodeMap.get(scene.id) ?? null;
     }
   }
 

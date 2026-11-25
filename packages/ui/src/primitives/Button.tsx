@@ -5,7 +5,7 @@ import { cn } from '../utils/cn';
 /** Native button attributes with library variants and sizes. */
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** Visual treatment; defaults to the primary filled button. */
-  variant?: 'default' | 'destructive' | 'outline' | 'ghost';
+  variant?: 'default' | 'destructive' | 'outline' | 'ghost' | undefined;
   /** Spacing and type scale; defaults to md. Small buttons retain a 44px mobile target. */
   size?: 'sm' | 'md' | 'lg';
 }

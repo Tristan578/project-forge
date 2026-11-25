@@ -22,16 +22,16 @@ export interface ZipExportOptions {
   format: ExportFormat;
   includeSourceMaps: boolean;
   compressTextures: boolean;
-  textureCompressionConfig?: CompressionConfig;
-  customLoadingScreen?: LoadingScreenConfig;
+  textureCompressionConfig?: CompressionConfig | undefined;
+  customLoadingScreen?: LoadingScreenConfig | undefined;
   title: string;
   resolution: GameTemplateOptions['resolution'];
   bgColor: string;
   includeDebug: boolean;
-  orientationLock?: 'landscape' | 'portrait' | 'none';
+  orientationLock?: 'landscape' | 'portrait' | 'none' | undefined;
   /** Project dimension; see `GameTemplateOptions.projectType`. */
-  projectType?: '2d' | '3d';
-  signal?: AbortSignal;
+  projectType?: '2d' | '3d' | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 interface ZipEntry {
@@ -57,11 +57,14 @@ async function fetchWasmEngineFiles(signal?: AbortSignal): Promise<ZipEntry[]> {
       // Exported games load from engine-pkg-{variant}/ paths (no -runtime suffix)
       const exportPath = `engine-pkg-${variant}/${file}`;
 
+      // DOM's RequestInit.signal is `AbortSignal | null` (no `| undefined`);
+      // conditional spread omits the key when this function received none.
+      const fetchInit: RequestInit = { ...(signal !== undefined ? { signal } : {}) };
       try {
-        let response = await fetch(runtimeUrl, { signal });
+        let response = await fetch(runtimeUrl, fetchInit);
         if (!response.ok) {
           // Fall back to editor variant
-          response = await fetch(editorUrl, { signal });
+          response = await fetch(editorUrl, fetchInit);
         }
         if (response.ok) {
           const blob = await response.blob();
@@ -254,10 +257,10 @@ export function generateZipIndexHtml(options: {
   loadingScript: string;
   hasWebGPU: boolean;
   hasWebGL2: boolean;
-  embedBridge?: string;
-  orientationLock?: 'landscape' | 'portrait' | 'none';
-  isPwa?: boolean;
-  projectType?: '2d' | '3d';
+  embedBridge?: string | undefined;
+  orientationLock?: 'landscape' | 'portrait' | 'none' | undefined;
+  isPwa?: boolean | undefined;
+  projectType?: '2d' | '3d' | undefined;
 }): string {
   const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock, isPwa, projectType } = options;
   const bgColor = validateCssColor(rawBgColor);

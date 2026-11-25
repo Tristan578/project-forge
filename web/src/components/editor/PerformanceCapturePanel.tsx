@@ -237,6 +237,7 @@ export function PerformanceCapturePanel() {
         {notice && <div>{notice}</div>}
       </div>
 
+      {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is there an error to show); ?? cannot substitute this OR */}
       {(error || (timedCapture?.status === 'failed' && timedCapture.error)) && (
         <InlineAlert variant="error">{error ?? timedCapture.error}</InlineAlert>
       )}

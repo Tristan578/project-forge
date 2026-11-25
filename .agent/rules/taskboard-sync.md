@@ -5,7 +5,8 @@
 **No code changes without a ticket.** This rule has no exceptions.
 
 Before writing ANY code:
-1. Ensure taskboard is running (start: `cd project-forge && taskboard start --port 3010`)
+1. Ensure taskboard is running (start: `cd project-forge && node .claude/hooks/taskboard-launch.mjs start` — the launcher resolves and passes the shared DB path; never start the binary by hand)
+   - First run on a new machine (no taskboard database yet), once, instead of `start`: `node .claude/hooks/taskboard-launch.mjs init`, then `python3 .claude/hooks/github_project_sync.py pull`.
 2. Check the board for existing work
 3. Pick an existing ticket OR create a new one with ALL required fields
 4. Move the ticket to `in_progress`

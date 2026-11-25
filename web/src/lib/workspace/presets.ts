@@ -25,10 +25,14 @@ export interface LayoutPreset {
 function panelOpts(id: string) {
   const def = PANEL_DEFINITIONS[id];
   if (!def) return {};
+  // Conditional spread, not a direct map: dockview-react's AddPanelOptions
+  // doesn't accept an explicit `undefined` for these under
+  // exactOptionalPropertyTypes, so an unset field on `def` must be omitted
+  // rather than carried through as `key: undefined`.
   return {
-    minimumWidth: def.minWidth,
-    minimumHeight: def.minHeight,
-    renderer: def.renderer as 'onlyWhenVisible' | 'always' | undefined,
+    ...(def.minWidth !== undefined ? { minimumWidth: def.minWidth } : {}),
+    ...(def.minHeight !== undefined ? { minimumHeight: def.minHeight } : {}),
+    ...(def.renderer !== undefined ? { renderer: def.renderer } : {}),
   };
 }
 

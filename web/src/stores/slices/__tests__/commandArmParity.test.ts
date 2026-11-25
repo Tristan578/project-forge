@@ -98,10 +98,43 @@ const ALLOWED_UNDISPATCHED: Record<string, string> = Object.fromEntries(
 interface StoreDispatches {
   /** Command name -> the slice file that dispatches it. */
   names: Map<string, string>;
-  /** Files holding a dispatch whose command name this scanner cannot read. */
+  /**
+   * Every dispatch CALL whose command name this scanner cannot read, as
+   * `file:line <the call as written>`, so the failure names the site rather
+   * than a count.
+   */
   unreadable: string[];
   fileCount: number;
 }
+
+/**
+ * Every dispatch call in a slice, whatever its arguments. The lookbehind keeps
+ * a DEFINITION (`function dispatchSceneCommand(`) out: it is not a call.
+ *
+ * Two call shapes exist in the slices. `dispatchCommand(…)` is the plain one.
+ * `dispatchSceneCommand(<dispatcher>, '<name>', …)` is `sceneSlice`'s
+ * chokepoint for the two scene-replacing commands: it takes the dispatcher
+ * first so it can wrap the engine throw as `EngineDispatchThrewError`
+ * (#10202), and the name is still a literal, one argument in. Routing
+ * `load_scene` / `new_scene` through it removed the only literal
+ * `dispatchCommand('load_scene'` sites in the tree, and a scanner that knew one
+ * shape stopped seeing the slice's two most safety-critical dispatches — while
+ * its "can I read every call" guard, which counted only `dispatchCommand(`,
+ * stayed green and let the reverse-parity check blame the engine commands
+ * instead (#10202 review board, round 2).
+ */
+const DISPATCH_CALL = /(?<!function )\b(?:dispatchCommand|dispatchSceneCommand)\(/g;
+
+/**
+ * The same two shapes, with the command name captured. A match here starts at
+ * the same offset as its `DISPATCH_CALL` match, which is how the two are
+ * paired below.
+ */
+const READABLE_DISPATCH =
+  /(?<!function )\b(?:dispatchCommand\(\s*|dispatchSceneCommand\(\s*[A-Za-z_$][\w$]*\s*,\s*)'([a-z0-9_]+)'/g;
+
+/** The shapes `READABLE_DISPATCH` reads, for the failure message. */
+const READABLE_SHAPES = "`dispatchCommand('<name>'` and `dispatchSceneCommand(<dispatcher>, '<name>'`";
 
 function readStoreDispatches(): StoreDispatches {
   const names = new Map<string, string>();
@@ -110,27 +143,42 @@ function readStoreDispatches(): StoreDispatches {
 
   for (const file of files) {
     const source = readFileSync(join(SLICES_DIR, file), 'utf8');
-    // A dispatch built from a variable is invisible to a literal scan, so the pin
-    // would silently stop covering it. Report rather than under-report.
-    const allCalls = source.match(/dispatchCommand\(/g)?.length ?? 0;
-    const literalCalls = source.match(/dispatchCommand\(\s*'/g)?.length ?? 0;
-    if (literalCalls !== allCalls) {
-      unreadable.push(`${file} (${allCalls - literalCalls} non-literal)`);
-    }
-
-    for (const m of source.matchAll(/dispatchCommand\(\s*'([a-z0-9_]+)'/g)) {
+    const readableAt = new Set<number>();
+    for (const m of source.matchAll(READABLE_DISPATCH)) {
+      readableAt.add(m.index);
       if (!names.has(m[1])) names.set(m[1], file);
+    }
+    // A dispatch built from a variable — or through a wrapper this scanner has
+    // not been taught — is invisible to a literal scan, so the pin would
+    // silently stop covering it. Report EACH such call, by line, rather than
+    // under-report.
+    for (const call of source.matchAll(DISPATCH_CALL)) {
+      if (readableAt.has(call.index)) continue;
+      const line = source.slice(0, call.index).split('\n').length;
+      const lineEnd = source.indexOf('\n', call.index);
+      const asWritten = source.slice(call.index, lineEnd === -1 ? undefined : lineEnd).trim();
+      unreadable.push(`${file}:${line} ${asWritten}`);
     }
   }
   return { names, unreadable, fileCount: files.length };
 }
 
-/** Commands passed at a literal browser dispatch call site outside tests. */
+/**
+ * Commands passed at a literal browser dispatch call site outside tests — the
+ * plain dispatcher spellings, plus `sceneSlice`'s chokepoint shape (see
+ * `DISPATCH_CALL`), which is the only place `load_scene` and `new_scene` are
+ * dispatched from the editor.
+ */
 function readBrowserDispatches(): Set<string> {
   const names = new Set<string>();
   for (const source of productionSources(WEB_SRC_DIR)) {
     for (const match of source.matchAll(
       /\b(?:dispatchCommand|engineDispatch|dispatch)\(\s*['"]([a-z0-9_]+)['"]/g,
+    )) {
+      names.add(match[1]);
+    }
+    for (const match of source.matchAll(
+      /\bdispatchSceneCommand\(\s*[A-Za-z_$][\w$]*\s*,\s*['"]([a-z0-9_]+)['"]/g,
     )) {
       names.add(match[1]);
     }
@@ -178,10 +226,25 @@ describe('store command names have engine dispatch arms', () => {
     it('can read the command name of every dispatch call', () => {
       expect(
         store.unreadable,
-        'This pin only sees string-literal command names. Either inline the name at ' +
-          'the dispatch site or teach this scanner about the new shape — a dispatch it ' +
-          'cannot read is a dispatch it silently stops covering.',
+        `This pin reads a command name only at ${READABLE_SHAPES}. The calls listed ` +
+          'use another shape — a name held in a variable, a new wrapper, a different ' +
+          'argument order. Either write the name as a literal at the call, or teach BOTH ' +
+          '`readStoreDispatches` and `readBrowserDispatches` the new shape. A dispatch ' +
+          'this scanner cannot read is a dispatch it silently stops covering, and the ' +
+          'first symptom would be the reverse-parity check below blaming the engine ' +
+          'commands rather than this file.',
       ).toEqual([]);
+    });
+
+    it('sees the two scene-replacing commands through the sceneSlice chokepoint', () => {
+      // `load_scene` and `new_scene` are dispatched ONLY as
+      // `dispatchSceneCommand(dispatchCommand, '<name>', …)` (#10202). If either
+      // scanner stops reading that shape, the slice's two most safety-critical
+      // dispatches drop out of this pin silently — this is the alarm for that.
+      expect(storeDispatches.get('load_scene')).toBe('sceneSlice.ts');
+      expect(storeDispatches.get('new_scene')).toBe('sceneSlice.ts');
+      expect(browserDispatches.has('load_scene')).toBe(true);
+      expect(browserDispatches.has('new_scene')).toBe(true);
     });
 
     it.each([

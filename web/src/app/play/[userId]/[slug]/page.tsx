@@ -8,8 +8,7 @@ import { GAME_NOT_FOUND_PAGE_TITLE } from '@/lib/play/notFoundDocument';
 import { safeAuth } from '@/lib/auth/safe-auth';
 import { GamePlayer } from '@/components/play/GamePlayer';
 import { Breadcrumbs } from '@/components/marketing/Breadcrumbs';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 /** Asynchronous author/slug route parameters supplied by Next.js. */
 interface PlayPageProps {
@@ -41,6 +40,7 @@ export async function generateMetadata({
 
   return {
     title: `${game.title} - SpawnForge`,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored game description is unset; falls back to generated SEO copy
     description: game.description || `Play ${game.title} on SpawnForge`,
     alternates: { canonical: `/play/${clerkId}/${slug}` },
   };
@@ -87,6 +87,7 @@ export default async function PlayPage({ params }: PlayPageProps) {
     '@context': 'https://schema.org',
     '@type': 'VideoGame',
     name: game.title,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored game description is unset; falls back to generated SEO copy
     description: game.description || `Play ${game.title} on SpawnForge`,
     url: `${SITE_URL}/play/${userId}/${slug}`,
     gamePlatform: 'Web Browser',

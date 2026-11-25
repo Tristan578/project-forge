@@ -72,6 +72,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
           typeof data?.details === 'object' && data.details !== null && typeof (data.details as { message?: unknown }).message === 'string'
             ? (data.details as { message: string }).message
             : null;
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank detail/error message falls through to the next candidate, same as an absent one
         throw new Error(detailMessage || data.error || `HTTP ${res.status}`);
       }
 

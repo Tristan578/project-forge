@@ -16,9 +16,11 @@ async function GET_impl(req: NextRequest) {
 
   try {
     const searchParams = req.nextUrl.searchParams;
-    const query = searchParams.get('q') || '';
+    const query = searchParams.get('q') ?? '';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `sort` query param is the same as an omitted one, not a distinct value
     const sort = searchParams.get('sort') || 'trending';
     const tag = searchParams.get('tag');
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `page` query param is the same as an omitted one, not a distinct value
     const page = parseInt(searchParams.get('page') || '1', 10);
     const { limit } = parsePaginationParams(searchParams);
 
@@ -171,6 +173,7 @@ async function GET_impl(req: NextRequest) {
       description: g.description,
       slug: g.slug,
       authorId: g.authorId,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
       authorName: g.authorName || 'Unknown',
       playCount: g.playCount,
       likeCount: Number(g.likeCount),

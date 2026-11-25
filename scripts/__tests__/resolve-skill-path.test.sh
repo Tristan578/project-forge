@@ -66,6 +66,8 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-agentic-s
 # The audit delegates to a SECOND gate, the Codex CLI surface (#9745), and fails
 # when that gate is missing — so the minimal project carries a stub of it too.
 printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-codex-port.sh"
+# ...and a THIRD gate, the Copilot hook files (#8769), with the same missing-is-a-failure rule.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-copilot-hooks.sh"
 mkdir -p "$audit_project/.claude/skills/frontend" "$audit_project/.agents/skills/frontend" "$audit_project/.codex/skills/design"
 printf '# Fixture validate-\n' > "$audit_project/.agents/skills/frontend/SKILL.md"
 printf '# Fixture validate-\n' > "$audit_project/.codex/skills/design/SKILL.md"
@@ -75,6 +77,8 @@ grep -Fq 'frontend skill exists' "$fixture/audit-positive.log"
 grep -Fq 'design skill exists' "$fixture/audit-positive.log"
 checks=$((checks + 3))
 grep -Fq 'Codex CLI surface in sync with .claude/' "$fixture/audit-positive.log"
+checks=$((checks + 1))
+grep -Fq 'Copilot hook files valid' "$fixture/audit-positive.log"
 checks=$((checks + 1))
 # The Codex gate delegation in its FAILING direction — the reason it exists is
 # that the audit printed PASSED over a stale mirror. A delegation that swallows
@@ -92,6 +96,20 @@ fi
 grep -Fq 'scripts/check-codex-port.sh missing' "$fixture/audit-codex-missing.log"
 checks=$((checks + 1))
 printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-codex-port.sh"
+# The Copilot gate delegation, failing direction and missing gate, for the same reason.
+printf '#!/usr/bin/env bash\nexit 1\n' > "$audit_project/scripts/check-copilot-hooks.sh"
+if bash "$audit_project/.claude/tools/dx-audit.sh" > "$fixture/audit-copilot-invalid.log"; then
+  echo 'Actual audit passed while the Copilot hook gate failed' >&2; exit 1
+fi
+grep -Fq 'Copilot hook files invalid' "$fixture/audit-copilot-invalid.log"
+checks=$((checks + 1))
+rm "$audit_project/scripts/check-copilot-hooks.sh"
+if bash "$audit_project/.claude/tools/dx-audit.sh" > "$fixture/audit-copilot-missing.log"; then
+  echo 'Actual audit passed with no Copilot hook gate at all' >&2; exit 1
+fi
+grep -Fq 'scripts/check-copilot-hooks.sh missing' "$fixture/audit-copilot-missing.log"
+checks=$((checks + 1))
+printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-copilot-hooks.sh"
 # Use a random skill absent from user providers: an installed user frontend
 # is a valid fallback and must never make this negative fixture fail spuriously.
 missing_fixture_skill="audit-$(basename "$fixture")"

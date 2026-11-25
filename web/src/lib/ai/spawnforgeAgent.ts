@@ -28,6 +28,7 @@ import {
   type AnthropicThinkingOption,
 } from '@/lib/ai/models';
 import { buildAnthropicCacheControl, type CacheTtlTier } from '@/lib/ai/cachedContext';
+import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
 import { isCommandAvailable } from '@/lib/config/providers';
 import manifestJson from '@/data/commands.json';
 
@@ -90,7 +91,7 @@ function isAgentAdvertised(cmd: ManifestEntry): boolean {
  * Build AI SDK tool definitions from the MCP command manifest.
  *
  * Filter policy: includes available `:write`-scoped and `query`-category commands.
- * Read-only informational commands are excluded to reduce tool count (295 of 379)
+ * Read-only informational commands are excluded to reduce tool count (299 of 383)
  * and prevent the model from calling informational endpoints when it should be acting.
  *
  * Schemas go through `modelToolSchema`, which withholds the manifest parameters
@@ -147,7 +148,7 @@ export const AGENT_TOOLS = getAgentTools();
  * exactly today's path.
  *
  * Derived from the manifest's `destructive` flag rather than from
- * `requiredScope`: `:write` covers 280 of 379 commands, so scope-gating would
+ * `requiredScope`: `:write` covers 284 of 383 commands, so scope-gating would
  * put an approval prompt in front of every `spawn_entity` in a normal
  * "build me a platformer" turn. A gate that fires on 95% of ordinary edits is
  * a gate users turn off.
@@ -274,7 +275,7 @@ export interface SpawnforgeAgentOptions {
    * as the SDK's default singleton did. Must be a concrete value: the installed
    * SDK has no credential-provider hook, so it cannot refresh mid-stream.
    */
-  anthropicAuthOverride?: { apiKey?: string; authToken?: string };
+  anthropicAuthOverride?: { apiKey?: string | undefined; authToken?: string };
 }
 
 /**
@@ -317,7 +318,17 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
 
   const gatewayModelId = canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat;
   const modelInstance = isDirectBackend
-    ? createAnthropic({ ...(options.anthropicAuthOverride ?? { apiKey: process.env.ANTHROPIC_API_KEY }) }).languageModel(canonicalModel)
+    ? createAnthropic(
+        // omitUndefinedValues: `anthropicAuthOverride.apiKey` admits an
+        // explicit `undefined` (the caller can carry one through from
+        // `resolveAnthropicClientAuth()`), but the vendor
+        // `AnthropicProviderSettings` this feeds doesn't accept the key at
+        // all when its value is undefined — the SDK's own `loadApiKey` then
+        // re-reads `ANTHROPIC_API_KEY` itself, same as an omitted key.
+        omitUndefinedValues(
+          options.anthropicAuthOverride ?? (process.env.ANTHROPIC_API_KEY ? { apiKey: process.env.ANTHROPIC_API_KEY } : {}),
+        ),
+      ).languageModel(canonicalModel)
     : gateway(gatewayModelId);
 
   // Provider options for thinking + effort (Anthropic direct only). Both fields

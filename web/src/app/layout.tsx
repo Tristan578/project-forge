@@ -2,6 +2,7 @@ import { CapabilitiesAuthSync } from '@/components/providers/CapabilitiesAuthSyn
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense, lazy } from "react";
+import type { ComponentProps } from "react";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -151,7 +152,16 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         {hasValidClerkKey ? (
-          <ClerkProvider appearance={{ theme: dark }} afterSignOutUrl="/sign-in">
+          <ClerkProvider
+            // `@clerk/themes`'s `dark` preset types `cssLayerName` as
+            // `string | undefined`; `@clerk/react`'s `BaseTheme` (not
+            // publicly exported, so derived structurally below) types the
+            // same field as plain `string`. Both packages come from Clerk —
+            // this is a vendor-internal type disagreement, not our code, and
+            // there is no narrower fix than this cast.
+            appearance={{ theme: dark as NonNullable<NonNullable<ComponentProps<typeof ClerkProvider>['appearance']>['theme']> }}
+            afterSignOutUrl="/sign-in"
+          >
             <CapabilitiesAuthSync />
             {bodyContent}
           </ClerkProvider>

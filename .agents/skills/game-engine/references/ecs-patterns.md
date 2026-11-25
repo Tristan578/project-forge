@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-SpawnForge uses Bevy 0.18 ECS running as WASM in the browser. All engine state is ECS components. No global mutable state. No direct DOM access from Rust.
+SpawnForge uses Bevy 0.19 ECS running as WASM in the browser. All engine state is ECS components. No global mutable state. No direct DOM access from Rust.
 
 ```
 engine/src/
@@ -179,17 +179,24 @@ Register in `useEngineEvents.ts`.
 ### Step 7: `web/src/lib/chat/handlers/<domain>Handlers.ts`
 
 ```typescript
-export const handlers: Record<string, ToolHandler> = {
-  set_my_component: async (args, { dispatchCommand }) => {
-    const parsed = parseArgs(args, {
-      entityId: { type: 'string', required: true },
-      value: { type: 'number', required: false, default: 1.0 },
-      enabled: { type: 'boolean', required: false, default: true },
-    });
-    if (!parsed.success) return parsed;
+import { z } from 'zod';
+import type { ToolHandler } from './types';
+import { zEntityId, parseArgs } from './types';
 
-    dispatchCommand('set_my_component', parsed.data);
-    return { success: true, message: `Updated my component on ${parsed.data.entityId}` };
+export const myDomainHandlers: Record<string, ToolHandler> = {
+  set_my_component: async (args, { dispatchCommand }) => {
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        value: z.number().default(1.0),
+        enabled: z.boolean().default(true),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    dispatchCommand('set_my_component', p.data);
+    return { success: true, message: `Updated my component on ${p.data.entityId}` };
   },
 };
 ```
@@ -260,7 +267,7 @@ When the component is user-facing and state changes should be undoable:
 - `engine/src/core/entity_factory.rs` — Add arm in `spawn_from_snapshot` if component carries data needed to recreate the entity
 - `engine/src/core/engine_mode.rs` — Add field to `snapshot_scene` query if component should be saved in scene snapshots
 
-## ECS System Limits (Bevy 0.18)
+## ECS System Limits (Bevy 0.19)
 
 | Limit | Value | Workaround |
 |-------|-------|-----------|

@@ -15,10 +15,12 @@
 //      Codex discovers repo skills from `.agents/skills` — and from the project
 //      layer's `.codex/skills`, which this repository does not use — and has no
 //      configurable extra directory (codex-rs core-skills/src/loader.rs). A
-//      symlink would avoid the copy, but this repo is developed on Windows with
-//      `core.symlinks=false`, where a git symlink checks out as a text stub —
-//      the skills would silently not exist for the one platform Codex is
-//      installed on here. Bodies are NOT rewritten: a path like
+//      symlink would avoid the copy, but on a checkout with
+//      `core.symlinks=false` (the Git for Windows default) a git symlink checks
+//      out as a text stub, and the skills would silently not exist there. This
+//      repo requires real symlinks (scripts/check-symlinks.sh, run in CI and at
+//      session start), but the mirror does not depend on that requirement
+//      being met. Bodies are NOT rewritten: a path like
 //      `.claude/rules/x.md` inside a skill is a real path, and rewriting it is
 //      precisely what produced the 143 dead references.
 //   2. `.codex/agents/<name>.toml`  from `.claude/agents/<name>.md`. Codex needs
@@ -65,8 +67,9 @@
 // DESIGN NOTES
 //  * Zero dependencies, like sync.mjs. `git` is used when present, and it
 //    decides four things: WHICH source files are mirrored at all (only tracked
-//    ones — see planSkills), which are symlinks (mode 120000; on Windows those
-//    are text stubs and must be dereferenced by hand), what the executable bit
+//    ones — see planSkills), which are symlinks (mode 120000; on a
+//    `core.symlinks=false` checkout those are text stubs and must be
+//    dereferenced by hand), what the executable bit
 //    should be where the filesystem cannot say (core.fileMode=false), and what
 //    `.codex/config.toml` DECLARES (the committed blob, for MCP parity). With
 //    no repository — the hermetic fixtures — every file on disk is taken.
@@ -272,6 +275,9 @@ function loadManifest() {
   for (const k of ['skills.independent', 'agents.handAuthored', 'agents.droppedFrontmatterKeys', 'geminiAgents.droppedFrontmatterKeys', 'hooks.toolAliases', 'hooks.unsupportedEvents', 'hooks.skipScripts', 'hooks.droppedHandlerKeys']) {
     need(k, isObj, 'an object');
   }
+  // Optional: hook groups whose matcher names tools Codex has no alias for
+  // (the GitHub MCP tools), kept Claude-only with a reason a reader can audit.
+  need('hooks.claudeOnlyMatchers', (v) => v === undefined || (isObj(v) && Object.values(v).every(str)), 'an object of matcher -> non-empty reason, when present');
   need('hooks.patchTimeoutFactor', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
   need('hooks.maxTimeoutSeconds', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
   need('hooks.adapterOverheadSeconds', (v) => Number.isInteger(v) && v >= 2, 'an integer of at least 2');
@@ -495,6 +501,7 @@ function planHooks(m, plan) {
   const out = {};
   const conditions = {};
   const report = { ported: 0, skipped: [], unsupported: [], bothChannels: [] };
+  const claudeOnlyUsed = new Set();
   // Every key on a group or a handler is classified, exactly like events and
   // scripts. `.claude/settings.json` already carries two the first cut of this
   // generator dropped without a word: a group-level `if` on six groups and
@@ -510,6 +517,14 @@ function planHooks(m, plan) {
     for (const group of groups) {
       for (const k of Object.keys(group)) {
         if (!GROUP_KEYS.includes(k)) die(`hooks: ${event} group carries key "${k}", which this generator does not know how to port — classify it in port.mjs`);
+      }
+      // A Claude-only group (port.json hooks.claudeOnlyMatchers) is reported and
+      // left out: mapping its matcher would need a Codex tool name nobody has
+      // verified, and mapMatcher would refuse it anyway.
+      if (supported && Object.hasOwn(h.claudeOnlyMatchers || {}, group.matcher)) {
+        claudeOnlyUsed.add(group.matcher);
+        report.skipped.push(`${event}:[${group.matcher}]`);
+        continue;
       }
       const handlers = [];
       // null = no matcher reaches Codex, so every tool is matched.
@@ -645,6 +660,9 @@ function planHooks(m, plan) {
       entry.hooks = handlers;
       (out[event] ||= []).push(entry);
     }
+  }
+  for (const m of Object.keys(h.claudeOnlyMatchers || {})) {
+    if (!claudeOnlyUsed.has(m)) die(`hooks: port.json hooks.claudeOnlyMatchers names "${m}", which no supported-event group in ${h.source} uses — remove the stale entry`);
   }
   if (report.ported === 0) die('hooks: nothing was ported — refusing to emit an empty hooks.json');
   const doc = {

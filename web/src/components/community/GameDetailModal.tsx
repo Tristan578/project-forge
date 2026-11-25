@@ -33,6 +33,21 @@ interface GameDetail {
   ratingBreakdown: { rating: number; count: number }[];
   /** Public gallery tags. */
   tags: string[];
+  /** How many times this game has been forked. */
+  forkCount: number;
+  /**
+   * The game this one was forked from, when it was. All fields are null and
+   * `unavailable` is true when the original is no longer public, so the
+   * source is credited without exposing a taken-down game (#7858).
+   */
+  forkedFrom: {
+    gameId: string | null;
+    title: string | null;
+    slug: string | null;
+    authorClerkId: string | null;
+    authorName: string | null;
+    unavailable?: boolean;
+  } | null;
   /** Optional playable public page URL. */
   cdnUrl: string | null;
   /** Creation timestamp. */
@@ -178,6 +193,25 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
           <div>
             <h2 id="game-detail-title" className="text-2xl font-bold text-zinc-100">{game?.title ?? (loading ? 'Loading game' : 'Game unavailable')}</h2>
             {game && <p className="text-sm text-zinc-400">by {game.authorName}</p>}
+            {game?.forkedFrom && (
+              <p data-testid="remix-attribution" className="text-xs text-zinc-400 mt-1">
+                {game.forkedFrom.unavailable || !game.forkedFrom.authorClerkId || !game.forkedFrom.slug ? (
+                  'Remixed from a game that is no longer available'
+                ) : (
+                  <>
+                    Remixed from{' '}
+                    {/* The play page is /play/{clerkId}/{slug}; there is no /play/{id}. */}
+                    <a
+                      href={`/play/${encodeURIComponent(game.forkedFrom.authorClerkId)}/${encodeURIComponent(game.forkedFrom.slug)}`}
+                      className="underline hover:text-zinc-200"
+                    >
+                      {game.forkedFrom.title}
+                    </a>{' '}
+                    by {game.forkedFrom.authorName}
+                  </>
+                )}
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -253,7 +287,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-zinc-800 rounded p-3">
               <div className="text-xs text-zinc-400">Rating</div>
               <div className="flex items-center gap-2">
@@ -279,6 +313,13 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
               <div className="text-xs text-zinc-400">Comments</div>
               <div className="text-lg font-semibold text-zinc-100">
                 {game.comments.length}
+              </div>
+            </div>
+            {/* Fifth tile: span both columns on the 2-column mobile grid so it does not sit alone in a half-empty row. */}
+            <div className="col-span-2 md:col-span-1 bg-zinc-800 rounded p-3">
+              <div className="text-xs text-zinc-400">Forks</div>
+              <div className="text-lg font-semibold text-zinc-100">
+                {game.forkCount}
               </div>
             </div>
           </div>

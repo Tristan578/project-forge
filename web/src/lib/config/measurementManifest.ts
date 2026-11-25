@@ -92,10 +92,10 @@ export interface ManifestUserAgentData {
 
 /** Minimal navigator surface the manifest reads. Injectable for tests. */
 export interface ManifestNavigator {
-  userAgent?: string;
-  deviceMemory?: number;
-  gpu?: { requestAdapter: () => Promise<unknown> };
-  userAgentData?: ManifestUserAgentData;
+  userAgent?: string | undefined;
+  deviceMemory?: number | undefined;
+  gpu?: { requestAdapter: () => Promise<unknown> } | undefined;
+  userAgentData?: ManifestUserAgentData | undefined;
 }
 
 /** Minimal window surface the manifest reads. Injectable for tests. */
@@ -394,9 +394,9 @@ export interface BuildManifestOptions {
    */
   browserVersion?: string | Unknown;
   /** Injectable navigator (defaults to the global). */
-  nav?: ManifestNavigator;
+  nav?: ManifestNavigator | undefined;
   /** Injectable window (defaults to the global). */
-  win?: ManifestWindow;
+  win?: ManifestWindow | undefined;
 }
 
 function defaultNavigator(): ManifestNavigator | undefined {
@@ -451,6 +451,7 @@ export function buildMeasurementManifest(options: BuildManifestOptions = {}): Me
     buildSha,
     fixtureChecksum: options.fixtureChecksum ?? UNKNOWN,
     os: parseOs(nav?.userAgent),
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank supplied browser version is unset; falls back to parsing the user agent
     browserVersion: options.browserVersion || parseBrowserVersion(nav?.userAgent),
     gpuDriver: options.gpuDriver ?? UNKNOWN,
     backend: options.backend ?? UNKNOWN,

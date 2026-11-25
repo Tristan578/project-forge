@@ -1,0 +1,95 @@
+{
+  "briefVersion": 1,
+  "id": "idea-score3-v1-endless",
+  "title": "Lantern Yard",
+  "description": "A small walled yard at dusk. Lanterns keep going out as the night deepens, and the keeper relights them for as long as they can keep up. There is no final state, only how long the yard stayed lit.",
+  "projectType": "3d",
+  "completionMode": "endless",
+  "systems": [
+    {
+      "id": "sys-movement",
+      "category": "movement",
+      "type": "walk",
+      "config": { "speed": 5 },
+      "priority": "core",
+      "dependsOn": ["physics"]
+    },
+    {
+      "id": "sys-input",
+      "category": "input",
+      "type": "keyboard",
+      "config": { "interact": "E" },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "id": "sys-camera",
+      "category": "camera",
+      "type": "follow",
+      "config": { "smoothing": 0.1 },
+      "priority": "core",
+      "dependsOn": ["entities"]
+    },
+    {
+      "id": "sys-world",
+      "category": "world",
+      "type": "walled-yard",
+      "config": { "size": "small" },
+      "priority": "core",
+      "dependsOn": []
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene-yard",
+      "name": "Yard",
+      "purpose": "The one yard the keeper tends",
+      "systems": ["movement", "input", "camera", "world"],
+      "entities": [
+        {
+          "id": "ent-keeper",
+          "name": "Keeper",
+          "role": "player",
+          "systems": ["movement", "input"],
+          "appearance": "primitive:capsule"
+        },
+        {
+          "id": "ent-lantern",
+          "name": "Lantern",
+          "role": "interactable",
+          "systems": ["input"],
+          "appearance": "primitive:sphere"
+        },
+        {
+          "id": "ent-post",
+          "name": "LanternPost",
+          "role": "decoration",
+          "systems": [],
+          "appearance": "primitive:cylinder"
+        }
+      ],
+      "transitions": []
+    }
+  ],
+  "assetManifest": [
+    {
+      "id": "asset-lantern",
+      "type": "3d-model",
+      "description": "A small iron lantern with a single glass pane",
+      "entityRef": "Lantern",
+      "styleDirective": "simple shapes, warm glass, soft edges",
+      "priority": "nice-to-have",
+      "fallback": "primitive:sphere"
+    }
+  ],
+  "estimatedScope": "small",
+  "styleDirective": "Soft dusk light over a tidy stone yard",
+  "feelDirective": {
+    "mood": "calm",
+    "pacing": "slow",
+    "weight": "medium",
+    "referenceGames": [],
+    "oneLiner": "Keep the lanterns burning for as long as you can"
+  },
+  "constraints": ["No enemies", "One scene"]
+}

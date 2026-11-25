@@ -12,7 +12,7 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 **Web:** `/frontend`, `/mcp-commands`, `/web-accessibility`, `/shadcn`, `/vercel-react-best-practices`, `/vercel-composition-patterns`, `/vercel-react-view-transitions`
 **Next.js:** `/next-best-practices`, `/next-cache-components`, `/next-upgrade`
 **Testing:** `/testing`, `/playwright-best-practices`, `/tdd`
-**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/env-health-check`, `/changelog-review`, `/deploy-to-vercel`, `/resolve-pr-comments`, `/resolve-all-pr-comments`, `/api-middleware-migrate`, `/autonomous-sprint`
+**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/env-health-check`, `/changelog-review`, `/deploy-to-vercel`, `/resolve-pr-comments`, `/resolve-all-pr-comments`, `/autonomous-sprint`
 **Database:** `/db-migrate`, `/neon-postgres`, `/claimable-postgres`, `/neon-postgres-egress-optimizer`
 **Deployment:** `/deploy-engine` (user-only)
 **Billing:** `/stripe-webhooks` (background, auto-loads on billing edits)
@@ -21,14 +21,31 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 **Review:** `/review-protocol`, `/component-checklist`
 **Vercel:** `/vercel-cli-with-tokens`
 
-## MCP Servers (`.mcp.json` — 7 servers)
+## MCP Servers (`.mcp.json` — 8 servers)
 - `context7` — live library documentation for all 30+ dependencies
 - `neon` — direct Neon Postgres queries (needs `NEON_API_KEY`)
 - `playwright` — browser automation for E2E verification
-- `github` — GitHub API access for PR/issue/Actions operations
+- `github-local` — GitHub API access for PR/issue/Actions operations, for local sessions
+  that export `GITHUB_PERSONAL_ACCESS_TOKEN`. It is not named `github` on purpose: in a
+  claude.ai/code cloud session there is no token, and a server under that name hid the
+  account's authenticated GitHub server, so every write failed (#10389). Cloud sessions
+  use that authenticated server, whose tools are `mcp__github__*`.
 - `sentry` — error tracking, issue search, event analysis
 - `stripe` — payment processing, webhook debugging, test cards
 - `upstash` — Redis cache operations and rate limiting
+- `taskboard` — the local ticket board (launched through a git alias; see `docs/guides/taskboard-sync.md`)
+
+Claude Code defers MCP tools behind Tool Search by default. Only `context7` sets
+`"alwaysLoad": true`, so its tools are in context from session start: it needs no
+credential, only reads documentation, and nearly every session uses it. Every other
+server stays deferred on purpose. `neon`, `sentry`, `stripe` and `upstash` read
+credentials from the environment, and `github-local` needs a GitHub token and can write to
+the repository (push, merge, create and delete files), so loading its tools into every
+context, reviewer seats included, is not worth the saved search. `alwaysLoad` also
+makes startup wait for the server. Add it to another server only if that server needs
+no credential, cannot write, and is needed in nearly every session. The key and its behavior are documented at
+https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral. The key affects
+Claude Code only: Codex does not read `.mcp.json`.
 
 ## Hooks (`.claude/hooks/` — 52 scripts, 20 event types)
 
@@ -54,8 +71,8 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 
 ## Validation Tools (`.claude/tools/`)
 - `validate-rust.sh` — Architecture boundaries, bridge isolation, unsafe audit
-- `validate-frontend.sh` — ESLint, TypeScript, vitest
-- `validate-mcp.sh` — Manifest sync, MCP tests, AI parity audit
+- `validate-frontend.sh` — ESLint, TypeScript (web, packages/ui, apps/docs), vitest
+- `validate-mcp.sh` — Manifest sync, MCP type-check + tests, AI parity audit
 - `validate-tests.sh` — Test inventory, coverage report
 - `validate-docs.sh` — Documentation integrity, version refs
 - `dx-audit.sh` — Cross-IDE consistency, tool health, onboarding check

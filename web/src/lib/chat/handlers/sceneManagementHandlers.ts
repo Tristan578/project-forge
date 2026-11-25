@@ -5,11 +5,14 @@
 
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult, InputBinding } from './types';
-import { parseArgs } from './types';
+import { parseArgs, sceneDispatchThrewResult } from './types';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
-import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
+import { validateSceneFile, type SceneValidation } from '@/lib/scenes/sceneValidation';
+import { COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
 
 /**
  * Read the live scene back out of the engine before a mutation moves off it
@@ -48,14 +51,23 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   validate_scene: async (args): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ json: z.string().min(1).max(50 * 1024 * 1024) }), args);
     if (p.error) return p.error;
+    let verdict: SceneValidation;
     try {
-      if (isValidSceneFile(JSON.parse(p.data.json))) {
-        return { success: true, result: { valid: true } };
-      }
+      verdict = validateSceneFile(JSON.parse(p.data.json));
     } catch {
       return { success: false, error: 'Scene JSON is malformed.' };
     }
-    return { success: false, error: 'Scene validation failed or the engine is unavailable.' };
+    if (verdict.valid) return { success: true, result: { valid: true } };
+    // The engine's reason names what failed (e.g. `Invalid scene file:
+    // missing field `entities` at line 1 column 2`) — relayed RAW, position
+    // included, because that is what lets the assistant fix the scene rather
+    // than guess (#10267). Creator-facing surfaces use `describeSceneRefusal`.
+    return {
+      success: false,
+      error: verdict.reason
+        ? `Scene validation failed: ${verdict.reason}`
+        : 'Scene validation failed or the engine is unavailable.',
+    };
   },
 
   export_scene: async (_args, ctx): Promise<ExecutionResult> => {
@@ -75,15 +87,44 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     // The scene currently on screen is untouched when the load is rejected, so
     // this must not strand the editor: the failure is reported back to the
     // assistant below and saving of the current scene stays enabled (#10056).
-    if (ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false }) === false) {
+    let accepted: boolean;
+    try {
+      accepted = ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false });
+    } catch (error) {
+      // A rejection returns `false`; a THROWN dispatch is re-raised after the
+      // store has locked saving (#10079, #10202). "Try again" is the wrong
+      // advice for a viewport that may be half-applied, so this says reload —
+      // parity with `switch_scene` below. Only the typed engine throw carries
+      // that lockout: anything else set none, so it goes to the executor's
+      // generic catch as the plain failure it is (#10202 review).
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      return sceneDispatchThrewResult('The scene could not be opened', error);
+    }
+    if (accepted === false) {
       return { success: false, error: 'The scene was not loaded. Check its prefab metadata and engine readiness, then try again.' };
     }
     return { success: true, result: { message: 'Scene load triggered' } };
   },
 
   new_scene: async (_args, ctx): Promise<ExecutionResult> => {
-    if (ctx.store.newScene() === false) {
-      return { success: false, error: 'The engine did not accept a new scene. The current scene is unchanged.' };
+    let accepted: boolean;
+    try {
+      accepted = ctx.store.newScene();
+    } catch (error) {
+      // Same as `load_scene`: a thrown `new_scene` can have despawned the
+      // outgoing scene mid-apply, so "unchanged" below would be a lie (#10202)
+      // — and the same narrowing, for the same reason.
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      return sceneDispatchThrewResult('A new scene could not be created', error);
+    }
+    if (accepted === false) {
+      // By cause: a `false` is also "no engine attached yet" and "browser
+      // storage refused the registry write before the dispatch", neither of
+      // which the engine did (#10202 review). Same words as the toolbar.
+      return {
+        success: false,
+        error: `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The current scene is unchanged.`,
+      };
     }
     return { success: true, result: { message: 'New scene created' } };
   },
@@ -168,7 +209,8 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     const { createScene, loadProjectScenes, saveProjectScenes } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes(ctx.store.projectId);
-    const result = createScene(project, p.data.name);
+    // The live type travels into the new scene so it is self-describing (#10227).
+    const result = createScene(project, p.data.name, ctx.store.projectType);
     saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
@@ -227,16 +269,25 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       // outgoing scene's unsaved work, parity with the store's `switchScene`.
       // The persist writes the already-captured outgoing data, not a fresh
       // export of the wrecked engine scene, so it is safe under the lockout
-      // both `loadScene` and `newScene` have by now set.
+      // both `loadScene` and `newScene` have by now set — or, for a throw
+      // that was NOT the engine's (no lockout), simply correct. That one is
+      // rethrown: only the typed engine throw may be reported as an engine
+      // error with saving locked (#10202 review).
       saveProjectScenes(project, ctx.store.projectId);
-      return {
-        success: false,
-        error: `The scene could not be opened due to an engine error (${error instanceof Error ? error.message : String(error)}). Reload the editor before continuing — the viewport can no longer be trusted and saving is locked to protect your stored scene.`,
-      };
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      return sceneDispatchThrewResult('The scene could not be opened', error);
     }
     if (accepted === false) {
       saveProjectScenes(project, ctx.store.projectId);
-      return { success: false, error: 'The engine rejected the scene switch. The current scene is unchanged.' };
+      // The `newScene()` fallback refuses for reasons that are not the
+      // engine's (no engine attached, a storage write refused), so its `false`
+      // is reported by cause; a refused `loadScene` is the engine's answer.
+      return {
+        success: false,
+        error: result.sceneToLoad
+          ? 'The engine rejected the scene switch. The current scene is unchanged.'
+          : `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The scene switch was cancelled, and the current scene is unchanged.`,
+      };
     }
     saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
@@ -413,14 +464,46 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
     await ctx.store.startSceneTransition(p.data.sceneName, {
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition type is not a member of the transition enum; treated as unset
       type: p.data.transitionType || 'fade',
       duration: p.data.duration ?? 500,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition color is unset; falls back to the default swatch
       color: p.data.color || '#000000',
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank direction is not a member of the direction enum; treated as unset
       direction: p.data.direction || 'left',
     });
     return {
       success: true,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition type is not a member of the transition enum; treated as unset
       result: { message: `Loaded scene "${p.data.sceneName}" with ${p.data.transitionType || 'fade'} transition` },
+    };
+  },
+
+  /**
+   * The typed in-app AI operation for the scene's completion mode
+   * (idea.FR-1.OP-04, #9998).
+   *
+   * Deliberately NOT a `z.enum` here: the raw `mode` goes straight to
+   * `setCompletionMode`, the store action the manual picker calls, which owns
+   * validation. So the tool and the picker accept the same values and refuse
+   * the rest with the same words — parity by construction, not by two schemas
+   * agreeing. The change is recorded in the picker's undo history, so a mode
+   * the AI chose is one Undo away, and a later targeted AI edit to entities
+   * never touches it.
+   */
+  set_completion_mode: async (args, ctx): Promise<ExecutionResult> => {
+    const result = ctx.store.setCompletionMode(args.mode);
+    if (!result.ok) return { success: false, error: result.error };
+    const info = COMPLETION_MODE_INFO[result.mode];
+    return {
+      success: true,
+      result: {
+        mode: result.mode,
+        changed: result.changed,
+        message: result.changed
+          ? `Completion mode set to ${info.label}. ${info.description}`
+          : `Completion mode is already ${info.label}.`,
+      },
     };
   },
 
@@ -442,6 +525,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     });
     return {
       success: true,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition type is not a member of the transition enum; treated as unset
       result: { message: `Default transition set to ${p.data.transitionType || 'updated'}` },
     };
   },

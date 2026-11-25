@@ -42,7 +42,8 @@ Run `git diff <base>...HEAD` and read every changed file in full. For each chang
 
 ## Verdict
 
-PASS or FAIL only. ANY finding at ANY severity is a FAIL — there is no "pass with issues". Each
+PASS or FAIL only — there is no "pass with issues". Under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`, a blocker or major
+(a broken, vacuous or missing test of the CHANGED code) fails; a minor is listed but does not. Each
 finding names the file and line, states the defect in one sentence, and says what test (or
 assertion) would close it.
 

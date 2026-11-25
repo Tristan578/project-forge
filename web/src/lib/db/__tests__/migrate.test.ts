@@ -6,6 +6,9 @@ const mockMigrate = vi.fn();
 
 vi.mock('@neondatabase/serverless', () => ({
   neon: mockNeon,
+  // migrate.ts now goes through e2eNeonEndpoint.ts, which imports the driver's
+  // global config object; a factory without it makes vitest throw on access.
+  neonConfig: {},
 }));
 
 vi.mock('drizzle-orm/neon-http', () => ({

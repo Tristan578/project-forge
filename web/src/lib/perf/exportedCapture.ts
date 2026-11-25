@@ -83,9 +83,9 @@ export interface ExportedRunInput {
    * Cache state the driver guarantees (e.g. a fresh browser profile is cold).
    * When omitted, detected from the engine binary's resource timing.
    */
-  declaredCacheState?: CacheState | Unknown;
-  reportId?: string;
-  now?: () => Date;
+  declaredCacheState?: CacheState | Unknown | undefined;
+  reportId?: string | undefined;
+  now?: (() => Date) | undefined;
 }
 
 function gpuDescription(gpu: NonNullable<HarnessState['env']>['gpu']): string | Unknown {

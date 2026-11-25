@@ -45,18 +45,25 @@ vi.mock('@/lib/keys/resolver', () => ({
   ApiKeyError: class extends Error { code: string; constructor(c: string, m: string) { super(m); this.code = c; } },
 }));
 
-vi.mock('@/lib/tokens/pricing', () => ({
-  getTokenCost: vi.fn().mockReturnValue(10),
-  TOKEN_COSTS: {
-    sprite_generation_dalle3: 20,
-    sprite_generation_replicate: 10,
-    sprite_sheet_cost_per_frame: 15,
-    tileset_generation: 50,
-    pixel_art_replicate: 10,
-    pixel_art_openai: 20,
-    localize_cost_per_chunk: 5,
-  },
-}));
+// Spread the actual module: `assertAiAccess`/`createGenerationHandler` reach
+// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
+// via `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return {
+    ...actual,
+    getTokenCost: vi.fn().mockReturnValue(10),
+    TOKEN_COSTS: {
+      sprite_generation_dalle3: 20,
+      sprite_generation_replicate: 10,
+      sprite_sheet_cost_per_frame: 15,
+      tileset_generation: 50,
+      pixel_art_replicate: 10,
+      pixel_art_openai: 20,
+      localize_cost_per_chunk: 5,
+    },
+  };
+});
 
 vi.mock('@/lib/ai/contentSafety', () => ({
   sanitizePrompt: vi.fn((text: string) => ({ safe: true, filtered: text })),
@@ -90,6 +97,14 @@ vi.mock('@/lib/db/client', () => ({
   getNeonSql: vi.fn().mockReturnValue(
     Object.assign(vi.fn(), { transaction: vi.fn().mockResolvedValue([]) }),
   ),
+}));
+
+// Job-ownership binding (#10262) is covered by its own unit tests
+// (jobOwnership.test.ts) and by createGenerationHandler.qstash.test.ts;
+// isolate it here so the mocked `getDb()` above (no `insert`) doesn't
+// silently fail inside `bindProviderJob` on every async route's success path.
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Provider client mocks

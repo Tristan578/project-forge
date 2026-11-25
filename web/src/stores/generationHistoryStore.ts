@@ -17,7 +17,7 @@ export interface HistoryEntry {
   provider: string;
   resultUrl: string;
   createdAt: number;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | undefined;
 }
 
 const STORAGE_KEY = 'forge-generation-history';

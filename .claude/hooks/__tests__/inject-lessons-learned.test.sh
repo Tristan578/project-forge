@@ -28,12 +28,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 FAILURES=0
 
 pass() { echo "ok   $1"; }
+readonly -f pass
 fail() { echo "FAIL $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 # Shared platform contract (#9611): a probe skip is loud, and a failure in CI.
 # shellcheck source=scripts/__tests__/lib/platform.sh
 # shellcheck disable=SC1091  # plain shellcheck (no -x) cannot follow the relative source; -x resolves the directive above
 . "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/__tests__/lib/platform.sh"
 skip() { probe_skip "$1"; }
+readonly -f skip
 
 command -v jq >/dev/null 2>&1 || { echo "FAIL jq is required to run this suite"; exit 1; }
 command -v awk >/dev/null 2>&1 || { echo "FAIL awk is required to run this suite"; exit 1; }
@@ -133,6 +136,7 @@ run() {
   RUN_STATUS=$?
   printf '%s' "$out"
 }
+readonly -f run
 
 assert_contains() {
   local label="$1" hay="$2" needle="$3"
@@ -141,6 +145,7 @@ assert_contains() {
     *) fail "$label (expected to contain: $needle)" ;;
   esac
 }
+readonly -f assert_contains
 
 assert_not_contains() {
   local label="$1" hay="$2" needle="$3"
@@ -149,21 +154,25 @@ assert_not_contains() {
     *) pass "$label" ;;
   esac
 }
+readonly -f assert_not_contains
 
 assert_empty() {
   local label="$1" hay="$2"
   if [ -z "$hay" ]; then pass "$label"; else fail "$label (expected no output, got: ${hay:0:80})"; fi
 }
+readonly -f assert_empty
 
 assert_not_empty() {
   local label="$1" hay="$2"
   if [ -n "$hay" ]; then pass "$label"; else fail "$label (expected some warning, got silence)"; fi
 }
+readonly -f assert_not_empty
 
 assert_status_zero() {
   local label="$1" status="$2"
   if [ "$status" -eq 0 ]; then pass "$label"; else fail "$label (exit $status, want 0)"; fi
 }
+readonly -f assert_status_zero
 
 # --- targeting: **Applies:** ------------------------------------------------
 

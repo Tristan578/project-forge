@@ -57,6 +57,7 @@ export function assertPushAllowed(state: PushGuardState): void {
 
 async function main(): Promise<void> {
   const { neon } = await import('@neondatabase/serverless');
+  const { applyE2eNeonEndpointOverride } = await import('../src/lib/db/e2eNeonEndpoint.ts');
 
   if (!process.env.DATABASE_URL) {
     throw new Error(
@@ -64,6 +65,9 @@ async function main(): Promise<void> {
     );
   }
 
+  // Reaches a per-run CI Postgres through its local Neon-protocol proxy; a
+  // no-op everywhere else (#10161).
+  applyE2eNeonEndpointOverride();
   const sql = neon(process.env.DATABASE_URL);
   const journalTable = (await sql.query(
     "SELECT to_regclass('drizzle.__drizzle_migrations')::text AS table_name",

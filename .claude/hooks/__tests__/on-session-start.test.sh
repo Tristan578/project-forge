@@ -25,17 +25,24 @@ readonly -f bad
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/hooks" "$TMP/tools"
-cp "$HOOK" "$TMP/hooks/on-session-start.sh"
-printf '#!/usr/bin/env bash\necho "STUB-SYNC-FROM-GITHUB-RAN"\n' > "$TMP/hooks/sync-from-github.sh"
-chmod +x "$TMP/hooks/sync-from-github.sh"
+# A repository-shaped layout, so the hook's own relative paths resolve inside
+# $TMP: .claude/hooks (the hook and its libraries), .claude/tools (dx-audit) and
+# scripts/ (check-symlinks.sh, which the hook runs from "$SCRIPT_DIR/../../").
+HK="$TMP/repo/.claude/hooks"
+TL="$TMP/repo/.claude/tools"
+SC="$TMP/repo/scripts"
+readonly HK TL SC
+mkdir -p "$HK" "$TL" "$SC"
+cp "$HOOK" "$HK/on-session-start.sh"
+printf '#!/usr/bin/env bash\necho "STUB-SYNC-FROM-GITHUB-RAN"\n' > "$HK/sync-from-github.sh"
+chmod +x "$HK/sync-from-github.sh"
 
 # The stub. Driven by:
 #   STUB_INSTALLED     1 = tb_check_installed succeeds (default 1)
 #   STUB_API_AVAILABLE 1 = tb_api_available succeeds (default 1)
 #   STUB_AUTO_START    1 = tb_auto_start succeeds (default 1)
 #   STUB_STALE / STUB_ACTIVE_ID / STUB_VALIDATE / STUB_CONSISTENCY  printed text
-cat > "$TMP/hooks/taskboard-state.sh" <<'STUB'
+cat > "$HK/taskboard-state.sh" <<'STUB'
 # full-replacement stub of taskboard-state.sh for on-session-start.test.sh
 TB_API="http://127.0.0.1:0/api"
 tb_check_installed() { [ "${STUB_INSTALLED:-1}" = "1" ]; }
@@ -53,18 +60,30 @@ STUB
 # stub the hook probes at "$SCRIPT_DIR/../tools/dx-audit.sh".
 set_dx() {
   if [ "$1" = absent ]; then
-    rm -f "$TMP/tools/dx-audit.sh"
+    rm -f "$TL/dx-audit.sh"
   else
-    printf '#!/usr/bin/env bash\nexit %s\n' "$1" > "$TMP/tools/dx-audit.sh"
-    chmod +x "$TMP/tools/dx-audit.sh"
+    printf '#!/usr/bin/env bash\nexit %s\n' "$1" > "$TL/dx-audit.sh"
+    chmod +x "$TL/dx-audit.sh"
   fi
 }
 readonly -f set_dx
 
+# set_symlinks <exit-code|absent> [output] — install (or remove) the stub
+# scripts/check-symlinks.sh the hook runs at "$SCRIPT_DIR/../../scripts/".
+set_symlinks() {
+  if [ "$1" = absent ]; then
+    rm -f "$SC/check-symlinks.sh"
+  else
+    printf '#!/usr/bin/env bash\necho "%s"\nexit %s\n' "${2:-check-symlinks: 25 symlinks OK}" "$1" > "$SC/check-symlinks.sh"
+    chmod +x "$SC/check-symlinks.sh"
+  fi
+}
+readonly -f set_symlinks
+
 # run_hook [VAR=value ...] — prints "<exit>|<output>".
 run_hook() {
   local out rc
-  out="$(env "$@" bash "$TMP/hooks/on-session-start.sh" </dev/null 2>&1)"
+  out="$(env "$@" bash "$HK/on-session-start.sh" </dev/null 2>&1)"
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
@@ -89,13 +108,40 @@ expect() {
 }
 readonly -f expect
 
+# assert_no_raw_start <case> <result> — the hook's EMITTED guidance must never
+# tell an operator to run the taskboard binary by hand (#9995 / #10291): a raw
+# `taskboard start` lets the binary fall back to its own default database path,
+# which is the divergence the runtime launcher exists to close. This is an
+# occurrence check on the live output (a whole-word `taskboard start`, whatever
+# precedes it), not a containment check on the hook's source, so a comment or a
+# re-worded banner cannot satisfy it (lessons-learned #16). The launcher line
+# `taskboard-launch.mjs start` never matches: its hyphen breaks the word.
+assert_no_raw_start() {
+  local desc="$1" res="$2" out="${2#*|}"
+  if grep -qE '(^|[^-[:alnum:]_])taskboard start' <<<"$out"; then
+    bad "$desc — emitted guidance still prescribes a raw 'taskboard start': $out"
+  else
+    ok "$desc"
+  fi
+}
+readonly -f assert_no_raw_start
+
 echo "=== on-session-start.sh tests ==="
 set_dx absent
+set_symlinks 0
 
 # ---- 1. not installed -> the install banner and exit 1 -----------------------
+res="$(run_hook STUB_INSTALLED=0)"
 expect "1. taskboard not installed prints the install banner and exits 1" \
-  "$(run_hook STUB_INSTALLED=0)" 1 \
+  "$res" 1 \
   "TASKBOARD NOT INSTALLED" "MANDATORY: Install taskboard" "~TASKBOARD STATUS" "~STUB-SYNC-FROM-GITHUB-RAN"
+# `go install github.com/tcarac/taskboard@latest` fails: v0.6.0 has no main
+# package at the module root, and cmd/taskboard's `//go:embed web/dist` names a
+# directory the module does not ship. The banner must not prescribe it, and it
+# must name the TASKBOARD_BIN override the install check honours.
+expect "1b. the install banner never prescribes the broken 'go install' and names TASKBOARD_BIN" \
+  "$res" 1 \
+  "~go install github.com/tcarac/taskboard" "https://github.com/tcarac/taskboard/releases" "TASKBOARD_BIN"
 
 # ---- 2. installed and running -> the whole status flow, exit 0 ---------------
 res="$(run_hook)"
@@ -110,9 +156,18 @@ expect "2e. no DX line when tools/dx-audit.sh is absent" "$res" 0 "~DX AUDIT"
 expect "3. server down + auto-start succeeds continues to the status flow" \
   "$(run_hook STUB_API_AVAILABLE=0 STUB_AUTO_START=1)" 0 \
   "Server not running" "STUB-AUTO-START-CALLED" "Server started on http://localhost:3010" "TASKBOARD STATUS"
+res="$(run_hook STUB_API_AVAILABLE=0 STUB_AUTO_START=0)"
 expect "3b. server down + auto-start fails prints the FAILED TO START banner and exits 0 without the status flow" \
-  "$(run_hook STUB_API_AVAILABLE=0 STUB_AUTO_START=0)" 0 \
+  "$res" 0 \
   "TASKBOARD FAILED TO START" "~TASKBOARD STATUS" "~STUB-SYNC-FROM-GITHUB-RAN"
+expect "3c. the FAILED TO START banner's manual remedy is the runtime launcher" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs start"
+assert_no_raw_start "3d. the FAILED TO START banner never prescribes a raw 'taskboard start'" "$res"
+# On a new machine `start` refuses (no database), so the banner must also give
+# the first-run path. tb_auto_start discards the launcher's stdout, so this
+# banner is the only place SessionStart can put that remedy in front of anyone.
+expect "3e. the FAILED TO START banner gives the first-run 'init' and the pull that follows it" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs init" "python3 .claude/hooks/github_project_sync.py pull"
 
 # ---- 4. stale, active-with-issues, consistency reports -----------------------
 expect "4. stale in-progress tickets are reported with an ACTION REQUIRED line" \
@@ -136,6 +191,71 @@ expect "5. a failing tools/dx-audit.sh adds the DX AUDIT line and the hook still
 set_dx 0
 expect "5b. a passing tools/dx-audit.sh adds nothing" "$(run_hook)" 0 "~DX AUDIT"
 set_dx absent
+
+# ---- 7. symlink check: runs first, warns loudly, never changes the exit ------
+# Symlinks are required (skills behind a text stub do not load), so a failing
+# check prints its own report under a banner. It must run BEFORE the taskboard
+# install check, whose failure exits early.
+expect "7. a passing check-symlinks.sh adds nothing" "$(run_hook)" 0 "~SYMLINKS ARE BROKEN"
+set_symlinks 1 "STUB-SYMLINK-REPORT .claude/skills/tdd"
+expect "7b. a failing check-symlinks.sh prints the banner and its report, and the hook still exits 0" \
+  "$(run_hook)" 0 "SYMLINKS ARE BROKEN" "STUB-SYMLINK-REPORT .claude/skills/tdd" "TASKBOARD STATUS"
+expect "7c. the symlink report appears even when the taskboard install check exits early" \
+  "$(run_hook STUB_INSTALLED=0)" 1 "SYMLINKS ARE BROKEN" "TASKBOARD NOT INSTALLED"
+set_symlinks absent
+expect "7d. a missing scripts/check-symlinks.sh is reported, not skipped" \
+  "$(run_hook)" 0 "SYMLINKS ARE BROKEN" "check-symlinks.sh is missing"
+set_symlinks 0
+
+# ---- 6. the REAL install check honours TASKBOARD_BIN --------------------------
+# Every case above runs against a stub library. This one sources the real
+# taskboard-state.sh, from a temp copy so its "../taskboard" sibling candidate
+# points inside $TMP, and reads which binary tb_check_installed settled on.
+# taskboard_runtime.binary() tries TASKBOARD_BIN first, so the install check
+# must too, or a binary off PATH reads as "not installed" while the launcher
+# would start it. The assertion is EQUALITY with the override, not success:
+# another candidate on the host (PATH, /usr/local/bin) could make
+# tb_check_installed succeed without the override being read at all.
+#
+# Precedence, not just membership: an executable is also planted at the
+# library's "$_TB_PROJECT_ROOT/../taskboard/taskboard" sibling candidate
+# ($TMP/taskboard/taskboard, next to $TMP/real-repo). With TASKBOARD_BIN anywhere
+# but FIRST in the candidate list, that sibling wins and case 6 goes red; 6c
+# proves the sibling really is a live competitor, so 6 cannot pass vacuously.
+REAL_LIB_DIR="$TMP/real-repo/.claude/hooks"
+mkdir -p "$REAL_LIB_DIR" "$TMP/custom-bin" "$TMP/taskboard"
+cp "$HERE/../taskboard-state.sh" "$REAL_LIB_DIR/taskboard-state.sh"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/custom-bin/my-taskboard"
+chmod +x "$TMP/custom-bin/my-taskboard"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/taskboard/taskboard"
+chmod +x "$TMP/taskboard/taskboard"
+
+# resolved_bin <TASKBOARD_BIN value> - prints "<tb_check_installed exit>|<TB_BIN>".
+resolved_bin() {
+  # shellcheck disable=SC2016  # expanded by the child bash, which sources the library first
+  TASKBOARD_BIN="$1" bash -c '. "$1"; tb_check_installed; printf "%s|%s" "$?" "$TB_BIN"' _ "$REAL_LIB_DIR/taskboard-state.sh" 2>/dev/null
+}
+readonly -f resolved_bin
+
+res="$(resolved_bin "$TMP/custom-bin/my-taskboard")"
+if [ "$res" = "0|$TMP/custom-bin/my-taskboard" ]; then
+  ok "6. tb_check_installed selects the binary TASKBOARD_BIN names, ahead of the ../taskboard sibling"
+else
+  bad "6. TASKBOARD_BIN=$TMP/custom-bin/my-taskboard should be selected ahead of $TMP/taskboard/taskboard, got '$res'"
+fi
+res="$(resolved_bin "$TMP/custom-bin/absent-taskboard")"
+if [ "${res#*|}" != "$TMP/custom-bin/absent-taskboard" ]; then
+  ok "6b. a TASKBOARD_BIN that names no executable is not selected"
+else
+  bad "6b. a missing TASKBOARD_BIN was selected anyway: '$res'"
+fi
+res="$(resolved_bin "")"
+# The library does not normalise the path, so TB_BIN keeps the "../".
+if [ "$res" = "0|$TMP/real-repo/../taskboard/taskboard" ]; then
+  ok "6c. with TASKBOARD_BIN unset the planted ../taskboard sibling is selected (the precedence fixture is live)"
+else
+  bad "6c. the planted sibling $TMP/taskboard/taskboard should win when TASKBOARD_BIN is unset, got '$res'"
+fi
 
 echo
 echo "on-session-start.test.sh: $pass passed, $fail failed"

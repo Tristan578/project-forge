@@ -267,7 +267,7 @@ describe('AudioInspector', () => {
     // they can still make their pitch — but `title` is unreachable by keyboard,
     // so the requirement has to be in the accessible name.
     mockEditorStore();
-    useUserStore.setState({ tier: 'starter' });
+    useUserStore.setState({ tier: 'starter' , profileLoaded: true });
     render(<AudioInspector />);
     expect(
       screen.getByRole('button', { name: 'Generate sound with AI — requires Starter tier' })
@@ -279,11 +279,52 @@ describe('AudioInspector', () => {
 
   it('drops the tier clause once the tier actually allows it', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     render(<AudioInspector />);
     expect(
       screen.getByRole('button', { name: 'Generate sound with AI' })
     ).not.toHaveAttribute('aria-disabled');
+  });
+
+  // #7715 — a starter account holding spendable trial tokens reads as
+  // hobbyist through `effectiveTier`, which is exactly the tier both
+  // generate buttons require, so the tier clause must drop for it too.
+  it('drops the tier clause for a starter account with spendable trial tokens', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter', spendableTokens: 50 , profileLoaded: true });
+    render(<AudioInspector />);
+    const sound = screen.getByRole('button', { name: 'Generate sound with AI' });
+    const music = screen.getByRole('button', { name: 'Generate music with AI' });
+    expect(sound).not.toHaveAttribute('aria-disabled');
+    expect(music).not.toHaveAttribute('aria-disabled');
+    expect(sound).not.toHaveAccessibleName(/requires/);
+    expect(music).not.toHaveAccessibleName(/requires/);
+  });
+
+  // Companion case: once the trial balance is spent, the same account is
+  // gated exactly as any other starter account.
+  it('keeps the tier clause for a starter account with no spendable tokens', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter', spendableTokens: 0 , profileLoaded: true });
+    render(<AudioInspector />);
+    expect(
+      screen.getByRole('button', { name: 'Generate sound with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Generate music with AI — requires Starter tier' })
+    ).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  // #7715 review round 2 — before /api/user/profile resolves, `tier`/
+  // `spendableTokens` read their store defaults ('starter'/0), which is
+  // indistinguishable from "no trial access". The tier clause must not flash
+  // for that one render.
+  it('does not show the tier clause while the profile is still loading', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: false });
+    render(<AudioInspector />);
+    expect(screen.getByRole('button', { name: 'Generate sound with AI' })).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByRole('button', { name: 'Generate music with AI' })).not.toHaveAttribute('aria-disabled');
   });
 });
 
@@ -298,7 +339,7 @@ describe('AudioInspector music gate (#9117)', () => {
 
   it('gates the Sound button when NEITHER sfx nor voice can run', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'sfx-generation' || featureId === 'voice-generation'
         ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
@@ -318,7 +359,7 @@ describe('AudioInspector music gate (#9117)', () => {
   // impossible to exercise (#9725 p8).
   it('keeps the Sound button open while voice is still available', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'sfx-generation'
         ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
@@ -338,7 +379,7 @@ describe('AudioInspector music gate (#9117)', () => {
   // to a disabled amber badge when the body landed (#9725 p8).
   it('does not present a ready button while the gate is still loading', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation(() => ({
       blocked: false, reason: undefined, loading: true, unprovisionable: false, byokConfigurable: false,
     }));
@@ -352,7 +393,7 @@ describe('AudioInspector music gate (#9117)', () => {
 
   it('disables the Music button with the reason in its name and a distinct Unavailable badge, and never opens the dialog', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     // Both buttons ask the gate for their own capability; only music is blocked here.
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
@@ -392,7 +433,7 @@ describe('AudioInspector music gate (#9117)', () => {
 
   it('keeps a merely unconfigured capability clickable and opens its dialog', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'sfx-generation' || featureId === 'voice-generation' ? UNCONFIGURED : OPEN,
     );
@@ -411,7 +452,7 @@ describe('AudioInspector music gate (#9117)', () => {
   // and Settings is offered — #9725 p7, reintroduced silently.
   it('keeps a merely unconfigured MUSIC capability clickable and opens its dialog', () => {
     mockEditorStore();
-    useUserStore.setState({ tier: 'creator' });
+    useUserStore.setState({ tier: 'creator' , profileLoaded: true });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
         ? { ...UNCONFIGURED, reason: 'Configure an ElevenLabs API key in Settings to enable Music Generation.' }
@@ -438,7 +479,7 @@ describe('AudioInspector music gate (#9117)', () => {
     'shows the tier lock, not an Unavailable badge, when a tier-locked %s capability is merely unconfigured',
     (which) => {
       mockEditorStore();
-      useUserStore.setState({ tier: 'starter' });
+      useUserStore.setState({ tier: 'starter' , profileLoaded: true });
       vi.mocked(useGenerationGate).mockImplementation(() => ({
         blocked: true,
         reason: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.',

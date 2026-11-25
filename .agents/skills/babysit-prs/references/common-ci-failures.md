@@ -51,7 +51,7 @@ cd web && npx tsc --noEmit 2>&1 | head -60
 
 **Root cause:** `jsdom` environment leaves open handles (HTTP connections, timers) that prevent process exit.
 
-**Fix already in place:** CI uses `timeout 600 npx vitest run --pool=threads --coverage` with exit 124 treated as warning in `quality-gates.yml`. If you see this fail:
+**Fix already in place:** `quality-gates.yml` runs `timeout 600 npx vitest run --coverage` and adjudicates the exit code with `scripts/check-vitest-exit.sh`, which swallows a timeout only when the output shows a green summary AND the coverage-report marker (read that script's header for the exact guarantee). If you see this fail:
 - Check `vitest.config.ts` — ensure `pool: 'threads'` is set
 - Ensure tests that use `fetch` mock it properly (don't leave real requests open)
 - Add `afterEach(() => vi.restoreAllMocks())` to test files using timers
@@ -111,7 +111,7 @@ gh run view <RUN_ID> --log-failed | grep "Missing\|CLERK\|DATABASE\|STRIPE"
 
 **Fix:**
 ```bash
-cd web && npm install   # Regenerates package-lock.json
+cd "$(git rev-parse --show-toplevel)" && npm install   # single root lockfile — there is no web/package-lock.json
 git add package-lock.json
 git commit -m "chore: regenerate lockfile"
 ```
@@ -122,7 +122,7 @@ git commit -m "chore: regenerate lockfile"
 
 ## 7. Sentry Comment Blocking PR Review
 
-**Symptom:** PR has Sentry "Bug prediction" or "Security" comment that hasn't been responded to. CI "Sentry comment check" job fails.
+**Symptom:** PR has an unanswered Sentry (Seer) "Bug prediction" or "Security" comment.
 
 **Process:**
 1. Read the Sentry comment carefully
@@ -144,13 +144,9 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | select(.user.log
 
 **Symptom:** `download-artifact` step fails with `Unable to find any artifacts for the associated workflow`.
 
-**Root cause:** `upload-artifact@v4` and `download-artifact@v3` (or vice versa) — major versions must match.
+**Root cause:** Usually a pre-v4 action (`@v3` or older) on one side — that format is incompatible with v4+. From v4 on, the artifact format is cross-compatible, so the two actions do NOT need to share a major.
 
-**Fix:** In `.github/workflows/*.yml`, ensure both actions use the same major version:
-```yaml
-- uses: actions/upload-artifact@v4     # Upload
-- uses: actions/download-artifact@v4   # Download — must match!
-```
+**Fix:** Pin both to a Node24-era major (the tree runs `upload-artifact@v7` + `download-artifact@v8`, SHA-pinned). Never pin to a major still on the removed Node20 runtime. See `.claude/rules/gotchas-build-ci.md`.
 
 ---
 
@@ -160,17 +156,7 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | select(.user.log
 
 **Root cause:** GitHub Actions path filters cause jobs to be skipped. The gate job depends on skipped jobs and never gets a signal to run.
 
-**Fix:** The gate job in `quality-gates.yml` must use `if: always()` and check the results of dependent jobs:
-```yaml
-gate:
-  needs: [lint, test, typecheck]
-  if: always()
-  runs-on: ubuntu-latest
-  steps:
-    - name: Check all jobs passed
-      run: |
-        if [[ "${{ needs.lint.result }}" != "success" ]]; then exit 1; fi
-```
+**Fix:** A job that must run after skippable dependencies needs `if: always()` AND an explicit `.result` check for every job in its `needs:` — `always()` alone removes the implicit success lock. See lessons-learned #4 and `.claude/rules/gotchas-build-ci.md`.
 
 ---
 

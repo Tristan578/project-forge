@@ -65,6 +65,7 @@ pub(super) mod scan {
         ("core/entity_factory.rs", include_str!("../entity_factory.rs")),
         ("core/game_camera.rs", include_str!("../game_camera.rs")),
         ("core/reparent.rs", include_str!("../reparent.rs")),
+        ("core/simulation_clock.rs", include_str!("../simulation_clock.rs")),
     ];
 
     /// Where systems are registered. `bridge/mod.rs` carries almost all of
@@ -77,6 +78,9 @@ pub(super) mod scan {
         ("core/snap.rs", include_str!("../snap.rs")),
         ("core/physics.rs", include_str!("../physics.rs")),
         ("core/physics_2d_sim.rs", include_str!("../physics_2d_sim.rs")),
+        // `SimulationClockPlugin` (#10007) registers its own drain in `First`;
+        // `bridge/mod.rs` adds the plugin unconditionally, in both builds.
+        ("core/simulation_clock.rs", include_str!("../simulation_clock.rs")),
     ];
 
     pub const BRIDGE_MOD: &str = include_str!("../../bridge/mod.rs");
@@ -891,6 +895,16 @@ app.add_systems(Update, runtime_call);
         assert!(
             pushes.iter().any(|(f, q)| f == "apply_scene_load" && q == "custom_wgsl_source_updates"),
             "the scan no longer sees apply_scene_load push custom_wgsl_source_updates — the producer model is broken: {pushes:?}"
+        );
+        // #10227: the loader also hands the scene file's `metadata.projectType`
+        // to the project-type queue, through the same direct `.push(` shape so
+        // this scan sees it; a `pending.queue_*(..)` helper call is invisible
+        // to `pushed_fields` and would hide the producer from the orphan check
+        // below. The drain (`apply_project_type_changes`) is always-active, so
+        // the pair must be seen AND must not be orphaned.
+        assert!(
+            pushes.iter().any(|(f, q)| f == "apply_scene_load" && q == "set_project_type_requests"),
+            "the scan no longer sees apply_scene_load push set_project_type_requests (#10227) — a helper call hides the producer: {pushes:?}"
         );
         let orphaned: Vec<&(String, String)> = pushes
             .iter()

@@ -88,7 +88,7 @@
       "args": ["-y", "@playwright/mcp@latest"],
       "trust": false
     },
-    "github": {
+    "github-local": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "trust": false

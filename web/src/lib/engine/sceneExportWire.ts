@@ -43,7 +43,7 @@ export interface SceneExportedDetail {
    * tool) **and** when the running engine binary predates PF-1103 — the two are
    * indistinguishable on the wire, which is exactly why absence means "accept".
    */
-  requestId?: string;
+  requestId?: string | undefined;
 }
 
 /**

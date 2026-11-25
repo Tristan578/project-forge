@@ -1,4 +1,4 @@
-/** Scene-wide lighting, environment, post-processing, quality and bridge-tool settings. */
+/** Scene-wide completion mode, lighting, environment, post-processing, quality and bridge-tool settings. */
 'use client';
 
 import { useCallback, useId, useRef, useState } from 'react';
@@ -10,6 +10,7 @@ import { SceneStatistics } from './SceneStatistics';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
 import { BridgeToolsSection } from './BridgeToolsSection';
+import { CompletionModeSection } from './CompletionModeSection';
 
 /** Visible tab text, reused as the name of the tab's slider group. */
 const GRADING_SECTION_LABELS = {
@@ -112,8 +113,13 @@ export function SceneSettings() {
 
   return (
     <div className="space-y-4" data-testid="scene-settings">
+      {/* Completion mode (#9998) — the scene-wide rule for how the game ends. */}
+      <CompletionModeSection />
+
       {/* Scene Statistics */}
-      <SceneStatistics />
+      <div className="border-t border-zinc-800 pt-4">
+        <SceneStatistics />
+      </div>
 
       {/* Quality Preset */}
       <div role="group" aria-labelledby={fieldId('quality-heading')} className="border-t border-zinc-800 pt-4">
@@ -244,6 +250,7 @@ export function SceneSettings() {
             <label htmlFor={fieldId('skybox')} className="w-20 shrink-0 text-xs text-zinc-400">Skybox<InfoTooltip term="skybox" /></label>
             <select
               id={fieldId('skybox')}
+              // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank skybox preset is not a member of the preset enum; treated as unset
               value={environment.skyboxAssetId ? '__custom__' : (environment.skyboxPreset || 'none')}
               onChange={(e) => {
                 const value = e.target.value;
@@ -269,6 +276,7 @@ export function SceneSettings() {
           </div>
 
           {/* Skybox Brightness (shown when skybox active) */}
+          {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is a skybox configured at all); ?? cannot substitute this OR */}
           {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label htmlFor={fieldId('skybox-brightness')} className="w-20 shrink-0 text-xs text-zinc-400">Brightness<InfoTooltip term="skyboxBrightness" /></label>
@@ -289,6 +297,7 @@ export function SceneSettings() {
           )}
 
           {/* IBL Intensity (shown when skybox active) */}
+          {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is a skybox configured at all); ?? cannot substitute this OR */}
           {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label htmlFor={fieldId('ibl-intensity')} className="w-20 shrink-0 text-xs text-zinc-400">IBL<InfoTooltip term="ibl" /></label>
@@ -309,6 +318,7 @@ export function SceneSettings() {
           )}
 
           {/* IBL Rotation (shown when skybox active) */}
+          {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is a skybox configured at all); ?? cannot substitute this OR */}
           {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label htmlFor={fieldId('ibl-rotation')} className="w-20 shrink-0 text-xs text-zinc-400">Rotation<InfoTooltip term="skyboxRotation" /></label>

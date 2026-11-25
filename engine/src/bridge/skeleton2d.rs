@@ -955,7 +955,7 @@ pub(super) fn apply_vertex_skinning_2d(
             &world_xforms.transforms,
         );
 
-        if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+        if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
             // Mutate in-place if the attribute already exists to avoid per-frame realloc.
             if let Some(positions) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
                 if let bevy::mesh::VertexAttributeValues::Float32x3(ref mut verts) = positions {

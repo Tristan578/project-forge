@@ -5,11 +5,11 @@ description: Validate SpawnForge production environments — Vercel deployments,
 
 # Environment Health Check
 
-You are running a systematic health check across all SpawnForge production environments. This skill exists because silent infrastructure failures (like duplicate YAML keys breaking CD for 21+ hours — Lesson #80) are catastrophic when customers are live.
+You are running a systematic health check across all SpawnForge production environments. This skill exists because silent infrastructure failures (like duplicate YAML keys breaking CD for 21+ hours) are catastrophic when customers are live.
 
 ## When to Run
 
-- At the start of every session (triggered by SessionStart hook if stale)
+- At session start when a silent breakage is suspected
 - After merging PRs to main (verify CD triggered)
 - After any infrastructure change (workflow files, Vercel config, env vars)
 - When the user reports something isn't working in production
@@ -27,7 +27,7 @@ gh run list --workflow=cd.yml --branch main --limit 3
 ```
 
 **Evaluate:**
-- If the latest run has `0s` duration and `failure` → **CRITICAL: workflow file error** (like Lesson #80)
+- If the latest run has `0s` duration and `failure` → **CRITICAL: workflow file error** (the duplicate-YAML-key failure above)
 - If the latest run failed after >0s → investigate with `gh run view <ID> --log-failed`
 - If no runs in the last 24h → CD may not be triggering on push
 
@@ -245,14 +245,6 @@ echo "Production is $COMMITS_BEHIND commits behind main"
 
 ### Issues Found
 - [description of any failures with recommended action]
-```
-
-## After Running
-
-Update the timestamp so the SessionStart hook knows:
-
-```bash
-date +%s > "$(git rev-parse --show-toplevel)/.claude/.env-health-last-check"
 ```
 
 ## Important Rules

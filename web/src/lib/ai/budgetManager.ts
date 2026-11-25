@@ -58,7 +58,7 @@ export class AIBudgetManager {
   private readonly ceiling: number;
   private committedSpend: number = 0;
   private reservations: Map<string, ReservationEntry> = new Map();
-  private readonly onWarning?: BudgetWarningCallback;
+  private readonly onWarning?: BudgetWarningCallback | undefined;
   private warnedAt80 = false;
   private warnedAt95 = false;
 

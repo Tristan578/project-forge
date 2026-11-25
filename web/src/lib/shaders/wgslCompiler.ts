@@ -201,6 +201,7 @@ function generateNodeCode(node: ShaderNode, edges: ShaderEdge[], ctx: CompilerCo
     if (edge) {
       // Use connected value
       const varName = ctx.varMap.get(`${edge.source}:${edge.sourceHandle}`);
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- no connected graph edge yields a blank variable name, which must resolve to the input's default value
       inputs[input.id] = varName || getDefaultValue(input.type, input.defaultValue);
     } else {
       // Use default value
@@ -516,6 +517,7 @@ function generateOutputCode(outputNode: ShaderNode, edges: ShaderEdge[], ctx: Co
   def.inputs.forEach((input) => {
     const edge = edges.find((e) => e.target === outputNode.id && e.targetHandle === input.id);
     const value = edge
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- no connected graph edge yields a blank variable name, which must resolve to the input's default value
       ? ctx.varMap.get(`${edge.source}:${edge.sourceHandle}`) || getDefaultValue(input.type, input.defaultValue)
       : getDefaultValue(input.type, input.defaultValue);
 

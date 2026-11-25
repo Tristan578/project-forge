@@ -18,7 +18,7 @@ Monitor open pull requests for CI failures and review comments (Sentry, Copilot,
 
 ## Process
 
-Begin and end each PR with `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <number> -Json`. Exit `0` is the only readiness signal. Exit `1` means blockers remain; exit `2` means safety could not be established. Results apply only to their reported head and main SHAs, so rerun after every push, rebase, branch update, or review.
+Begin and end each PR with `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <number> -Json`. Exit `0` is the only readiness signal. Exit `1` means blockers remain; exit `2` means safety could not be established. Results apply only to their reported head and main SHAs, so rerun after every push, rebase, branch update, or review. Where `pwsh` or GitHub GraphQL is unavailable (a Claude Code cloud session has neither), the audit cannot run; `.claude/hooks/require-pr-ready.sh` then blocks marking a PR ready, and posting a board PASS for it, until GitHub shows every review thread resolved, no failed or pending check on the head and no merge conflict (#10328). It covers those three facts only, not the audit's other checks.
 
 ### Step 1: Discover PRs
 
@@ -103,13 +103,13 @@ Every reply MUST fall into exactly one of these four outcomes. There is no fifth
 | Outcome | When | Reply Template | Requires |
 |---------|------|----------------|----------|
 | **Fixed** | Bug is valid and fixed in this PR | "Fixed in `abc1234`. [description]" | Commit SHA |
-| **Deferred** | Bug is valid but out of scope | "Valid bug. Tracked as **PF-XXX** — [title]." | PF-ticket (create FIRST) |
+| **Deferred** | Bug is valid but out of scope | "Valid bug. Tracked in #NNNN — [title]." | GitHub issue (create FIRST) |
 | **False positive** | Bug report is incorrect | "False positive — [specific technical reason]" | Evidence |
 | **Already addressed** | Fixed in a prior commit | "Already addressed in `abc1234`." | Commit SHA |
 
-**There is no "out of scope" without a ticket. There is no "follow-up" without a PF-number.**
+**There is no "out of scope" without a ticket. There is no "follow-up" without a GitHub issue number.**
 
-### Banned Phrases (require a PF-ticket before use)
+### Banned Phrases (require a GitHub issue before use)
 
 Before writing ANY reply, scan your draft for these patterns. If present, you MUST create a ticket first:
 
@@ -171,7 +171,7 @@ Common false positives from automated reviewers:
 - Always run the quick validation suite before pushing
 - If multiple PRs need the same fix, fix on the earliest branch and note in others
 - **ALWAYS reply to comments** — even false positives need a reply so reviewers know they were seen
-- **EVERY reply must contain one of:** a commit SHA, a PF-ticket number, or a technical false-positive explanation
+- **EVERY reply must contain one of:** a commit SHA, a GitHub issue number (`#NNNN`), or a technical false-positive explanation
 - **Self-check before posting:** Re-read your reply. Does it promise, imply, or conditionally suggest future work? If yes, where's the ticket? No ticket = rewrite the reply.
 
 ## Scripts

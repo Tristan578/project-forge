@@ -36,6 +36,7 @@ import {
 } from '@/lib/generate/pollProviderStatus';
 import { updateJobStatusByProviderJob } from '@/lib/generate/jobRecord';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
@@ -126,7 +127,7 @@ async function POST_impl(request: NextRequest): Promise<NextResponse> {
   // Resolve the same provider key the user's own status route would use.
   let apiKey: string;
   try {
-    const resolved = await resolveApiKey(userId, DB_PROVIDER[ASYNC_TYPE_TO_DB_CAPABILITY[type]], 0, 'status_check');
+    const resolved = await resolveApiKey(userId, DB_PROVIDER[ASYNC_TYPE_TO_DB_CAPABILITY[type]], 0, STATUS_CHECK_OPERATION);
     apiKey = resolved.key;
   } catch (err) {
     // Key gone (downgrade / removed BYOK) → we can never poll. Finalize +

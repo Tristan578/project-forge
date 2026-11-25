@@ -73,8 +73,12 @@ compaction. Treat the items below with the same authority as CLAUDE.md.
 
 # Reviews
 
-- PASS or FAIL only. No "pass with issues." Any finding at any severity
-  blocks. Boy Scout Rule: fix every bug you find, regardless of fault.
+- PASS or FAIL only. No "pass with issues." The board reviews the diff and
+  the code it touches: a blocker or major there fails; a minor is fixed in
+  the same push or filed. Re-reviews cover the fix diff only. Stop and ask
+  the user if a blocker or major is still open after round 3.
+- Boy Scout Rule: fix bugs in the code you are changing; a pre-existing bug
+  elsewhere gets an issue, not a detour.
 
 # Quality gate (run before any push)
 
@@ -93,7 +97,7 @@ echo ""
 for rule in "${RULES[@]}"; do
   rel="${rule#"$REPO_ROOT"/}"
   case "$(basename "$rule")" in
-    bevy-api.md)        hint="Bevy 0.18 API, 0.16->0.18 migration, ECS limits, library APIs" ;;
+    bevy-api.md)        hint="Bevy 0.19 API, 0.16->0.19 migration, ECS limits, library APIs" ;;
     entity-snapshot.md) hint="EntityType, EntitySnapshot, history, selection events" ;;
     web-quality.md)     hint="ESLint rules, React patterns, Next.js constraints" ;;
     library-apis.md)    hint="csgrs, noise, terrain, texture pipeline, particles" ;;

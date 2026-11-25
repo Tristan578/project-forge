@@ -112,6 +112,12 @@ describe('shaderHandlers', () => {
       expect(result.error).toContain('No active shader graph');
     });
 
+    it('treats a blank graphId from the model as not given and uses the active graph (#9565)', async () => {
+      const { result } = await invoke('add_shader_node', { nodeType: 'color', graphId: '' });
+      expect(result.success).toBe(true);
+      expect(mockGraphState.addNode).toHaveBeenCalledWith('color', { x: 0, y: 0 }, {});
+    });
+
     it('adds node with custom position', async () => {
       const { result } = await invoke('add_shader_node', {
         nodeType: 'color', position: { x: 100, y: 200 },
@@ -187,6 +193,12 @@ describe('shaderHandlers', () => {
       expect(result.success).toBe(false);
     });
 
+    it('treats a blank graphId from the model as not given and compiles the active graph (#9565)', async () => {
+      const { result } = await invoke('compile_shader', { graphId: '' });
+      expect(result.success).toBe(true);
+      expect(mockCompileToWgsl).toHaveBeenCalledWith(mockGraphState.graphs['graph-1']);
+    });
+
     it('fails for nonexistent graph', async () => {
       const { result } = await invoke('compile_shader', { graphId: 'nonexistent' });
       expect(result.success).toBe(false);
@@ -246,6 +258,14 @@ describe('shaderHandlers', () => {
     it('applies shader from graph with inferred type', async () => {
       const { result, store } = await invoke('apply_shader_to_entity', {
         entityId: 'e1', graphId: 'graph-1',
+      });
+      expect(result.success).toBe(true);
+      expect(store.updateShaderEffect).toHaveBeenCalledWith('e1', { shaderType: 'dissolve' });
+    });
+
+    it('treats a blank graphId from the model as not given and applies the active graph (#9565)', async () => {
+      const { result, store } = await invoke('apply_shader_to_entity', {
+        entityId: 'e1', graphId: '',
       });
       expect(result.success).toBe(true);
       expect(store.updateShaderEffect).toHaveBeenCalledWith('e1', { shaderType: 'dissolve' });

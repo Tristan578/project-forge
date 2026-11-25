@@ -78,6 +78,7 @@ async function GET_impl(
       rating: r.rating,
       content: r.content,
       createdAt: r.createdAt.toISOString(),
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored userName is unset, same as absent; falls back to a display placeholder
       userName: r.userName || 'Anonymous',
     }));
 
@@ -101,6 +102,7 @@ async function GET_impl(
         createdAt: asset.createdAt.toISOString(),
         seller: {
           id: asset.sellerId,
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored sellerName is unset, same as absent; falls back to a display placeholder
           name: asset.sellerName || 'Unknown',
           bio: asset.sellerBio,
           portfolioUrl: asset.sellerPortfolio,

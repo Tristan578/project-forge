@@ -62,7 +62,7 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
         if (!res.ok) throw new Error('Failed to fetch');
         const data = await res.json();
         setAsset(data.asset);
-        setReviews(data.reviews || []);
+        setReviews(data.reviews ?? []);
       } catch (error) {
         console.error('Error fetching asset:', error);
       } finally {

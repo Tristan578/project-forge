@@ -24,6 +24,16 @@ export interface SpriteSlice {
   tilemapActiveLayerIndex: number | null;
 
   setProjectType: (type: ProjectType) => void;
+  /**
+   * State-only mirror of the engine's `ProjectType` resource, written by the
+   * `PROJECT_TYPE_CHANGED` handler (#10227). The engine emits that event for
+   * every type request it processes — the `set_project_type` command and the
+   * one `load_scene` queues from the scene file's `metadata.projectType` — so
+   * this is how a reopened or published 2D project switches the store to 2D
+   * without an AI turn. `setProjectType` would echo `set_project_type` back at
+   * the engine that just reported it.
+   */
+  applyProjectTypeFromEngine: (type: ProjectType) => void;
   setSpriteData: (entityId: string, data: SpriteData) => void;
   /**
    * State-only mirror of what the engine reports. `null` means the entity has no
@@ -118,6 +128,9 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
   setProjectType: (type) => {
     set({ projectType: type });
     if (dispatchCommand) dispatchCommand('set_project_type', { projectType: type });
+  },
+  applyProjectTypeFromEngine: (type) => {
+    set({ projectType: type });
   },
   setSpriteData: (entityId, data) => {
     set(state => ({ sprites: { ...state.sprites, [entityId]: data } }));

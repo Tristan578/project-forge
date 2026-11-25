@@ -6,12 +6,20 @@
 import { sanitizeInstanceRecord, type PrefabInstance } from '../prefabs/prefabInstance';
 import { sanitizePrefabDefinition, type Prefab } from '../prefabs/prefabStore';
 import { emptySceneFile, isSceneFileEnvelope, isValidSceneFile } from './sceneValidation';
+import type { SceneProjectType } from './sceneProjectType';
+import type { CompletionMode } from '@/lib/playMode/completionMode';
 
 /** Scene payload retained losslessly; persistence validates its full Rust SceneFile schema. */
 export interface SceneFileData {
   formatVersion: number;
   sceneName?: string;
-  metadata?: { name: string; createdAt?: string; modifiedAt?: string };
+  /**
+   * `projectType` (#10227) is the engine's: written on every export from its
+   * live `ProjectType` resource, applied on load when present. ABSENT means
+   * the engine keeps the session's current type on load — never read it as
+   * 3D (see `sceneProjectType.ts`).
+   */
+  metadata?: { name: string; createdAt?: string; modifiedAt?: string; projectType?: SceneProjectType };
   entities: unknown[];
   environment?: unknown;
   postProcessing?: unknown;
@@ -32,6 +40,13 @@ export interface SceneFileData {
    * `readPrefabDefinitions` and `prefabStore.collectTransitivePrefabDefinitions`.
    */
   prefabDefinitions?: Prefab[];
+  /**
+   * The scene's completion mode (#9998), an editor-side key the engine ignores
+   * on load and never writes on export. Optional: absent is the legacy `win`
+   * rule, so every pre-existing scene file stays valid with no migration. Read
+   * only through `readCompletionModeFromSceneData`, which validates it.
+   */
+  completionMode?: CompletionMode;
 }
 
 /** Defense-in-depth cap on how many instance records one scene load accepts. */
@@ -185,6 +200,14 @@ export function loadProjectScenes(projectId: string | null = null): ProjectScene
         const data = entry.data as Record<string, unknown>;
         // The old createScene producer emitted only these three fields for
         // empty scenes. Never reinterpret entity-bearing or unknown payloads.
+        //
+        // Deliberately WITHOUT a `metadata.projectType` (#10227): this runs
+        // when the project is read from storage, before the engine has
+        // reported the session's type (the store may still be at its 3D
+        // default), so stamping a type here would turn "inherit the session's
+        // dimension" into "force 3D" for every legacy empty scene in a 2D
+        // project. Absent, the engine leaves its current type alone on load,
+        // which is the right outcome for a scene that never stated one.
         if (Number.isInteger(data.formatVersion) && (data.formatVersion as number) >= 1 &&
             (data.formatVersion as number) <= 3 && typeof data.sceneName === 'string' &&
             Array.isArray(data.entities) && data.entities.length === 0 &&
@@ -203,6 +226,23 @@ export function loadProjectScenes(projectId: string | null = null): ProjectScene
     localStorage.setItem(key, JSON.stringify(parsed));
   }
   return parsed;
+}
+
+/** Capture one project's stored registry exactly as it is, including "nothing
+ * stored yet", so a write that has to be undone can be put back byte for byte
+ * (#10380). `loadProjectScenes` cannot serve here: for an empty slot it returns
+ * a fresh placeholder project, and saving that back would register a scene that
+ * never existed.
+ *
+ * @returns A function that restores the captured value, or removes the key when nothing was stored.
+ */
+export function snapshotStoredProjectScenes(projectId: string | null = null): () => void {
+  const key = storageKey(SCENES_STORAGE_KEY, projectId);
+  const raw = localStorage.getItem(key);
+  return () => {
+    if (raw === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, raw);
+  };
 }
 
 /**
@@ -246,15 +286,30 @@ export function saveProjectScenes(project: ProjectScenes, projectId: string | nu
   localStorage.setItem(storageKey(SCENES_STORAGE_KEY, projectId), serialized);
 }
 
-/** Create a new empty scene */
-export function createScene(project: ProjectScenes, name: string): { project: ProjectScenes; sceneId: string } {
+/**
+ * Create a new empty scene.
+ *
+ * @param projectType The project's live dimension (`spriteSlice.projectType`),
+ *   stated in the new scene's `metadata.projectType` so the scene is
+ *   self-describing — a scene created in a 2D project is a 2D scene, and opens
+ *   as one even cold in a fresh engine (#10227). Every production caller
+ *   passes it. Omitted, the key is absent and the engine leaves its current
+ *   type alone when the scene is loaded, so the scene inherits the session's
+ *   dimension: even a caller that forgets cannot flip a 2D project to 3D on
+ *   the first switch, it only loses the cold-open self-description.
+ */
+export function createScene(
+  project: ProjectScenes,
+  name: string,
+  projectType?: SceneProjectType,
+): { project: ProjectScenes; sceneId: string } {
   const id = generateSceneId();
   const now = new Date().toISOString();
   const newScene: SceneEntry = {
     id,
     name: name || `Scene ${project.scenes.length + 1}`,
     isStartScene: false,
-    data: emptySceneFile(name),
+    data: emptySceneFile(name, projectType),
     createdAt: now,
     updatedAt: now,
   };
@@ -305,6 +360,7 @@ export function duplicateScene(project: ProjectScenes, sceneId: string, newName?
   const now = new Date().toISOString();
   const duplicate: SceneEntry = {
     id,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested scene-copy name is unset; falls back to a generated name
     name: newName || `${source.name} Copy`,
     isStartScene: false,
     data: source.data ? JSON.parse(JSON.stringify(source.data)) : null,
@@ -385,6 +441,7 @@ export function importSingleScene(sceneData: SceneFileData): ProjectScenes {
     activeSceneId: id,
     scenes: [{
       id,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank imported scene name is unset; falls back to sceneName, then a generated default
       name: sceneData.metadata?.name || sceneData.sceneName || 'Main',
       isStartScene: true,
       data: sceneData,
@@ -560,6 +617,7 @@ export function createCheckpoint(
   const checkpoint: SceneCheckpoint = {
     id: generateCheckpointId(),
     projectId,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a whitespace-only checkpoint label (after trim) is unset; falls back to a timestamped name
     label: label?.trim() || `Checkpoint ${new Date().toISOString()}`,
     createdAt: new Date().toISOString(),
     snapshot,

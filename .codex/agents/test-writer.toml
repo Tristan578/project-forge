@@ -34,7 +34,7 @@ import { render, screen, fireEvent } from '@/test/utils/componentTestUtils';
 - Test: rendering, user interactions, conditional rendering, edge cases, empty states
 
 ### Store Slice Tests
-- Use `createSliceStore()` and `createMockDispatch()` from `web/src/test/utils/`
+- Use `createSliceStore()` / `createMockDispatch()` from `web/src/stores/slices/__tests__/sliceTestTemplate.ts`
 - Test state mutations, action side effects, selector return values
 
 ### API Route Tests
@@ -46,8 +46,7 @@ import { render, screen, fireEvent } from '@/test/utils/componentTestUtils';
 Always use `@/lib/...` alias in `vi.mock()`, never relative paths from `__tests__/` dirs.
 
 ## Coverage Targets
-- Current thresholds: statements 70, branches 60, functions 65, lines 72
-- Target: 90/80/85/90
+- Thresholds live in `web/vitest.config.ts` (auto-ratcheted; never lower them). Read it, don't trust a number here.
 - Run: `cd web && npx vitest run --coverage`
 
 ## Validation — After Every Test File

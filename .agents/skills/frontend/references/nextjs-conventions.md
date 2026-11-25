@@ -6,7 +6,7 @@ Conventions for Next.js 16.x (App Router) in `web/src/`.
 
 | File | Purpose |
 |------|---------|
-| `app/layout.tsx` | Root layout — `force-dynamic` export required for CI |
+| `app/layout.tsx` | Root layout (statically renderable — skips `ClerkProvider` when no valid Clerk key) |
 | `app/page.tsx` | Route page (Server Component by default) |
 | `app/error.tsx` | Error boundary for the route segment |
 | `app/loading.tsx` | Suspense skeleton for the route segment |
@@ -33,21 +33,6 @@ Files in `app/` are Server Components unless explicitly marked `'use client'`. P
 app/editor/page.tsx           — Server Component (fetches session, passes data)
   └─ components/editor/EditorLayout.tsx   — 'use client' boundary (needs Zustand)
        └─ components/editor/InspectorPanel.tsx  — 'use client' (uses hooks)
-```
-
-## Server Actions for Mutations
-
-Use Server Actions (not API routes) for form submissions and mutations from Server
-Components:
-
-```ts
-// app/actions/createProject.ts
-'use server';
-import { auth } from '@clerk/nextjs/server';
-export async function createProject(formData: FormData) {
-  const { userId } = await auth();
-  ...
-}
 ```
 
 ## Async Request APIs (Next.js 15+)
@@ -99,14 +84,15 @@ or `../../packages` in page/component files.
 
 Exception: `@spawnforge/ui` is allowed via `transpilePackages` in `next.config.ts`.
 
-## MCP Manifest Dual Location
+## MCP Manifest Locations
 
 ```
 mcp-server/manifest/commands.json   ← source of truth
 web/src/data/commands.json          ← COPY — must be kept in sync
+apps/docs/data/commands.json        ← COPY — must be kept in sync
 ```
 
-When adding or editing commands, update BOTH files. Run `bash .claude/tools/validate-mcp.sh sync`
+When adding or editing commands, update all three files. Run `bash .claude/tools/validate-mcp.sh sync`
 to verify they match.
 
 ## Turbopack vs Webpack
@@ -118,17 +104,6 @@ to verify they match.
 | CI | Turbopack |
 
 Do not add webpack-only plugins that are incompatible with Turbopack.
-
-## Root Layout force-dynamic
-
-`web/src/app/layout.tsx` exports:
-
-```ts
-export const dynamic = 'force-dynamic';
-```
-
-This prevents prerender failures when Clerk keys are absent (CI/E2E environments). Do not
-remove this export.
 
 ## Route Handlers
 

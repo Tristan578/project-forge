@@ -26,9 +26,13 @@ tb_refresh_identity() {
     export PROJECT_ID TEAM_ENGINEERING_ID
 }
 
-# Known locations for the taskboard binary
+# Known locations for the taskboard binary. TASKBOARD_BIN comes first, as it
+# does in taskboard_runtime.binary(): the launcher honours it, so the install
+# check must too, or a binary off PATH reads as "not installed" here while the
+# launcher would start it.
 TB_BIN=""
 for candidate in \
+    "${TASKBOARD_BIN:-}" \
     "$_TB_PROJECT_ROOT/../taskboard/taskboard.exe" \
     "$_TB_PROJECT_ROOT/../taskboard/taskboard" \
     "$(command -v taskboard 2>/dev/null)" \

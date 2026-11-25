@@ -112,7 +112,7 @@ regenerate. `scripts/check-codex-port.sh` fails any PR where the two differ.
 
 ## Taskboard Setup
 
-**Binary**: tcarac/taskboard (install via `go install github.com/tcarac/taskboard@latest`)
+**Binary**: tcarac/taskboard (install with `brew tap tcarac/taskboard && brew install taskboard`, a release binary from https://github.com/tcarac/taskboard/releases, or `make build` from a clone; set TASKBOARD_BIN if it is not on PATH. `go install github.com/tcarac/taskboard@latest` does not work: v0.6.0 has no main package at the module root, and `cmd/taskboard` embeds a `web/dist` the module does not ship.)
 
 <!-- AGENTIC-SYNC:START -->
 <!-- Generated from tools/agentic-sync/canonical.json by tools/agentic-sync/sync.mjs.
@@ -121,18 +121,19 @@ regenerate. `scripts/check-codex-port.sh` fails any PR where the two differ.
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
-- Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
+- Start: `node .claude/hooks/taskboard-launch.mjs start`  *(the launcher resolves the shared database path and passes it to the binary itself — never start the binary by hand or pass your own `--db`)*
+- First run on a new machine (no taskboard database yet): `node .claude/hooks/taskboard-launch.mjs init` once, instead of Start  *(the only command that creates the shared database; it refuses when a populated database already exists or a server is already running)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.3.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.4.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 85 · branches 77 · functions 80 · lines 87
+**Coverage thresholds (CI-enforced):** statements 86 · branches 79 · functions 82 · lines 88
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 ## Required Ticket Fields
@@ -249,11 +250,13 @@ powershell.exe -File ".\build_wasm.ps1"
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation (run after every feature change)
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # MCP server tests
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 
 # E2E tests (requires WASM build)
 cd web && npx playwright test
@@ -263,7 +266,7 @@ cd web && npx playwright test
 
 For full architecture rules, ECS patterns, and library APIs, see:
 - `.claude/CLAUDE.md` — Full project constitution
-- `.claude/rules/bevy-api.md` — Bevy 0.18 API patterns
+- `.claude/rules/bevy-api.md` — Bevy 0.19 API patterns
 - `.claude/rules/entity-snapshot.md` — ECS snapshot patterns
 - `.claude/rules/web-quality.md` — ESLint & React patterns
 - `.claude/rules/library-apis.md` — Third-party library APIs
@@ -279,6 +282,6 @@ All hooks live in `.claude/hooks/` and are shared across Claude Code, Copilot, G
 | `on-prompt-submit.sh` | Ticket enforcement + stale reminders | `UserPromptSubmit` |
 | `on-stop.sh` | Ticket validation + GitHub push | `Stop` |
 | `post-edit-lint.sh` | ESLint on changed files | `PostToolUse` (`apply_patch`) |
-| `block-main-commits.sh`, `check-pr-metadata.sh`, `pre-push-quality-gate.sh`, `block-deferred-fixes.sh` | Commit, PR and push policy | `PreToolUse` (`Bash`) |
+| `block-main-commits.sh`, `check-pr-metadata.sh`, `pre-push-quality-gate.sh`, `block-deferred-fixes.sh`, `require-pr-ready.sh` | Commit, PR and push policy; a PR is not marked ready or passed while threads, checks or a conflict remain | `PreToolUse` (`Bash`) |
 | `sync-to-github.sh` | Push to GitHub Project | run by `on-stop.sh` |
 | `sync-from-github.sh` | Pull from GitHub Project | run by `on-session-start.sh` |

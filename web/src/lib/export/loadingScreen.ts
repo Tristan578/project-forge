@@ -7,11 +7,11 @@ import { escapeHtml, validateCssColor } from './exportUtils';
 
 export interface LoadingScreenConfig {
   backgroundColor: string;
-  logoDataUrl?: string;
+  logoDataUrl?: string | undefined;
   progressBarColor: string;
   progressStyle: 'bar' | 'spinner' | 'dots' | 'none';
-  title?: string;
-  subtitle?: string;
+  title?: string | undefined;
+  subtitle?: string | undefined;
 }
 
 export function generateLoadingHtml(config: LoadingScreenConfig): string {

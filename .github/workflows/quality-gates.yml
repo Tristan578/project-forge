@@ -35,6 +35,26 @@ on:
         description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
         type: boolean
         default: true
+      # ======================= CHROMATIC PAUSE SWITCH =======================
+      # PAUSED 2026-09-26 — tracking issue #10279. The Chromatic account hit
+      # its billed monthly snapshot limit and the owner declined the plan
+      # upgrade, so every design/UI PR failed CI Success on a quota error.
+      #
+      # While `default: true`:
+      #   - the `chromatic` job below is SKIPPED, never reported as passing;
+      #   - `chromatic-paused-notice` warns on every design/UI-touching run
+      #     that visual regression was NOT checked.
+      # PRs merged while paused have NO visual-regression check.
+      #
+      # TO RE-ENABLE: change `default: true` to `default: false` here, and
+      # CHROMATIC_PAUSED to 'false' in chromatic-baseline.yml (the
+      # visual-ci-contract suite fails if the two disagree). No caller passes
+      # this input; the contract suite fails if one starts to.
+      # See docs/operations/visual-ci-gate.md.
+      chromatic-paused:
+        description: 'Temporary pause of the Chromatic visual gate, tracking issue 10279. true = chromatic job skipped and a NOT-checked warning emitted'
+        type: boolean
+        default: true
     outputs:
       lint-result:
         description: 'Outcome of the lint job'
@@ -79,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -111,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -143,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -219,7 +239,7 @@ jobs:
           jq -n --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" '{sha: $sha, run_id: $run}' > web/coverage/coverage-artifact.json
 
       - name: Upload trusted coverage summary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-summary-${{ github.sha }}
           path: |
@@ -230,7 +250,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-report
           path: web/coverage/
@@ -250,7 +270,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download coverage artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         continue-on-error: true
         with:
           name: coverage-report
@@ -275,7 +295,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -290,6 +310,12 @@ jobs:
       # that needs this step from the workflow text.
       - name: Assert native swc binding survived npm ci
         run: bash scripts/check-native-bindings.sh
+
+      # vitest does not type-check. Without this step, mcp-server's tsconfig
+      # (strict + exactOptionalPropertyTypes, #7592) is enforced only by
+      # whoever remembers to run tsc by hand.
+      - run: npx tsc --noEmit
+        working-directory: mcp-server
 
       - run: npx vitest run
         working-directory: mcp-server
@@ -449,7 +475,7 @@ jobs:
           echo "CD reuse key: $(cat engine/wasm-ci-reuse-key.txt)"
 
       - name: Upload pre-optimisation WASM for CD reuse
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-binaries-cd-reuse
           path: |
@@ -490,19 +516,21 @@ jobs:
           #
           # Each threshold is the measured post-opt size rounded UP to the next
           # whole MiB; the job fails when a binary exceeds its threshold by more
-          # than 10%. Measured on main at wasm-bindgen 0.2.127 (runs 33255964959
-          # and 33255044708, ~30 min apart):
+          # than 10%. Raised for the Bevy 0.18.1 -> 0.19.1 migration (#8887,
+          # PR #10268, owner-approved 2026-09-26): 0.19 generates more per-type
+          # ECS code in bevy_ecs itself (resources became components), which no
+          # feature flag we control removes. Measured by this job on the PR at
+          # d85796cd (wasm-bindgen 0.2.127):
           #
-          #   pkg-webgl2          23,480,588 B  22.4 MiB  -> 23 MiB
-          #   pkg-webgpu          23,903,062 B  22.8 MiB  -> 23 MiB
-          #   pkg-webgl2-runtime                21.0 MiB  -> 22 MiB
-          #   pkg-webgpu-runtime                21.4 MiB  -> 22 MiB
+          #   pkg-webgl2          27,023,317 B  25.8 MiB  -> 26 MiB  (was 23)
+          #   pkg-webgpu          27,825,976 B  26.5 MiB  -> 27 MiB  (was 23)
+          #   pkg-webgl2-runtime  26,077,179 B  24.9 MiB  -> 25 MiB  (was 22)
+          #   pkg-webgpu-runtime  26,878,831 B  25.6 MiB  -> 26 MiB  (was 22)
           #
-          # (the runtime figures come from the wasm-opt log above, which prints
-          # at 0.1 MiB resolution — rounding the threshold up to the next whole
-          # MiB absorbs that uncertainty.) Build-to-build variance between those
-          # two runs was under 6 KB, i.e. 0.03%, so the 10% tolerance is slack
-          # for a real regression rather than for noise.
+          # The 0.18.1 baselines and the second-run agreement check are recorded
+          # in the doc below. Build-to-build variance on one commit has measured
+          # under 6 KB (0.03%), so the 10% tolerance is slack for a real
+          # regression rather than for noise.
           #
           # Raising any number here is a deliberate, reviewed change. The policy
           # and the procedure for re-measuring live in
@@ -539,17 +567,17 @@ jobs:
             return 0
           }
 
-          check_pkg pkg-webgl2 24117248            # 23 MiB
-          check_pkg pkg-webgpu 24117248            # 23 MiB
-          check_pkg pkg-webgl2-runtime 23068672    # 22 MiB
-          check_pkg pkg-webgpu-runtime 23068672    # 22 MiB
+          check_pkg pkg-webgl2 27262976            # 26 MiB
+          check_pkg pkg-webgpu 28311552            # 27 MiB
+          check_pkg pkg-webgl2-runtime 26214400    # 25 MiB
+          check_pkg pkg-webgpu-runtime 27262976    # 26 MiB
 
           echo "=========================================="
 
           exit $FAILED
 
       - name: Upload WASM artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-binaries
           path: |
@@ -573,7 +601,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -655,7 +683,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -729,7 +757,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -782,7 +810,7 @@ jobs:
         run: |
           npx next start -p 3000 &
           # Wait for server to be ready and serving content
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -sf http://localhost:3000 -o /dev/null 2>/dev/null; then break; fi
             sleep 1
           done
@@ -799,7 +827,7 @@ jobs:
           node --input-type=module -e "import { renameSync } from 'node:fs'; renameSync('.lighthouseci', '.lhci-baseline');"
 
       - name: Stop baseline server
-        run: kill $(lsof -t -i:3000) 2>/dev/null || true
+        run: lsof -t -i:3000 | xargs -r kill 2>/dev/null || true
 
       - name: Build Next.js for effects-on run
         working-directory: web
@@ -817,7 +845,7 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: |
           npx next start -p 3001 &
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -sf http://localhost:3001 -o /dev/null 2>/dev/null; then break; fi
             sleep 1
           done
@@ -916,7 +944,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -961,6 +989,11 @@ jobs:
 
   chromatic:
     name: Chromatic Visual Regression
+    # The ONLY permitted job-level condition: the pause switch (#10279) at the
+    # top of this file. The job body below is unchanged and still fully
+    # enforced by visual-ci-contract.test.mjs; a skipped job is reported as
+    # skipped, not as success.
+    if: ${{ !inputs.chromatic-paused }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -992,7 +1025,7 @@ jobs:
             echo "No design system changes — skipping Chromatic"
           fi
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.check-design.outputs.changed == 'true'
         with:
           node-version-file: .node-version
@@ -1022,7 +1055,7 @@ jobs:
 
       - name: Run Chromatic
         if: steps.check-design.outputs.changed == 'true'
-        uses: chromaui/action@bb3b582719a93c1828c5e520e62992b2937d7889 # v18.9.4
+        uses: chromaui/action@38afd264ef2241136f12d039093c2724748bec08 # v18.11.0
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: apps/design
@@ -1035,3 +1068,27 @@ jobs:
       - name: Verify completed visual results
         if: steps.check-design.outputs.changed == 'true'
         run: node scripts/check-visual-results.mjs apps/design/chromatic-diagnostics.json
+
+  chromatic-paused-notice:
+    # Self-announcing half of the pause switch (#10279). It runs ONLY while the
+    # gate is paused and the change touches apps/design/ or packages/ui/ —
+    # exactly the runs on which `chromatic` would otherwise have compared
+    # snapshots. It checks nothing and says so: its name, a ::warning::
+    # annotation and the run summary all state that visual regression was NOT
+    # checked. Delete nothing here to re-enable — flipping the switch skips it.
+    name: Chromatic Visual Regression (PAUSED - not checked)
+    if: ${{ inputs.chromatic-paused && inputs.design-changed }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Announce that visual regression was NOT checked
+        run: |
+          echo "::warning title=Visual regression NOT checked::Chromatic is paused (snapshot quota exhausted, #10279). This change touches apps/design/ or packages/ui/ and NO visual-regression or UI-review check ran. Review rendering changes by hand."
+          {
+            echo "## Chromatic visual regression: PAUSED - NOT checked"
+            echo ""
+            echo "The Chromatic gate is paused while the snapshot quota is exhausted (#10279)."
+            echo "This change touches apps/design/ or packages/ui/, and no visual-regression or UI-review check ran on it."
+            echo "A green CI Success on this run says nothing about rendered output."
+          } >> "$GITHUB_STEP_SUMMARY"

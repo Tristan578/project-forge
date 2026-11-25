@@ -28,10 +28,10 @@ export default defineConfig({
       // Ratcheted up per sprint — see docs/coverage-plan.md
       // The thresholds below are the enforced minimums; CI coverage reports show current measurements.
       thresholds: {
-        statements: 85,
-        branches: 77,
-        functions: 80,
-        lines: 87,
+        statements: 86,
+        branches: 79,
+        functions: 82,
+        lines: 88,
       },
     },
   },

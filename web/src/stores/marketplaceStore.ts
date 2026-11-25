@@ -85,6 +85,7 @@ export const useMarketplaceStore = create<MarketplaceState>()((set, get) => ({
       const res = await fetch(`/api/marketplace/assets?${params}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Failed to fetch assets' }));
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
         throw new Error(err.error || 'Failed to fetch assets');
       }
 
@@ -131,6 +132,7 @@ export const useMarketplaceStore = create<MarketplaceState>()((set, get) => ({
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Purchase failed' }));
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
         throw new Error(err.error || 'Purchase failed');
       }
 
@@ -156,6 +158,7 @@ export const useMarketplaceStore = create<MarketplaceState>()((set, get) => ({
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Review failed' }));
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
         throw new Error(err.error || 'Review failed');
       }
 
@@ -173,7 +176,7 @@ export const useMarketplaceStore = create<MarketplaceState>()((set, get) => ({
       if (!res.ok) return;
 
       const data = await res.json();
-      set({ purchasedAssetIds: new Set(data.assetIds || []) });
+      set({ purchasedAssetIds: new Set(data.assetIds ?? []) });
     } catch {
       // Silent fail for purchased list
     }
@@ -185,7 +188,7 @@ export const useMarketplaceStore = create<MarketplaceState>()((set, get) => ({
       if (!res.ok) return;
 
       const data = await res.json();
-      set({ sellerProfile: data.profile || null });
+      set({ sellerProfile: data.profile ?? null });
     } catch {
       // Silent fail
     }

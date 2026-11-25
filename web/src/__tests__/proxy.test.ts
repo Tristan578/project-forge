@@ -38,6 +38,7 @@ import { isPlayPath, PLAY_ROUTE_SOURCE } from '@/lib/security/csp';
 // two guards cannot disagree about which routes are meant to be reachable
 // without a session.
 import { PUBLIC_PAGE_ROUTES } from '@/test/utils/publicSurface';
+import { MCP_TOKEN_PARAM } from '@/lib/mcp/tokenParam';
 
 vi.mock('server-only', () => ({}));
 
@@ -264,6 +265,33 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
     expect(res.status).toBe(307);
     // Must preserve the original URL so the user lands back where they started.
     expect(redirectToSignIn).toHaveBeenCalledWith({ returnBackUrl: 'https://spawnforge.ai/dashboard' });
+  });
+
+  // `?mcp=` is the MCP relay token (MCP_TOKEN_PARAM, lib/mcp/tokenParam.ts). Handing it to Clerk
+  // as returnBackUrl would copy a credential into the sign-in redirect URL.
+  it.each([
+    [`/editor/p1?${MCP_TOKEN_PARAM}=secret-token&tab=scene`, 'https://spawnforge.ai/editor/p1?tab=scene'],
+    [`/editor/p1?tab=scene&${MCP_TOKEN_PARAM}=secret-token`, 'https://spawnforge.ai/editor/p1?tab=scene'],
+    [`/editor/p1?${MCP_TOKEN_PARAM}=secret-token`, 'https://spawnforge.ai/editor/p1'],
+    [`/editor/p1?${MCP_TOKEN_PARAM}=secret-token&${MCP_TOKEN_PARAM}=secret-token-2`, 'https://spawnforge.ai/editor/p1'],
+  ])('drops the mcp relay token from the sign-in return URL (%s)', async (path, expected) => {
+    redirectToSignIn.mockClear();
+    const res = await applyAuthDecision(unauthed, reqFor(path), isPublicRoute);
+    expect(res.status).toBe(307);
+    expect(redirectToSignIn).toHaveBeenCalledTimes(1);
+    const { returnBackUrl } = redirectToSignIn.mock.calls[0][0];
+    expect(returnBackUrl).toBe(expected);
+    expect(returnBackUrl).not.toContain('secret-token');
+  });
+
+  it('hands Clerk a return URL with no mcp token byte for byte, without re-serialising its query', async () => {
+    redirectToSignIn.mockClear();
+    // URLSearchParams would rewrite this query to `q=a+b&flag=`: proof the
+    // common case is passed through as-is rather than parsed and rebuilt.
+    await applyAuthDecision(unauthed, reqFor('/editor/p1?q=a%20b&flag'), isPublicRoute);
+    expect(redirectToSignIn).toHaveBeenCalledWith({
+      returnBackUrl: 'https://spawnforge.ai/editor/p1?q=a%20b&flag',
+    });
   });
 
   it('redirects an authenticated user away from the landing page to the dashboard', async () => {

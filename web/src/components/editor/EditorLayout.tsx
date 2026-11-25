@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, lazy, Suspense, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
@@ -29,7 +29,6 @@ const ShaderEditorPanel = lazy(() => import('./ShaderEditorPanel').then(m => ({ 
 const ChatPanel = lazy(() => import('../chat/ChatPanel').then(m => ({ default: m.ChatPanel })));
 const ModifyPanel = lazy(() => import('./ModifyPanel').then(m => ({ default: m.ModifyPanel })));
 const GDDPanel = lazy(() => import('./GDDPanel').then(m => ({ default: m.GDDPanel })));
-const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m.WelcomeModal })));
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
@@ -37,13 +36,13 @@ const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ defaul
 // executor all hang off this import, so an ordinary tab never loads them.
 const McpBridgeIndicator = lazy(() => import('./McpBridgeIndicator').then(m => ({ default: m.McpBridgeIndicator })));
 const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
-const OnboardingWizard = lazy(() => import('../onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
 const QuickStartDialog = lazy(() => import('../onboarding/QuickStartDialog').then(m => ({ default: m.QuickStartDialog })));
 
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
 import { TutorialOverlay } from './TutorialOverlay';
+import { OnboardingGate } from '../onboarding/OnboardingGate';
 import { OnboardingChecklist } from './OnboardingChecklist';
 import { PerformanceProfiler } from './PerformanceProfiler';
 import { GenerationStatus } from './GenerationStatus';
@@ -61,10 +60,10 @@ import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/st
 import type { CommandResponse } from '@/hooks/useEngine';
 import { recordEntityObservation, readEntityObservation } from '@/lib/game-creation/engineObservation';
 import { useGenerationStore } from '@/stores/generationStore';
-import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useUserStore } from '@/stores/userStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
+import { createReplaySessionRegistry } from '@/lib/playtest/replaySessionRegistry';
 import { startAutoSave } from '@/lib/storage/autoSave';
 import { safeGetItem, safeSetItem } from '@/lib/storage/safeLocalStorage';
 import { UserButton } from '@clerk/nextjs';
@@ -333,77 +332,14 @@ function ChatOverlay() {
         </div>
         <div className="flex-1 overflow-hidden">
           <Suspense fallback={<div className="p-4 text-zinc-400">Loading chat...</div>}>
-            <ChatPanel />
+            {/* The overlay is what revealChat() always opens, so it is the one
+                composer that takes a "Customize with AI" draft (#10172). */}
+            <ChatPanel draftTarget />
           </Suspense>
         </div>
       </div>
     </>
   );
-}
-
-// ---- Onboarding gate ----
-// No-op subscribe — localStorage doesn't fire events in the same tab
-const noopSubscribe = () => () => {};
-
-const LEGACY_QUICKSTART_KEY = 'forge-quickstart-completed';
-const LEGACY_WELCOME_KEY = 'forge-welcomed';
-const ONBOARDING_COMPLETED_KEY = 'forge-onboarding-completed';
-
-/**
- * Shows the new OnboardingWizard for brand-new users.
- * Falls back to WelcomeModal for users who completed the legacy quickstart/welcome flow.
- * Users with any legacy key (forge-quickstart-completed, forge-welcomed) are treated as
- * returning users and never shown the new wizard.
- */
-function OnboardingGate({ onRequestQuickStart }: { onRequestQuickStart: () => void }) {
-  const onboardingCompleted = useOnboardingStore((s) => s.onboardingCompleted);
-  const isNewUser = useOnboardingStore((s) => s.isNewUser);
-  const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
-
-  // Check legacy localStorage keys (old quickstart/welcome flows)
-  const legacyDone = useSyncExternalStore(
-    noopSubscribe,
-    () =>
-      !!safeGetItem(LEGACY_QUICKSTART_KEY) ||
-      !!safeGetItem(LEGACY_WELCOME_KEY),
-    () => true, // SSR: treat as done to avoid hydration mismatch
-  );
-
-  // Check if new onboarding was completed (separate from legacy)
-  const onboardingDone = useSyncExternalStore(
-    noopSubscribe,
-    () => !!safeGetItem(ONBOARDING_COMPLETED_KEY),
-    () => false,
-  );
-
-  const [wizardDismissed, setWizardDismissed] = useState(false);
-
-  const handleWizardComplete = useCallback(() => {
-    safeSetItem(ONBOARDING_COMPLETED_KEY, '1');
-    completeOnboarding();
-    setWizardDismissed(true);
-  }, [completeOnboarding]);
-
-  // New onboarding completed — no modals needed
-  if (onboardingDone || onboardingCompleted || wizardDismissed) {
-    return null;
-  }
-
-  // Legacy users who already completed the old welcome flow — no overlay needed.
-  // WelcomeModal's internal useSyncExternalStore checks !forge-welcomed, so
-  // rendering it here (when forge-welcomed IS set) would always be a no-op anyway.
-  if (legacyDone) {
-    return null;
-  }
-
-  // True first-time users (isNewUser=true in persisted Zustand store) → wizard
-  if (isNewUser) {
-    return <OnboardingWizard onComplete={handleWizardComplete} onStartAi={onRequestQuickStart} />;
-  }
-
-  // Returning users who don't have any legacy key (cleared storage after the wizard
-  // or bypassed it) → WelcomeModal as the lightweight fallback welcome experience
-  return <WelcomeModal />;
 }
 
 // ---- Main EditorLayout ----
@@ -581,7 +517,7 @@ export function EditorLayout() {
       // Install a caller-supplied command dispatcher.
       //
       // WHY THIS EXISTS: `runPipelineFromPlan` (orchestratorSlice) refuses with
-      // 'Engine not loaded' and returns before a single step runs when
+      // `ENGINE_NOT_READY_MESSAGE` and returns before a single step runs when
       // `getCommandDispatcher()` is null. The strict journey gate builds no WASM
       // and launches Chromium with `--disable-gpu`, which hangs `init_engine` —
       // so a dispatcher can never be installed there by the real engine, and the
@@ -610,28 +546,55 @@ export function EditorLayout() {
       ) => {
         setCommandDispatcher(dispatch);
       };
-      // Runtime input-trace replay (#9902). The engine-replay spec drives the
-      // REAL replay runner through this: it builds the same DOM-keyboard runtime
-      // boundary the manual Replay button uses, runs `invokeReplay('manual', …)`
-      // and returns the JSON-serializable observed-state outcome. Same build-time gate as the
-      // hooks above; never attached in a normal production build.
+      // Runtime input-trace replay (#9902; pinned runtime #10007). The engine
+      // replay spec drives the REAL replay runner through this: the same
+      // `replayEntryPoints` the manual Replay controls and the AI tool use,
+      // labelled 'manual', returning the JSON-serializable observed-state
+      // outcome. Same build-time gate as the hooks above; never attached in a
+      // normal production build.
       window.__FORGE_REPLAY = async (
         trace: unknown,
         config: { playerEntityId: string; collectibleEntityIds: string[] },
       ) => {
-        const [{ invokeReplay, createDomKeyboardEnvironment }, { parseInputTrace }] =
-          await Promise.all([
-            import('@/lib/playtest/replayInvocation'),
-            import('@/lib/playtest/inputTrace'),
-          ]);
-        const validated = parseInputTrace(trace);
-        const env = createDomKeyboardEnvironment({
-          bindings: useEditorStore.getState().inputBindings,
-          playerEntityId: config.playerEntityId,
-          collectibleEntityIds: config.collectibleEntityIds,
-        });
-        const result = await invokeReplay('manual', validated, env);
+        const { runReplay } = await import('@/lib/playtest/replayEntryPoints');
+        const result = await runReplay('manual', { trace, ...config });
         return result.outcome;
+      };
+      // Controlled replay sessions for the pause/cancel/restart scenario
+      // (#10007). Sessions live in a registry in this closure, addressed by
+      // id; settled sessions are dropped when the next one starts (the spec
+      // reads `state(id)` after `result(id)`, so the last finished one stays
+      // addressable until then — `lib/playtest/replaySessionRegistry`).
+      // `state` joins the runner's progress with the engine's OWN evaluated
+      // input and the observed player position from the play-tick bus, so the
+      // spec asserts "cancellation released input" on what the engine
+      // reports, not on the runner's bookkeeping. Same gate as `__FORGE_REPLAY`.
+      const replaySessions = createReplaySessionRegistry();
+      const replaySession = (id: string) => replaySessions.get(id);
+      window.__FORGE_REPLAY_CONTROL = {
+        start: async (trace, config, options) => {
+          const { startReplaySession } = await import('@/lib/playtest/replayEntryPoints');
+          const session = startReplaySession('manual', { trace, ...config }, options ?? {});
+          return replaySessions.register({ playerEntityId: config.playerEntityId, handle: session.handle });
+        },
+        state: async (id) => {
+          const { playerEntityId, handle } = replaySession(id);
+          const { getLatestPlayTick } = await import('@/lib/playtest/playTickBus');
+          const tick = getLatestPlayTick();
+          return {
+            ...handle.getProgress(),
+            engineInput: tick ? { pressed: tick.inputState.pressed, axes: tick.inputState.axes } : null,
+            playerPosition: tick?.entities[playerEntityId]?.position ?? null,
+          };
+        },
+        control: (id, action) => replaySession(id).handle[action](),
+        result: async (id) => {
+          const result = await replaySession(id).handle.result;
+          if (result.status === 'failed') {
+            return { status: 'failed', error: result.error.message, ticksReplayed: result.ticksReplayed };
+          }
+          return result;
+        },
       };
       // Feeds a `get_entity_details` answer into the confirmed spawn/transform
       // observation cache (#9899). Same gate and rationale as
@@ -743,7 +706,7 @@ export function EditorLayout() {
         <OnboardingChecklist />
         <TokenDepletedModal />
         <Suspense fallback={null}>
-          <OnboardingGate onRequestQuickStart={openQuickStart} />
+          <OnboardingGate onRequestQuickStart={openQuickStart} quickStartOpen={quickStartOpen} />
           <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
           <ShaderEditorPanel />
           <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
@@ -811,7 +774,7 @@ export function EditorLayout() {
       <OnboardingChecklist />
       <TokenDepletedModal />
       <Suspense fallback={null}>
-        <OnboardingGate onRequestQuickStart={openQuickStart} />
+        <OnboardingGate onRequestQuickStart={openQuickStart} quickStartOpen={quickStartOpen} />
         <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />

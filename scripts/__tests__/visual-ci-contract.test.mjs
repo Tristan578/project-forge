@@ -24,9 +24,15 @@ function baselinePin(document) {
   assert.match(writers[0].uses, pinned, 'baseline writer must pin chromaui/action to a full commit SHA');
   return writers[0].uses;
 }
+// The ONLY job-level condition the visual job may carry is the explicit pause
+// switch (#10279). Anything else (`if: false`, a hard-coded expression) is a
+// silent unwiring and is rejected exactly as it was before the pause existed.
+// Everything below the `if:` is the un-paused job body and is asserted
+// independently of the switch's current value.
+const pauseIf = '$' + '{{ !inputs.chromatic-paused }}';
 function validate(document, baselineDocument = baseline) {
   const job = document.jobs.chromatic;
-  assert.ok(job && job.if === undefined && !job['continue-on-error'], 'visual job must execute');
+  assert.ok(job && (job.if === undefined || job.if === pauseIf) && !job['continue-on-error'], 'visual job must execute unless the explicit pause switch skips it');
   const tokens = job.steps.filter(step => step.name === 'Require Chromatic token');
   assert.equal(tokens.length, 1, 'one required token step');
   const token = tokens[0];
@@ -144,6 +150,115 @@ test('a lockstep bump of both chromaui/action pins keeps the visual contract gre
   writerOf(writer).uses = next;
   validate(reparse(comparer), reparse(writer));
 });
+
+// ---- Temporary pause (#10279) -------------------------------------------
+// The pause must be EXPLICIT (one literal switch per workflow, in lockstep),
+// SELF-ANNOUNCING (a paused design change always produces a warning that visual
+// regression was NOT checked) and must never report the visual job as passed.
+// None of these assertions depend on the switch's current value, so lifting
+// the pause needs no edit here.
+const callers = ['ci.yml', 'cd.yml'].map(name => [name, YAML.parse(readFileSync(fileURLToPath(new URL('../../.github/workflows/' + name, import.meta.url)), 'utf8'))]);
+const noticeIf = '$' + '{{ inputs.chromatic-paused && inputs.design-changed }}';
+const baselineIf = '$' + "{{ needs.pause-switch.outputs.paused == 'false' }}";
+function noticeStep(document) {
+  const job = document.jobs['chromatic-paused-notice'];
+  assert.ok(job, 'a paused gate must announce itself through the notice job');
+  assert.equal(job.steps.length, 1, 'the notice job only announces');
+  return job.steps[0];
+}
+function validatePause(document, baselineDocument = baseline, callerDocuments = callers) {
+  const input = document.on.workflow_call.inputs['chromatic-paused'];
+  assert.ok(input, 'the pause switch input must exist');
+  assert.equal(input.type, 'boolean');
+  assert.equal(typeof input.default, 'boolean', 'the pause switch must be a literal boolean');
+  const baselineSwitch = baselineDocument.env?.CHROMATIC_PAUSED;
+  assert.ok(baselineSwitch === 'true' || baselineSwitch === 'false', 'baseline switch must be a literal true/false');
+  assert.equal(baselineSwitch, String(input.default), 'pause switches must move in lockstep');
+  for (const [name, caller] of callerDocuments) {
+    for (const job of Object.values(caller.jobs)) {
+      if (job.uses !== './.github/workflows/quality-gates.yml') continue;
+      assert.ok(!(job.with && 'chromatic-paused' in job.with), name + ' must not override the pause switch');
+    }
+  }
+  assert.equal(document.jobs.chromatic.if, pauseIf, 'the visual job must be skipped by, and only by, the pause switch');
+  const notice = document.jobs['chromatic-paused-notice'];
+  assert.ok(notice, 'a paused gate must announce itself through the notice job');
+  assert.match(notice.name, /PAUSED/, 'the notice job name must say the gate is paused');
+  assert.match(notice.name, /not checked/i, 'the notice job name must say the gate is paused');
+  assert.equal(notice.if, noticeIf, 'notice must run on every paused design change');
+  assert.ok(!notice['continue-on-error'] && notice.needs === undefined);
+  const step = noticeStep(document);
+  assert.equal(step.uses, undefined, 'the notice job must not run any visual action');
+  assert.ok(!step['continue-on-error'] && step.if === undefined);
+  assert.match(step.run, /::warning[^\n]*NOT checked/, 'the notice must warn that visual regression was NOT checked');
+  const sw = baselineDocument.jobs['pause-switch'];
+  assert.ok(sw, 'baseline pause switch job must exist');
+  assert.match(sw.steps.find(s => s.id === 'read')?.run ?? '', /::warning[^\n]*NOT written/);
+  assert.equal(baselineDocument.jobs.baseline.needs, 'pause-switch');
+  assert.equal(baselineDocument.jobs.baseline.if, baselineIf, 'baseline writer must be skipped by, and only by, the pause switch');
+  return input.default;
+}
+const bashPath = process.platform === 'win32' ? join(process.env.ProgramFiles || 'C:/Program Files', 'Git', 'bin', 'bash.exe') : 'bash';
+function runStep(run, env) {
+  const directory = mkdtempSync(join(tmpdir(), 'visual-pause-contract-'));
+  try {
+    const output = join(directory, 'out').replaceAll('\\', '/');
+    const summary = join(directory, 'summary').replaceAll('\\', '/');
+    writeFileSync(output, ''); writeFileSync(summary, '');
+    const result = spawnSync(bashPath, ['-c', run], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary, ...env } });
+    assert.equal(result.error, undefined);
+    return { status: result.status, text: result.stdout + result.stderr, output: readFileSync(output, 'utf8'), summary: readFileSync(summary, 'utf8') };
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+test('the pause is explicit, in lockstep, and self-announcing', () => validatePause(workflow));
+test('the paused notice step emits a NOT-checked warning and summary', () => {
+  const run = runStep(noticeStep(workflow).run, {});
+  assert.equal(run.status, 0, run.text);
+  assert.match(run.text, /^::warning title=Visual regression NOT checked::/m);
+  assert.match(run.summary, /PAUSED - NOT checked/);
+  assert.doesNotMatch(run.text + run.summary, /\bpass(ed)?\b/i, 'the notice must never claim a pass');
+});
+for (const [value, status, paused] of [['true', 0, 'true'], ['false', 0, 'false'], ['yes', 1, null], ['', 1, null]]) {
+  test('baseline pause switch reads ' + JSON.stringify(value), () => {
+    const run = runStep(baseline.jobs['pause-switch'].steps.find(s => s.id === 'read').run, { CHROMATIC_PAUSED: value });
+    assert.equal(run.status, status, run.text);
+    if (paused) assert.equal(run.output.trim(), 'paused=' + paused);
+    else assert.equal(run.output, '', 'an invalid switch must not emit a paused value');
+    if (value === 'true') assert.match(run.text, /::warning[^\n]*NOT written/);
+    else assert.doesNotMatch(run.text, /::warning/);
+  });
+}
+test('the un-paused configuration is the fully enforced gate', () => {
+  const comparer = structuredClone(workflow), writer = structuredClone(baseline);
+  comparer.on.workflow_call.inputs['chromatic-paused'].default = false;
+  writer.env.CHROMATIC_PAUSED = 'false';
+  assert.equal(validatePause(reparse(comparer), reparse(writer)), false);
+  validate(reparse(comparer), reparse(writer));
+});
+const pauseControls = [
+  ['a hard-coded skip in place of the switch', ({ comparer }) => { comparer.jobs.chromatic.if = '$' + '{{ false }}'; }, /skipped by, and only by, the pause switch|must execute/],
+  ['a paused gate with no notice job', ({ comparer }) => { delete comparer.jobs['chromatic-paused-notice']; }, /announce itself/],
+  ['a notice that does not warn', ({ comparer }) => { noticeStep(comparer).run = 'echo ok'; }, /must warn that visual regression was NOT checked/],
+  ['a notice gated off', ({ comparer }) => { comparer.jobs['chromatic-paused-notice'].if = false; }, /every paused design change/],
+  ['a notice that runs a visual action', ({ comparer }) => { noticeStep(comparer).uses = 'actions/checkout@v4'; }, /must not run any visual action/],
+  ['a notice renamed to look like a pass', ({ comparer }) => { comparer.jobs['chromatic-paused-notice'].name = 'Chromatic Visual Regression'; }, /name must say the gate is paused/],
+  ['switches out of lockstep', ({ writer }) => { writer.env.CHROMATIC_PAUSED = writer.env.CHROMATIC_PAUSED === 'true' ? 'false' : 'true'; }, /lockstep/],
+  ['a non-literal baseline switch', ({ writer }) => { writer.env.CHROMATIC_PAUSED = '$' + '{{ vars.CHROMATIC_PAUSED }}'; }, /literal true\/false/],
+  ['a non-literal quality-gates switch', ({ comparer }) => { comparer.on.workflow_call.inputs['chromatic-paused'].default = 'true'; }, /literal boolean/],
+  ['a missing quality-gates switch', ({ comparer }) => { delete comparer.on.workflow_call.inputs['chromatic-paused']; }, /switch input must exist/],
+  ['a baseline writer that ignores the switch', ({ writer }) => { delete writer.jobs.baseline.if; }, /baseline writer must be skipped/],
+  ['a caller overriding the switch', ({ callers: list }) => { const ci = list.find(([n]) => n === 'ci.yml')[1]; ci.jobs['quality-gates'].with['chromatic-paused'] = false; }, /must not override the pause switch/],
+];
+for (const [name, mutate, expected] of pauseControls) {
+  test('pause contract rejects ' + name, () => {
+    const documents = { comparer: structuredClone(workflow), writer: structuredClone(baseline), callers: structuredClone(callers) };
+    const before = JSON.stringify(documents);
+    mutate(documents);
+    assert.notEqual(JSON.stringify(documents), before, 'control must change the actual fixture');
+    assert.throws(() => validatePause(reparse(documents.comparer), reparse(documents.writer), documents.callers.map(([n, d]) => [n, reparse(d)])), expected);
+  });
+}
+
 test('visual contracts remain imported by the required production CI suite', () => {
   const entry = readFileSync(fileURLToPath(new URL('./production-ci-contract.test.mjs', import.meta.url)), 'utf8');
   assert.match(entry, /^import '\.\/visual-ci-contract\.test\.mjs';$/m);

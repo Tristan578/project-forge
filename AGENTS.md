@@ -21,25 +21,32 @@ Before writing ANY code, you MUST:
 3. Move the ticket to `in_progress`
 4. Only then begin implementation
 
-If you are asked to write code and no ticket exists, **create the ticket first**. This is not optional — it ensures all three contributors can monitor progress through the shared GitHub Project board.
+If you are asked to write code and no ticket exists, **create the ticket first**. It keeps progress visible on the shared GitHub Project board.
 
 ## Taskboard Setup
 
-The taskboard (tcarac/taskboard) is the single source of truth for all project work.
+GitHub issues are the backlog of record. The taskboard (tcarac/taskboard) is a local working view synced with them; when the two disagree, the GitHub issue is correct.
 
 ### Installation
 ```bash
-# Option 1: Go install
-go install github.com/tcarac/taskboard@latest
+# `go install github.com/tcarac/taskboard@latest` does NOT work (v0.6.0 has no
+# main package at the module root, and cmd/taskboard embeds a web/dist the
+# module does not ship).
+# Option 1: Homebrew
+brew tap tcarac/taskboard && brew install taskboard
 
-# Option 2: Download binary from releases
+# Option 2: Download a release binary from
 # https://github.com/tcarac/taskboard/releases
 # Place in: ../taskboard/, ~/.local/bin/, /usr/local/bin/, or PATH
+# (or set TASKBOARD_BIN to it)
+
+# Option 3: Build from source
+git clone https://github.com/tcarac/taskboard && cd taskboard && make build
 ```
 
 ### Starting the Server
 
-The session start hook auto-starts the server if the binary is found. If it fails, start it manually with the **Start** command in **Canonical Project Facts** below.
+The session start hook auto-starts the server if the binary is found. If it fails, start it manually with the **Start** command in **Canonical Project Facts** below. On a new machine with no taskboard database yet, run the **First run** command there once instead.
 
 <!-- AGENTIC-SYNC:START -->
 <!-- Generated from tools/agentic-sync/canonical.json by tools/agentic-sync/sync.mjs.
@@ -48,18 +55,19 @@ The session start hook auto-starts the server if the binary is found. If it fail
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
-- Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
+- Start: `node .claude/hooks/taskboard-launch.mjs start`  *(the launcher resolves the shared database path and passes it to the binary itself — never start the binary by hand or pass your own `--db`)*
+- First run on a new machine (no taskboard database yet): `node .claude/hooks/taskboard-launch.mjs init` once, instead of Start  *(the only command that creates the shared database; it refuses when a populated database already exists or a server is already running)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.3.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.4.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 85 · branches 77 · functions 80 · lines 87
+**Coverage thresholds (CI-enforced):** statements 86 · branches 79 · functions 82 · lines 88
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 ### Required Ticket Fields
@@ -88,7 +96,7 @@ Tickets sync bidirectionally with GitHub Project "SpawnForge" (#2, owner: Trista
 - **Automatic pull**: At session start via SessionStart hook
 - **Manual sync**: `python3 .claude/hooks/github_project_sync.py push|pull|status`
 
-All three contributors see the same board on GitHub regardless of which AI tool they use.
+Every AI tool syncs to the same GitHub board.
 
 ### Sync Source of Truth: `github_issue_number` + `sync_repo`
 
@@ -161,7 +169,9 @@ powershell.exe -File ".\build_wasm.ps1"
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 ```
 

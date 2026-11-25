@@ -155,7 +155,7 @@ export const BEHAVIOR_PLANS: Readonly<Record<Behavior, BehaviorPlan>> = {
  * drift apart, and putting it here keeps `challenge.ts` out of a module cycle
  * with the planner.
  */
-export function hasAuthoredBehavior(blueprint: { behavior?: Behavior }): boolean {
+export function hasAuthoredBehavior(blueprint: { behavior?: Behavior | undefined }): boolean {
   return blueprint.behavior !== undefined;
 }
 

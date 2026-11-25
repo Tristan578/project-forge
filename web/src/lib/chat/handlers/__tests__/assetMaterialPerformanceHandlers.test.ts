@@ -17,6 +17,7 @@ import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { assetHandlers } from '../assetHandlers';
 import { materialHandlers } from '../materialHandlers';
 import { performanceHandlers } from '../performanceHandlers';
+import { RAW_BASE64_REFUSAL } from '@/lib/engine/textureFormatGuard';
 import type { ToolCallContext } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -100,9 +101,12 @@ describe('assetHandlers — import_gltf', () => {
 });
 
 describe('assetHandlers — load_texture', () => {
+  // A raw body (no `data:` header) is typed by its first bytes before the
+  // store is touched (#10396). 'iVBORw0KGgo=' is the PNG signature, so the
+  // missing-field tests below can fail only for the field they name.
   it('returns error when entityId is missing', async () => {
     const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-      dataBase64: 'abc',
+      dataBase64: 'iVBORw0KGgo=',
       name: 'tex.png',
       slot: 'base_color',
     });
@@ -111,7 +115,7 @@ describe('assetHandlers — load_texture', () => {
 
   it('returns error when slot is missing', async () => {
     const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-      dataBase64: 'abc',
+      dataBase64: 'iVBORw0KGgo=',
       name: 'tex.png',
       entityId: 'ent-1',
     });
@@ -120,13 +124,27 @@ describe('assetHandlers — load_texture', () => {
 
   it('calls store.loadTexture with all four args', async () => {
     const { result, store } = await invokeHandler(assetHandlers, 'load_texture', {
-      dataBase64: 'texdata',
+      dataBase64: 'iVBORw0KGgo=',
       name: 'albedo.png',
       entityId: 'ent-1',
       slot: 'base_color',
     });
     expect(result.success).toBe(true);
-    expect(vi.mocked(store.loadTexture)).toHaveBeenCalledWith('texdata', 'albedo.png', 'ent-1', 'base_color');
+    expect(vi.mocked(store.loadTexture)).toHaveBeenCalledWith('iVBORw0KGgo=', 'albedo.png', 'ent-1', 'base_color');
+  });
+
+  it("refuses a raw body that is neither PNG nor JPEG in the engine's sentence, before the store is touched", async () => {
+    // 'texdata' is the body this suite used to send and report success for.
+    // Its first bytes are neither signature, so the tool must not say
+    // "Loading texture" for it, and the model needs the reason to act on.
+    const { result, store } = await invokeHandler(assetHandlers, 'load_texture', {
+      dataBase64: 'texdata',
+      name: 'albedo.png',
+      entityId: 'ent-1',
+      slot: 'base_color',
+    });
+    expect(result).toEqual({ success: false, error: RAW_BASE64_REFUSAL });
+    expect(vi.mocked(store.loadTexture)).not.toHaveBeenCalled();
   });
 });
 
@@ -756,4 +774,86 @@ describe('materialHandlers — partial snapshot updates', () => {
     expect((payload as unknown as Record<string, unknown>).polluted).toBeUndefined();
   });
 
+});
+
+// #10267: the engine refuses an attenuationDistance it would not store as
+// written (is_valid_attenuation_distance: finite and >= 0 after f32
+// narrowing; infinity is null) and drops the WHOLE update. The handler must
+// refuse it first, or the store writes it optimistically and the assistant
+// reports a success the engine never applied.
+describe('materialHandlers — update_material attenuationDistance', () => {
+  const refusal = (shown: string) =>
+    `attenuationDistance must be a finite number >= 0, got ${shown}; send null for infinity`;
+
+  it.each([
+    [-1, '-1'],
+    [-0.5, '-0.5'],
+    [Number.NaN, 'NaN'],
+    [Number.POSITIVE_INFINITY, 'Infinity'],
+    [Number.NEGATIVE_INFINITY, '-Infinity'],
+    // Finite in JS, `inf` once the engine narrows it to f32.
+    [1e300, '1e+300'],
+    [3.5e38, '3.5e+38'],
+    ['10', '"10"'],
+    [true, 'true'],
+    [[1], '[1]'],
+    [{}, '{}'],
+  ])('refuses %s before touching the store', async (value, shown) => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', {
+      entityId: 'ent-1',
+      metallic: 0.9,
+      attenuationDistance: value,
+    });
+    expect(result).toEqual({ success: false, error: refusal(shown) });
+    expect(vi.mocked(store.updateMaterial)).not.toHaveBeenCalled();
+  });
+
+  it('bounds a long refused value in the error text', async () => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', {
+      entityId: 'ent-1',
+      attenuationDistance: 'x'.repeat(500),
+    });
+    expect(result).toEqual({ success: false, error: refusal(`"${'x'.repeat(63)}…`) });
+    expect(vi.mocked(store.updateMaterial)).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [0],
+    [2.5],
+    // f32::MAX: the largest number the engine keeps as written.
+    [3.4028234663852886e38],
+  ])('forwards the finite number %s', async (value) => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', {
+      entityId: 'ent-1',
+      metallic: 0.9,
+      attenuationDistance: value,
+    });
+    expect(result).toEqual({ success: true });
+    expect(vi.mocked(store.updateMaterial)).toHaveBeenCalledWith(
+      'ent-1',
+      expect.objectContaining({ metallic: 0.9, attenuationDistance: value }),
+    );
+  });
+
+  it('forwards null (infinity) over a finite current value', async () => {
+    const { result, store } = await invokeHandler(
+      materialHandlers,
+      'update_material',
+      { entityId: 'ent-1', attenuationDistance: null },
+      { primaryMaterial: { attenuationDistance: 4 } },
+    );
+    expect(result).toEqual({ success: true });
+    expect(vi.mocked(store.updateMaterial)).toHaveBeenCalledWith('ent-1', { attenuationDistance: null });
+  });
+
+  it('keeps the current value when the key is absent', async () => {
+    const { result, store } = await invokeHandler(
+      materialHandlers,
+      'update_material',
+      { entityId: 'ent-1', metallic: 0.9 },
+      { primaryMaterial: { attenuationDistance: 4 } },
+    );
+    expect(result).toEqual({ success: true });
+    expect(vi.mocked(store.updateMaterial)).toHaveBeenCalledWith('ent-1', { attenuationDistance: 4, metallic: 0.9 });
+  });
 });

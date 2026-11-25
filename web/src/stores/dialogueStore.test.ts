@@ -164,6 +164,22 @@ describe('dialogueStore', () => {
       expect(updatedNode.text).toBe('Updated text');
     });
 
+    // #10306: TYPE-LEVEL gate, enforced by `tsc --noEmit` (which type-checks
+    // test files), not by this test's runtime. updateNode merges with a bare
+    // spread, so ChoiceNode's `speaker` / `text` stay exact and an
+    // explicit-undefined patch cannot compile. Widening either leaves its
+    // directive unused, and tsc fails TS2578. The closure is never called.
+    it('updateNode rejects an explicit-undefined speaker/text patch at compile time (#10306)', () => {
+      const mustNotCompile = () => {
+        // @ts-expect-error -- speaker is exact: undefined would erase it on the merge
+        useDialogueStore.getState().updateNode('tree', 'node', { speaker: undefined });
+        // @ts-expect-error -- text is exact: undefined would erase it on the merge
+        useDialogueStore.getState().updateNode('tree', 'node', { text: undefined });
+      };
+      // Reporting-only at runtime (lessons #11): the gate is the directives.
+      expect(typeof mustNotCompile).toBe('function');
+    });
+
     it('removeNode removes and cleans refs', () => {
       const treeId = useDialogueStore.getState().addTree('Test Tree');
       const tree = useDialogueStore.getState().dialogueTrees[treeId];

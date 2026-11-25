@@ -344,8 +344,11 @@ export async function startHttpTransport(
         let mcpServer: McpServer | null = null;
         if (options.stateless) {
           mcpServer = buildServer();
+          // No sessionIdGenerator = stateless mode. The SDK gates on the
+          // option being falsy, so omitting the key is the same as the
+          // `sessionIdGenerator: undefined` its docs show, and it is the only
+          // spelling exactOptionalPropertyTypes accepts.
           transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: undefined,
             enableJsonResponse: true,
           });
           // Register cleanup BEFORE connect(). If connect() throws, the

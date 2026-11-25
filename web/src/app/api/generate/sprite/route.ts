@@ -24,7 +24,7 @@ type SpriteProvider = 'dalle3' | 'sdxl';
 const POST_impl = createGenerationHandler<
   {
     prompt: string;
-    style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
+    style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic' | undefined;
     size: SpriteSize;
     provider: SpriteProvider;
     removeBackground: boolean;
@@ -47,6 +47,7 @@ const POST_impl = createGenerationHandler<
   }
 >({
   route: '/api/generate/sprite',
+  panel: 'generate-sprite',
   enforceRequestDeadline: true,
   provider: (params) => params.serviceName,
   operation: 'sprite_generation',

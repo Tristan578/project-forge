@@ -290,9 +290,11 @@ test.describe('Pipeline Game Creation Flow @ui @dev', () => {
 //
 // Everything above injects orchestrator state directly; this block injects
 // NOTHING but the GDD the API would have returned. It clicks the toolbar entry,
-// picks a game type, types a prompt, approves the gates that are not
+// picks a game type, types a prompt, presses "Plan my game", confirms the plan
+// and its cost with "Build it" (#6831), approves the gates that are not
 // auto-approved, and presses Play — running the real `startQuickStart` ->
-// `buildPlan` -> `runPipeline` path with the real executors.
+// `buildPlan` -> `runPipelineFromPlan` -> `runPipeline` path with the real
+// executors.
 // ---------------------------------------------------------------------------
 
 /** The store surface this block reads. `__EDITOR_STORE` is declared `unknown`. */
@@ -327,15 +329,20 @@ const JOURNEY_RUN_TIMEOUT_MS = 120_000;
 const JOURNEY_PROGRESS_TIMEOUT_MS = 45_000;
 
 /**
- * Bound on gate waits. `gate_plan` is auto-approved for quick-start, so a
- * healthy run stops at exactly two (`gate_assets`, `gate_final`) plus the
- * terminal read — anything more is a regression, and the bound is what turns
- * it into a failure instead of a hang.
+ * Bound on gate waits. `gate_plan` is answered by the plan review's "Build it"
+ * (the slice auto-approves it for quick-start), so a healthy run stops at
+ * exactly two gates (`gate_assets`, `gate_final`) plus the terminal read —
+ * anything more is a regression, and the bound is what turns it into a
+ * failure instead of a hang.
  */
 const MAX_GATE_WAITS = 5;
 
 test.describe('Pipeline Game Creation Journey @journey', () => {
+  /** Every `action` posted to /api/game/pipeline, in order. Reset per test. */
+  let pipelineActions: string[] = [];
+
   test.beforeEach(async ({ page, editor }) => {
+    pipelineActions = [];
     // Routes must be registered BEFORE the first navigation.
     await page.route('**/api/game/decompose', (route) =>
       route.fulfill({
@@ -344,15 +351,18 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         body: JSON.stringify({ gdd: crystalRun3dGdd }),
       }),
     );
-    await page.route('**/api/game/pipeline', (route) =>
-      route.fulfill({
+    await page.route('**/api/game/pipeline', (route) => {
+      // Recorded so the test can prove nothing is reserved before "Build it".
+      const action = (route.request().postDataJSON() as { action?: string } | null)?.action;
+      pipelineActions.push(action ?? 'unknown');
+      return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        // `startDecomposition` throws unless this is a non-empty string. The
-        // same route answers the fire-and-forget release on teardown.
+        // `runPipelineFromPlan` fails the run unless this is a non-empty
+        // string. The same route answers the fire-and-forget release.
         body: JSON.stringify({ reservationId: 'e2e-reservation' }),
-      }),
-    );
+      });
+    });
     // The quick-start path must never reach the chat route. Fail fast if it does
     // rather than hanging on a provider call.
     await page.route('**/api/chat', (route) => route.fulfill({ status: 503, body: '' }));
@@ -372,7 +382,7 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
     //
     // This gate builds no WASM and Chromium runs with --disable-gpu, so
     // `init_engine` never completes and `getCommandDispatcher()` stays null —
-    // `runPipelineFromPlan` refuses with 'Engine not loaded' before a single
+    // `runPipelineFromPlan` refuses with `ENGINE_NOT_READY_MESSAGE` before a single
     // step runs. `__FORGE_SET_DISPATCH` (EditorLayout, behind the same
     // build-time `e2eHooksEnabled()` gate as `__EDITOR_STORE`) hands the
     // stand-in to the production `setCommandDispatcher`, so it goes through the
@@ -574,7 +584,29 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
     await page.getByTestId('quick-start-trigger').click();
     await page.getByRole('button', { name: 'Platformer' }).click();
     await page.locator('#quick-start-prompt').fill('collect every crystal to win');
-    await page.getByRole('button', { name: 'Build it' }).click();
+    await page.getByRole('button', { name: 'Plan my game' }).click();
+
+    // -----------------------------------------------------------------------
+    // Confirm the plan and its cost (#6831). "Plan my game" only designs: the
+    // run waits at 'awaiting_approval' with no pending gate, nothing reserved
+    // and no build step started, until the plan review's "Build it".
+    // -----------------------------------------------------------------------
+    const dialog = page.getByRole('dialog');
+    const build = dialog.getByRole('button', { name: 'Build it' });
+    await expect(build).toBeVisible({ timeout: JOURNEY_PROGRESS_TIMEOUT_MS });
+    await expect(dialog.getByText('Estimated token cost')).toBeVisible();
+    const beforeBuild = await page.evaluate(() => {
+      const state = (window.__EDITOR_STORE as { getState: () => JourneyState }).getState();
+      return {
+        status: state.orchestratorStatus,
+        pendingGate: state.pendingGate,
+        started: Object.values(state.stepStatuses).filter((st) => st !== 'pending').length,
+      };
+    });
+    expect(beforeBuild).toEqual({ status: 'awaiting_approval', pendingGate: null, started: 0 });
+    expect(pipelineActions).not.toContain('reserve');
+
+    await build.click();
 
     // -----------------------------------------------------------------------
     // Approve the gates quick-start does NOT auto-approve, through the real
@@ -629,9 +661,11 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
       );
     }
 
-    // Exactly two: `gate_plan` is auto-approved for quick-start (a user who
-    // typed a prompt has already approved the plan), the other two are not.
+    // Exactly two: `gate_plan` was answered by "Build it" above, the other two
+    // are not auto-approved.
     expect(approvedGateIds).toEqual(['gate_assets', 'gate_final']);
+    // The build reserved its tokens once, when it started.
+    expect(pipelineActions.filter((a) => a === 'reserve')).toEqual(['reserve']);
 
     // -----------------------------------------------------------------------
     // Assert on store state only. `engineMode === 'play'` needs a live engine

@@ -31,6 +31,9 @@ interface ToolCallCardProps {
 }
 
 const TOOL_LABELS: Record<string, string> = {
+  replay_input_trace: 'Replay Input (Runtime)',
+  pin_frame_rate: 'Pin Simulation Clock',
+  unpin_frame_rate: 'Unpin Simulation Clock',
   spawn_entity: 'Spawn Entity',
   despawn_entity: 'Remove Entity',
   delete_entities: 'Delete Entities',
@@ -184,6 +187,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_game_camera: 'Get Game Camera',
   load_scene_with_transition: 'Load Scene',
   set_default_transition: 'Set Default Transition',
+  set_completion_mode: 'Set Completion Mode',
   design_economy: 'Design Economy',
   generate_3d_model: 'Generate 3D Model',
   generate_3d_from_image: 'Generate 3D from Image',

@@ -4,6 +4,8 @@ import { useCallback, useRef, useState, useId } from 'react';
 import { X, Image as ImageIcon, Pencil } from 'lucide-react';
 import { useEditorStore, type SpriteData, type SpriteAnchor } from '@/stores/editorStore';
 import { PixelArtEditor } from './PixelArtEditor';
+import { readTextureFile, fileReadFailureMessage, textureLoadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import { showError } from '@/lib/toast';
 
 /** Anchor point grid positions */
 const ANCHOR_GRID: SpriteAnchor[][] = [
@@ -39,13 +41,25 @@ export function SpriteInspector() {
   const handleTextureUpload = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0 || !primaryId) return;
     const file = files[0];
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(',')[1];
-      loadTexture(base64, file.name, primaryId, 'sprite');
-    };
-    reader.readAsDataURL(file);
+    // The data URL is sent whole, its type filled in from the extension
+    // when the OS declared none: the header is how the engine learns the
+    // format, and it refuses anything but PNG/JPEG by name (#10396).
+    let dataUrl: string;
+    try {
+      dataUrl = await readTextureFile(file);
+    } catch {
+      showError(fileReadFailureMessage(file.name));
+      return;
+    }
+    // Outside the read's try: a throw from the store action is a load
+    // failure, not an unreadable file, and must not be reported as one. It
+    // is caught rather than left to propagate because this is an event
+    // handler, where a rejection reaches nobody.
+    try {
+      loadTexture(dataUrl, file.name, primaryId, 'sprite');
+    } catch (error) {
+      showError(textureLoadFailureMessage(file.name, error));
+    }
   }, [primaryId, loadTexture]);
 
   const handleSelectTexture = useCallback((assetId: string) => {
@@ -147,7 +161,7 @@ export function SpriteInspector() {
           <input
             ref={fileRef}
             type="file"
-            accept=".png,.jpg,.jpeg,.webp"
+            accept=".png,.jpg,.jpeg"
             className="hidden"
             onChange={(e) => handleTextureUpload(e.target.files)}
           />

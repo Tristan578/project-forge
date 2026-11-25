@@ -139,9 +139,9 @@ export interface MeasuredMetricValue extends MetricValueBase {
   /** The metric value. Ratio in [0,1]; percent in [0,100]; ms >= 0; count >= 0. */
   value: number;
   /** Ratio numerator (e.g. verified requirements). Omitted for latency ms. */
-  numerator?: number;
+  numerator?: number | undefined;
   /** Ratio denominator (e.g. applicable requirements). Must be > 0 here. */
-  denominator?: number;
+  denominator?: number | undefined;
   /** Number of underlying data points. Must meet the metric's minimum. */
   sampleSize: number;
   /** How long this value stays fresh from `observedAt`, in seconds. */
@@ -218,9 +218,9 @@ export interface Observation {
    * Ratio numerator for ratio metrics (completeness/friction/uptime/budget).
    * Absent for raw-latency distribution observations.
    */
-  numerator?: number;
+  numerator?: number | undefined;
   /** Ratio denominator. Zero denominator must resolve to a non-measured state. */
-  denominator?: number;
+  denominator?: number | undefined;
   /** Underlying data points backing this observation. */
   sampleSize: number;
   /** Optional raw latency distribution (milliseconds), when metric === 'latency'. */

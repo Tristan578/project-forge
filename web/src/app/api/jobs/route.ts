@@ -3,11 +3,14 @@ import { z } from 'zod';
 import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
-import { eq, and, inArray, desc, sql } from 'drizzle-orm';
+import { eq, and, inArray, desc, sql, or } from 'drizzle-orm';
+import { isQstashConfigured } from '@/lib/qstash/client';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { findOtherProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +34,8 @@ const createJobSchema = z.object({
  * Optional resultUrl preserves an inline synchronous artifact: HTTP URL at
  * most 2000 chars or non-empty PNG data URL at most 4 MiB characters.
  * Returns HTTP 201 {job:{id}}; auth/rate/validation errors use middleware,
- * and persistence failures return a fixed 500 response.
+ * a providerJobId bound to another account returns 404 (#10262), and
+ * persistence failures return a fixed 500 response.
  */
 async function POST_impl(req: NextRequest) {
   try {
@@ -45,6 +49,34 @@ async function POST_impl(req: NextRequest) {
 
     const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId, resultUrl } =
       mid.body as z.infer<typeof createJobSchema>;
+
+    // #10262: this row is CLIENT-reported (fire-and-forget, client-supplied
+    // providerJobId), so it is never the ownership record status routes trust
+    // — see `src/lib/generate/jobOwnership.ts`. But it must not let a caller
+    // plant a row that CLAIMS someone else's already-bound job id, which would
+    // otherwise surface a stranger's job in this caller's own `GET /api/jobs`
+    // list (their id, but bound provider/providerJobId belonging to another
+    // account). Bound-to-this-user and never-bound are both accepted.
+    //
+    // Keyed on providerJobId ALONE, never on the reported `provider`: that
+    // field is client-supplied and is not the binding's namespace (sprite
+    // reports 'sdxl' for a job bound under 'replicate'), so scoping by it let
+    // any caller skip this check by changing one string.
+    //
+    // Refused with the SAME 404 body the status routes send for a job that is
+    // not the caller's, rather than a distinct 409 naming "another account".
+    // That is NOT oracle-free, and is not claimed to be: an unbound or
+    // own-bound id gets 201 and a foreign-bound id gets 404, so a caller can
+    // still learn that SOME other account has bound a given id. The residual
+    // is accepted because provider job ids are unguessable provider-issued
+    // tokens a caller can only hold if one was leaked to them, and the 404
+    // reveals nothing further: not which account owns the id, and not the
+    // job's status or result (the status routes refuse it). Closing it would
+    // mean accepting the planted row, which is what this check exists to stop.
+    const otherOwnerId = await findOtherProviderJobOwnerId(providerJobId, mid.userId!);
+    if (otherOwnerId) {
+      return redactedJson({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
+    }
 
     const [job] = await queryWithResilience(() =>
       getDb()
@@ -76,10 +108,14 @@ async function POST_impl(req: NextRequest) {
 
 /**
  * GET: List up to 50 owned jobs, newest first. status=active selects pending,
- * processing and downloading; all or an absent status includes every state.
- * HTTP 200 {jobs} retains HTTP resultUrl values, but inline artifacts are
- * excluded in SQL and represented by resultUrl:null, hasInlineResult:true.
- * Fetch each flagged artifact with GET /api/jobs/{id} during recovery.
+ * processing and downloading, PLUS durable jobs the server-side callback has
+ * already finished (completed/failed) but no client has reflected yet
+ * (imported = 0) — see #8892. all or an absent status includes every state.
+ * HTTP 200 {durableCompletionEnabled, jobs} retains HTTP resultUrl values, but
+ * inline artifacts are excluded in SQL and represented by resultUrl:null,
+ * hasInlineResult:true. Fetch each flagged artifact with GET /api/jobs/{id}
+ * during recovery. durableCompletionEnabled is a boolean only (whether the
+ * QStash callback path is configured), never a key value.
  * Authentication errors use middleware; query failures return fixed HTTP 500.
  */
 async function GET_impl(req: NextRequest) {
@@ -92,9 +128,24 @@ async function GET_impl(req: NextRequest) {
 
     let conditions;
     if (statusFilter === 'active') {
+      // DURABLE COMPLETION (#8892). The QStash callback finalizes a job's row
+      // with no tab open, so on the next load the job is already terminal and
+      // a live-states-only filter dropped it from the UI: the asset finished
+      // and simply vanished. `imported` is the signal — the live client sets
+      // it when IT resolves a job (PATCH in generationStore.updateJob); the
+      // webhook never touches it. Scoped to rows the client marked durable at
+      // creation, because a legacy job is only ever finalized by a live client
+      // and a failed legacy row legitimately keeps imported = 0 forever.
       conditions = and(
         eq(generationJobs.userId, mid.userId!),
-        inArray(generationJobs.status, ['pending', 'processing', 'downloading'])
+        or(
+          inArray(generationJobs.status, ['pending', 'processing', 'downloading']),
+          and(
+            inArray(generationJobs.status, ['completed', 'failed']),
+            eq(generationJobs.imported, 0),
+            sql`${generationJobs.parameters}->>'durable' = 'true'`,
+          ),
+        ),
       );
     } else if (statusFilter && statusFilter !== 'all') {
       conditions = and(
@@ -135,6 +186,7 @@ async function GET_impl(req: NextRequest) {
     // possibly months ago. Redacting on the way out is the only control that
     // covers rows already in the table.
     return redactedJson({
+      durableCompletionEnabled: isQstashConfigured(),
       jobs: jobs.map((j) => ({
         id: j.id,
         providerJobId: j.providerJobId,

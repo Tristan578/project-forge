@@ -1,6 +1,6 @@
 ---
 name: rust-engine
-description: Rust/WASM engine specialist. Knows Bevy 0.18 ECS, bridge isolation, wasm-bindgen constraints, pending queues, command dispatch, and WASM binary size budgets.
+description: Rust/WASM engine specialist. Knows Bevy 0.19 ECS, bridge isolation, wasm-bindgen constraints, pending queues, command dispatch, and WASM binary size budgets.
 model: sonnet
 effort: high
 memory: project
@@ -27,7 +27,7 @@ You work exclusively in `engine/src/`. You understand ECS architecture, WASM con
 
 ## Before ANY Action
 
-1. Read `.claude/rules/bevy-api.md` — Bevy 0.18 migration notes, import paths, ECS limits
+1. Read `.claude/rules/bevy-api.md` — Bevy 0.19 API and migration notes, import paths, ECS limits
 2. Read `.claude/rules/entity-snapshot.md` — EntityType, EntitySnapshot, history, spawn_from_snapshot
 3. Read `.claude/rules/lessons-learned.md` — engine-specific anti-patterns
 
@@ -84,7 +84,7 @@ cd engine && cargo clippy --target wasm32-unknown-unknown --features webgl2 -- -
 
 ## Binary Size
 
-WASM binaries ~22-23 MiB per variant. CI budgets all four (editor + runtime, WebGL2 + WebGPU); see `docs/operations/wasm-size-budgets.md`. When adding deps, check impact. Heavy deps should be feature-gated.
+WASM binaries ~25-27 MiB per variant (Bevy 0.19). CI budgets all four (editor + runtime, WebGL2 + WebGPU); see `docs/operations/wasm-size-budgets.md`. When adding deps, check impact. Heavy deps should be feature-gated.
 
 ## Taskboard Permissions
 

@@ -8,6 +8,7 @@ import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
 import { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { checkCommandBatch, checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
+import { resetPlayTickSnapshot } from '@/hooks/events/playTickSnapshot';
 
 /** Loading progress state exported for UI components to display progress feedback. */
 export type LoadingPhase = 'idle' | 'detecting' | 'downloading' | 'initializing' | 'ready' | 'error';
@@ -44,7 +45,7 @@ export function useLoadingState(): LoadingState {
 
 export interface CommandResponse {
   success: boolean;
-  error?: string;
+  error?: string | undefined;
   /**
    * Set only by a dispatcher that CAUGHT a throw from the engine call and
    * answered with `success: false` instead of rethrowing. It separates "the
@@ -305,8 +306,8 @@ export async function probeWebGPU(): Promise<boolean> {
  * carries immutable Cache-Control headers uploaded by upload-wasm-to-r2.sh.
  * Without a version the /latest/ alias is used, which has a short TTL.
  */
-const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
-const ENGINE_VERSION = (process.env.NEXT_PUBLIC_ENGINE_VERSION || '').trim();
+const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL ?? '').replace(/\/+$/, '');
+const ENGINE_VERSION = (process.env.NEXT_PUBLIC_ENGINE_VERSION ?? '').trim();
 /** Resolved prefix: "<cdn>/<version>" or "<cdn>/latest" or "" for same-origin. */
 const ENGINE_CDN_ROOT = ENGINE_CDN_BASE
   ? ENGINE_VERSION
@@ -342,7 +343,12 @@ export interface WasmManifest {
  */
 export async function fetchWasmManifest(basePath: string, signal?: AbortSignal): Promise<WasmManifest | null> {
   try {
-    const res = await fetch(`${basePath}wasm-manifest.json`, { signal, cache: 'no-store' });
+    // DOM's RequestInit.signal is `AbortSignal | null` (no `| undefined`);
+    // conditional spread omits the key when this function received none.
+    const res = await fetch(`${basePath}wasm-manifest.json`, {
+      ...(signal !== undefined ? { signal } : {}),
+      cache: 'no-store',
+    });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       wasmHash?: string;
@@ -350,9 +356,11 @@ export async function fetchWasmManifest(basePath: string, signal?: AbortSignal):
       buildId?: string;
       hash?: string;
     };
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a manifest can legitimately carry an empty-string hash (legacy/malformed build output); that must fall back to the legacy `hash` field exactly like a missing one does
     const wasmHash = data.wasmHash || data.hash || '';
     if (!wasmHash) return null;
-    const jsHash = data.jsHash || '';
+    const jsHash = data.jsHash ?? '';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty-string buildId is a real manifest shape (see useEngine.test.ts "uses wasmHash as buildId when buildId is empty string"); ?? would leave it blank instead of falling back to wasmHash
     const buildId = data.buildId || wasmHash;
     return { wasmHash, jsHash, buildId };
   } catch {
@@ -607,6 +615,12 @@ export function resetEngine(): void {
   wasmModule = null;
   initPromise = null;
   engineWasmMemory = null;
+  // No engine, no frame. `recoverEngine` reaches here first: the engine it
+  // then re-initialises starts from an empty delta cache and emits NO mode
+  // event, so the hub's reconstituted Play frame would otherwise survive the
+  // crash and have the new run's full first frame merged onto it, keeping
+  // entities that no longer exist (#10375, Sentry review on #10390).
+  resetPlayTickSnapshot();
   setLoadingState({ phase: 'idle' });
   clearEngineCrash();
 }

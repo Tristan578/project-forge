@@ -54,6 +54,7 @@ async function GET_impl(
       content: c.content,
       parentId: c.parentId,
       authorId: c.authorId,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
       authorName: c.authorName || 'Unknown',
       createdAt: c.createdAt.toISOString(),
     }));
@@ -140,6 +141,7 @@ async function POST_impl(
           content: comment.content,
           parentId: comment.parentId,
           authorId: mid.userId!,
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored displayName is unset, same as absent; falls back to a display placeholder
           authorName: author[0]?.displayName || 'Unknown',
           createdAt: comment.createdAt.toISOString(),
         },

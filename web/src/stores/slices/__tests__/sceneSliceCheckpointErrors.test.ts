@@ -8,6 +8,7 @@ import { attachCheckpointEngine, projectFixture, sceneFixture } from '@/lib/scen
 import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
+import { takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
 
 describe('checkpoint recovery transaction', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -60,6 +61,37 @@ describe('checkpoint recovery transaction', () => {
     // emptied one over the restored scene.
     await expect(store.getState().restoreCheckpoint(checkpoint!.id)).resolves.toBe(true);
     expect(loadPrefabInstances()).toEqual(seeded);
+  });
+
+  // #9998: the checkpoint read-back skips the SCENE_EXPORTED fold on purpose,
+  // so the capture must add the live completion mode itself — or restoring a
+  // sandbox checkpoint would reopen it as a win game that refuses to Play.
+  it('records the live completion mode in a checkpoint and hands it to SCENE_LOADED on restore', async () => {
+    store.setState({ sceneGraph: { nodes: {}, rootIds: [], completionMode: 'sandbox' } });
+
+    const checkpoint = await store.getState().createCheckpoint('Sandbox');
+    expect(checkpoint).not.toBeNull();
+    const stored = listCheckpoints().find((c) => c.id === checkpoint!.id)!;
+    expect(stored.snapshot.scenes[0].data?.completionMode).toBe('sandbox');
+
+    store.setState({ sceneGraph: { nodes: {}, rootIds: [], completionMode: 'endless' } });
+    takeStagedSceneCompletionMode();
+    await expect(store.getState().restoreCheckpoint(checkpoint!.id)).resolves.toBe(true);
+
+    expect(takeStagedSceneCompletionMode()).toBe('sandbox');
+  });
+
+  it('re-stages the live mode, not the legacy default, when a failed restore recovers the prior scene', async () => {
+    vi.useFakeTimers();
+    store.setState({ sceneGraph: { nodes: {}, rootIds: [], completionMode: 'endless' } });
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('silent');
+
+    const pending = store.getState().restoreCheckpoint(cp.id);
+    await vi.advanceTimersByTimeAsync(10000);
+    await expect(pending).resolves.toBe(false);
+
+    expect(takeStagedSceneCompletionMode()).toBe('endless');
   });
 
   it('does not persist or claim success on the synchronous queued response', async () => {
@@ -128,8 +160,10 @@ describe('checkpoint recovery transaction', () => {
     // The engine never adopted the checkpoint, so what it holds is not this
     // project's restored scene and the save lockout must stand — the same
     // reason `loadScene` records on its own rejection branch.
+    // The fixture engine refuses with `error: 'Refused'`; that text must ride
+    // along on the lockout so the person sees WHY, not only that it failed.
     expect(store.getState().sceneLoadError).toEqual({
-      reason: expect.stringContaining('the engine refused to load it'),
+      reason: 'This scene could not be opened: the engine refused to load it. Details: Refused.',
       at: expect.any(Number),
     });
     store.getState().saveScene('after-refused-restore');
@@ -186,7 +220,8 @@ describe('checkpoint recovery transaction', () => {
       if (command === 'load_scene') throw thrown;
       return { success: true };
     });
-    expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Wrecking load')))).toThrow(thrown);
+    // Re-raised as the typed engine error with the same message (#10202 review).
+    expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Wrecking load')))).toThrow(thrown.message);
     const lockout = store.getState().sceneLoadError;
     setSceneDispatcher(engine.dispatch);
     engine.setMode('reject');
@@ -209,6 +244,45 @@ describe('checkpoint recovery transaction', () => {
     await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(true);
     expect(store.getState().sceneLoadError).toBeNull();
     expect(engine.getScene().metadata?.name).toBe('Recovered');
+  });
+
+  // #10202 review, m7: `dispatchRestoreLoad` now receives the re-raised throw
+  // for a `threw: true` answer — the shape the editor's own dispatcher
+  // produces — so its lockout reason is ENGINE_LOAD_THREW where it read as a
+  // clean ENGINE_LOAD_REJECTION before. That changes what the NEXT restore
+  // sees in `priorCapturedUnderThrowLockout`: a capture taken under the throw
+  // lockout is of a possibly-wrecked viewport, so re-applying and confirming
+  // it must NOT clear the lockout (#10079, finding 4). The control is the
+  // clean-rejection test below, where the same second restore clears it.
+  it('a threw: true answer to the restore load locks with the THREW reason, and a later recovery of that untrusted prior keeps the lockout', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    const previousSave = localStorage.getItem('forge-project-scenes:v2:unsaved');
+
+    // Restore 1: the checkpoint load THROWS, then the recovery of `prior`
+    // fails its readback, so the lockout the throw raised survives.
+    engine.setModes(['threw', 'wrong']);
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    const lockout = store.getState().sceneLoadError;
+    expect(lockout?.reason).toContain('the engine failed while loading it');
+    expect(lockout?.reason).toContain('Engine failed');
+    expect(lockout?.reason).not.toContain('the engine refused to load it');
+    expect(store.getState().checkpointError).toContain('could not be recovered');
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(previousSave);
+
+    // Restore 2: the checkpoint load applies the wrong scene, and the recovery
+    // of `prior` — captured under the THREW lockout — is confirmed. Before
+    // #10202 the first answer read as a refusal, this flag was false, and
+    // this recovery cleared the lockout over a capture the throw may have
+    // wrecked; now it stands.
+    engine.dispatch.mockClear();
+    engine.setMode('wrong');
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    expect(engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene')).toHaveLength(2);
+    expect(store.getState().sceneLoadError).toEqual(lockout);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(previousSave);
+    // The consequence the lockout gates: saving still refuses.
+    store.getState().saveScene('after-threw-answer-recovery');
+    expect(exported('after-threw-answer-recovery')).toBe(false);
   });
 
   it('clears a clean-rejection lockout after confirming recovery of the trusted prior capture', async () => {

@@ -12,6 +12,7 @@ import { useGenerationHistoryStore } from './generationHistoryStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { trackAIAssetGenerated } from '@/lib/analytics/events';
 import { captureException } from '@/lib/monitoring/sentry-client';
+import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
 
 export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music' | 'sprite' | 'sprite_sheet' | 'tileset' | 'pixel-art';
 export type GenerationStatus = 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
@@ -25,21 +26,34 @@ export interface GenerationJob {
   progress: number;          // 0-100
   provider: string;
   createdAt: number;         // Date.now() — stored once, not used in render
-  resultUrl?: string;
-  error?: string;
-  entityId?: string;         // Target entity (for texture/audio attachment)
-  usageId?: string;          // Token usage ID for refund on failure
-  durable?: boolean;         // Server callback is the primary completion channel
-  metadata?: Record<string, unknown>;  // Type-specific data
-  dbId?: string;             // Database record ID (for syncing)
-  autoPlace?: boolean;       // Auto-import and attach to entity on completion
-  targetEntityId?: string;   // Entity to attach result to (e.g. place model as child, assign texture)
-  materialSlot?: string;     // Material texture slot for texture generation (e.g. 'base_color', 'normal_map')
+  resultUrl?: string | undefined;
+  error?: string | undefined;
+  entityId?: string | undefined;         // Target entity (for texture/audio attachment)
+  usageId?: string | undefined;          // Token usage ID for refund on failure
+  durable?: boolean | undefined;         // Server callback is the primary completion channel
+  /**
+   * Hydrated from the server already terminal (the durable callback finished
+   * it while no tab was open) and the client-side import/refund side effects
+   * have not run yet. useGenerationPolling's completion-sync effect consumes
+   * this and clears it (#8892).
+   */
+  needsCompletionSync?: boolean;
+  metadata?: Record<string, unknown> | undefined;  // Type-specific data
+  dbId?: string | undefined;             // Database record ID (for syncing)
+  autoPlace?: boolean | undefined;       // Auto-import and attach to entity on completion
+  targetEntityId?: string | undefined;   // Entity to attach result to (e.g. place model as child, assign texture)
+  materialSlot?: string | undefined;     // Material texture slot for texture generation (e.g. 'base_color', 'normal_map')
 }
 
 interface GenerationState {
   jobs: Record<string, GenerationJob>;
   hydrated: boolean;
+  /**
+   * Whether the server's QStash callback path is configured, as reported by
+   * GET /api/jobs. When true, durable jobs read their own DB row before the
+   * provider status route (#8892). Never a secret — a boolean only.
+   */
+  durableCompletionEnabled: boolean;
 
   // Computed
   get activeJobCount(): number;
@@ -50,11 +64,15 @@ interface GenerationState {
   removeJob: (id: string) => void;
   clearCompleted: () => void;
   hydrateFromServer: () => Promise<void>;
+  setDurableCompletionEnabled: (enabled: boolean) => void;
 }
 
 export const useGenerationStore = create<GenerationState>((set, get) => ({
   jobs: {},
   hydrated: false,
+  durableCompletionEnabled: false,
+
+  setDurableCompletionEnabled: (enabled) => set({ durableCompletionEnabled: enabled }),
 
   get activeJobCount() {
     const jobs = get().jobs;
@@ -129,7 +147,16 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     set((state) => {
       const existing = state.jobs[id];
       if (!existing) return state;
-      const updated = { ...existing, ...updates };
+      // The optional fields of GenerationJob admit `undefined` (#10230: the
+      // job-construction sites forward maybe-undefined provider data), so a
+      // patch can carry an explicit `undefined` key. Strip those keys before
+      // the spread: on a bare `{ ...existing, ...updates }` the key would
+      // erase a real value (`dbId`, `usageId`, `resultUrl`), and no caller
+      // clears a job field this way. The completion replay in `addJob`
+      // re-sends the job's own current `resultUrl` / `error`, so dropping an
+      // undefined one there leaves the stored value exactly as it was. The
+      // PATCH below still reads `updates`; JSON drops undefined values anyway.
+      const updated = { ...existing, ...omitUndefinedValues(updates) };
 
       // Track completion
       if (updated.status === 'completed' && existing.status !== 'completed') {
@@ -160,7 +187,13 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             progress: updates.progress,
             resultUrl: updates.resultUrl,
             errorMessage: updates.error,
-            imported: updates.status === 'completed',
+            // Only ever latch `imported` on; never send `false`. This PATCH is
+            // unawaited and races other writers for the same row (the durable
+            // completion sync's { imported: true }), so a `false` from an
+            // intermediate 'downloading' or a 'failed' update could land last
+            // and resurface a settled job on every reload (#8892). The route
+            // also ignores `false`; omitting it here keeps the intent explicit.
+            ...(updates.status === 'completed' && { imported: true }),
           }),
         })
           .then((res) => {
@@ -201,10 +234,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       const res = await fetch('/api/jobs?status=active');
       if (!res.ok) return;
       const data = await res.json();
-      const serverJobs = data.jobs || [];
+      const serverJobs = data.jobs ?? [];
 
       if (serverJobs.length === 0) {
-        set({ hydrated: true });
+        set({ hydrated: true, durableCompletionEnabled: data.durableCompletionEnabled === true });
         return;
       }
 
@@ -233,13 +266,28 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             continue;
           }
         }
+        // A terminal row in the ACTIVE list is one the durable callback
+        // finished while no tab was open (the route only returns terminal
+        // rows with imported = 0). Its import/refund still has to run here.
+        const needsCompletionSync = sj.status === 'completed' || sj.status === 'failed';
         hydratedJobs[localId] = {
           id: localId,
           jobId: sj.providerJobId,
           type: sj.type,
           prompt: sj.prompt,
           // A reload interrupts import. Requeue synchronous active artifacts.
-          status: sj.providerJobId.startsWith('dalle3-sync:') && resultUrl ? 'pending' : sj.status,
+          // A completed-but-unimported durable row is hydrated as 'downloading'
+          // — the state its completion sync is about to put it in — so the
+          // status indicator shows it finishing from the first render instead
+          // of flipping completed -> downloading moments after load (#8892).
+          // Only the completion-sync effect settles it: the polling effect
+          // picks up pending/processing only, so it never reaches the provider
+          // status route. A failed row stays 'failed' — no spinner at all.
+          status: sj.providerJobId.startsWith('dalle3-sync:') && resultUrl
+            ? 'pending'
+            : needsCompletionSync && sj.status === 'completed'
+              ? 'downloading'
+              : sj.status,
           progress: sj.progress,
           provider: sj.provider,
           createdAt: new Date(sj.createdAt).getTime(),
@@ -255,6 +303,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           materialSlot:
             typeof params['materialSlot'] === 'string' ? params['materialSlot'] : undefined,
           durable: params['durable'] === true,
+          ...(needsCompletionSync && { needsCompletionSync: true }),
         };
       }
 
@@ -262,6 +311,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       set((state) => ({
         jobs: { ...hydratedJobs, ...state.jobs },
         hydrated: true,
+        durableCompletionEnabled: data.durableCompletionEnabled === true,
       }));
     } catch (err) {
       // Network-level TypeError ("Failed to fetch") is expected in dev when

@@ -120,6 +120,15 @@ function sprite(color: Vec3, size: [number, number], order: number) {
  * (and of an untextured sprite's 64 px default size): the whole pile fits a
  * 1280 x 720 viewport. The run must be switched to the 2D camera
  * (`set_project_type`), which the export template does for a 2D project.
+ *
+ * The committed `perf-2d-v1.scene.json` predates `metadata.projectType`
+ * (#10227) and deliberately still lacks it: adding the key changes the
+ * checksum, which the registry pins as the fixture's identity, so the perf
+ * series keyed by `art:<checksum>` would restart. With the key absent the
+ * engine keeps its current type on load (a fresh runtime engine is 3D) and
+ * the exporter's explicit `set_project_type` is what switches the camera —
+ * the path this fixture measures. A future `perf-2d@2` should state
+ * `projectType: '2d'` in its metadata.
  */
 function buildPerf2d(): FixtureScene {
   const entities: FixtureEntity[] = [];

@@ -61,7 +61,7 @@ export function resolveBackend(
     if (!backend.isConfigured()) continue;
     if (!(backend.capabilities as ProviderCapability[]).includes(capability)) continue;
     // Track first capable backend as fallback
-    if (!firstCapable) firstCapable = backend;
+    firstCapable ??= backend;
     // Skip unhealthy backends — failover to next in priority order
     if (!providerHealthMonitor.isHealthy(backend.id)) continue;
     return buildRoute(backend, capability, preferredModel);

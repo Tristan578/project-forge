@@ -858,11 +858,16 @@ describe('editorStore', () => {
     });
 
     it('loadTexture dispatches load_texture command', () => {
+      // A raw body (no `data:` header) is typed by its first bytes before the
+      // command is built, and one that is neither PNG nor JPEG is refused
+      // without a dispatch (#10396) - which is where the old fixture
+      // 'base64image==' went. This is the PNG signature; the slice suite
+      // pins the refusal itself.
       const state = useEditorStore.getState();
-      state.loadTexture('base64image==', 'texture.png', 'entity-1', 'baseColorTexture');
+      state.loadTexture('iVBORw0KGgo=', 'texture.png', 'entity-1', 'baseColorTexture');
 
       expect(mockDispatch).toHaveBeenCalledWith('load_texture', {
-        dataBase64: 'base64image==',
+        dataBase64: 'iVBORw0KGgo=',
         name: 'texture.png',
         entityId: 'entity-1',
         slot: 'baseColorTexture',

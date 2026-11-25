@@ -76,17 +76,47 @@ expect() {
 }
 readonly -f expect
 
+# assert_no_raw_start <case> <result> — the hook's EMITTED guidance must never
+# tell an operator to run the taskboard binary by hand (#9995 / #10291): a raw
+# `taskboard start` lets the binary fall back to its own default database path,
+# which is the divergence the runtime launcher exists to close. This is an
+# occurrence check on the live output (a whole-word `taskboard start`, whatever
+# precedes it), not a containment check on the hook's source, so a comment or a
+# re-worded remedy cannot satisfy it (lessons-learned #16). The launcher line
+# `taskboard-launch.mjs start` never matches: its hyphen breaks the word.
+assert_no_raw_start() {
+  local desc="$1" res="$2" out="${2#*|}"
+  if grep -qE '(^|[^-[:alnum:]_])taskboard start' <<<"$out"; then
+    bad "$desc — emitted guidance still prescribes a raw 'taskboard start': $out"
+  else
+    ok "$desc"
+  fi
+}
+readonly -f assert_no_raw_start
+
 echo "=== on-prompt-submit.sh tests ==="
 
 # ---- 1. server unreachable: warn, exit 0, nothing else runs ------------------
+res="$(run_hook "implement the login form" STUB_API_AVAILABLE=0)"
 expect "1. unreachable API warns 'Server not reachable' and exits 0" \
-  "$(run_hook "implement the login form" STUB_API_AVAILABLE=0)" 0 \
+  "$res" 0 \
   "[TASKBOARD] Server not reachable" "~NO ACTIVE TICKET" "~Board has 0 tickets"
+expect "1b. the unreachable-server remedy is the runtime launcher" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs start"
+assert_no_raw_start "1c. the unreachable-server remedy never prescribes a raw 'taskboard start'" "$res"
+# `start` refuses on a machine with no database yet, so the hint must also name
+# the one command that creates it, and the pull that fills it afterwards.
+expect "1d. the unreachable-server hint gives the first-run 'init' and the pull after it" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs init" "python3 .claude/hooks/github_project_sync.py pull"
 
 # ---- 2. board health: the direct curl fails locally -> 0-ticket warning ------
+res="$(run_hook "hello" STUB_API_AVAILABLE=1)"
 expect "2. with the API up, the health probe against the sentinel TB_API reports 0 tickets" \
-  "$(run_hook "hello" STUB_API_AVAILABLE=1)" 0 \
+  "$res" 0 \
   "[TASKBOARD WARNING] Board has 0 tickets"
+expect "2b. the 0-ticket restart remedy is the runtime launcher" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs start"
+assert_no_raw_start "2c. the 0-ticket restart remedy never prescribes a raw 'taskboard start'" "$res"
 
 # ---- 3. stale in-progress tickets are listed ---------------------------------
 expect "3. stale in-progress tickets are surfaced with their lines" \

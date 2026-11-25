@@ -41,8 +41,14 @@ pub(super) fn apply_game_component_adds(
     // replace the first, and a player given a Character Controller and Health
     // in one frame kept only Health (#10193).
     let mut staged = StagedGameComponents::default();
+    // An add whose entity is not in the world yet — its `spawn_entity` is a
+    // deferred `Commands::spawn` from the SAME frame — is carried to the next
+    // frame rather than dropped; the first live run of the replay gate built a
+    // scene in one block and lost every component this way, silently (#10007).
+    let mut unmatched = Vec::new();
     for request in requests {
         let Some((entity, _eid, existing)) = entity_query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id) else {
+            unmatched.push(request);
             continue;
         };
 
@@ -77,6 +83,12 @@ pub(super) fn apply_game_component_adds(
     }
     for (entity, gc) in staged.into_inserts() {
         commands.entity(entity).insert(gc);
+    }
+    for dropped in pending.defer_game_component_adds(unmatched) {
+        log(&format!(
+            "add_game_component dropped: entity {} not found after {} frames (component {})",
+            dropped.entity_id, dropped.deferred_frames, dropped.component_type
+        ));
     }
 }
 

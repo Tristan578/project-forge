@@ -14,6 +14,7 @@ import {
   GPU_INIT_TIMEOUT_MS,
   WASM_FETCH_TIMEOUT_MS,
   ENGINE_GLOBAL_TIMEOUT_MS,
+  PLAY_ENGINE_ORIGIN_TIMEOUT_MS,
   EXPORTED_SCENE_LOAD_TIMEOUT_MS,
   EXPORTED_SCENE_LOAD_RETRY_MS,
   API_MAX_DURATION_DEFAULT_S,
@@ -117,6 +118,14 @@ describe('Engine / WASM loading timeouts', () => {
 
   it('ENGINE_GLOBAL_TIMEOUT_MS is 30 seconds', () => {
     expect(ENGINE_GLOBAL_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it('two play glue deadlines fit under the global engine budget (#7580)', () => {
+    expect(PLAY_ENGINE_ORIGIN_TIMEOUT_MS).toBe(12_000);
+    // CDN glue + same-origin glue must both be able to time out and still
+    // leave the page's global deadline unexpired, or a stalled CDN turns into
+    // a global timeout on a page with a working fallback.
+    expect(2 * PLAY_ENGINE_ORIGIN_TIMEOUT_MS).toBeLessThan(ENGINE_GLOBAL_TIMEOUT_MS);
   });
 
   it('the exported scene load waits up to 30 s, polling every 50 ms (#10013)', () => {

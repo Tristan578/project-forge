@@ -47,7 +47,7 @@
 | `streaming` | `streaming.ts` | Unified SSE streaming helper for AI generation endpoints — wraps `ReadableStream` with progress events |
 | `systemDecomposer` | `systemDecomposer.ts` | Decomposes a game description into composable systems (movement, camera, challenge, etc.) — replaces the deprecated `detectGenre()` approach |
 | `texturePainter` | `texturePainter.ts` | Generates texture modification prompts and applies AI-generated texture patches to entities |
-| `tierAccess` | `tierAccess.ts` | Tier-based access control for AI panels — gates premium AI features by user subscription tier |
+| `tierAccess` | `tierAccess.ts` | Tier-based access control for AI panels — gates premium AI features by `effectiveTier`: the account's subscription tier, except a `starter` account holding spendable tokens (the signup trial, or a cancelled subscription's leftover balance) is treated as `hobbyist` |
 | `toolAdapter` | `toolAdapter.ts` | Converts MCP command manifest tools to AI SDK v5 tool definitions for use in `streamText` calls |
 | `tutorialGenerator` | `tutorialGenerator.ts` | Auto-generates in-editor tutorials and tooltips from the current scene's active systems |
 | `worldBuilder` | `worldBuilder.ts` | Generates lore, factions, regions, and history from a world concept for RPG and open-world games |

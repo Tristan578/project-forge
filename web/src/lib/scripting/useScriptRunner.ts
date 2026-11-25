@@ -22,6 +22,16 @@ import { collider2dHalfHeight } from '@/lib/scripting/collider2dExtent';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
 import { handleLocalScriptCommand } from '@/lib/scripting/localScriptCommands';
 import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
+import { getScriptIsolationMode, resolveScriptTransport } from '@/lib/scripting/sandboxConfig';
+import {
+  createSandboxedScriptHost,
+  loadSandboxWorkerSource,
+  SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
+  SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
+  type ScriptWorkerLike,
+} from '@/lib/scripting/sandboxOrigin';
 
 /**
  * The Y scale the engine reported for one entity this tick, or 1.
@@ -42,7 +52,18 @@ function tickScaleY(entities: unknown, entityId: string): number {
   return scale[1];
 }
 
-const WATCHDOG_TIMEOUT_MS = 5000;
+/**
+ * How long a play session waits for the worker to answer a tick before calling
+ * it a possible infinite loop. Exported so the sandbox's own boot timeout
+ * (`SANDBOX_BOOT_TIMEOUT_MS`, which must be shorter) is tested against it.
+ */
+export const WATCHDOG_TIMEOUT_MS = 5000;
+
+/**
+ * How many sandbox `runtime` failure details one Play session writes to the
+ * devtools before a single "suppressed" line. See `reportSandboxRuntimeFailure`.
+ */
+export const SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT = 5;
 const OCCLUSION_RAYCAST_INTERVAL_MS = 250; // Check occlusion 4x per second
 
 // Module-level collision callback (replaces window.__scriptCollisionCallback)
@@ -75,7 +96,7 @@ interface ScriptRunnerOptions {
 
 export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const engineMode = useEditorStore((s) => s.engineMode);
-  const workerRef = useRef<Worker | null>(null);
+  const workerRef = useRef<ScriptWorkerLike | null>(null);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addScriptLog = useEditorStore((s) => s.addScriptLog);
   const elapsedRef = useRef(0);
@@ -90,6 +111,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   // runs inside the per-frame command drain, so a bad call in `onUpdate` would
   // otherwise log at 60Hz and bury every other line in the script console.
   const reportedFailuresRef = useRef<Set<string>>(new Set());
+  // Sandbox `runtime` failures seen this play session. A script can throw
+  // uncaught errors for as long as Play runs (`setInterval(() => { throw … }, 0)`),
+  // and the host relays every one, so reporting them 1:1 is an unbounded console
+  // and store-update loop. Reset with `reportedFailuresRef`, at session start.
+  const sandboxRuntimeFailuresRef = useRef(0);
 
   /**
    * Surface an engine refusal instead of swallowing it.
@@ -124,6 +150,83 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     });
   }, [addScriptLog]);
 
+  /**
+   * An uncaught error in a sandboxed worker that had already started. Play keeps
+   * running — the scripts may well still be working — so this neither stops Play
+   * nor touches the watchdog; it only reports, and reports boundedly:
+   *
+   * - The script console gets the fixed creator message ONCE per session. It is
+   *   the same words every time, so a second copy tells the creator nothing and
+   *   costs a store update (and a panel re-render) per error.
+   * - The devtools get the first {@link SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT}
+   *   raw details, then one "suppressed" line, then nothing. Not once: `detail`
+   *   differs per error and is the developer's only account of it, so the first
+   *   few show whether this is one error repeating or several distinct ones.
+   *   Not unbounded: past that, more lines add nothing and would bury the rest.
+   */
+  const reportSandboxRuntimeFailure = useCallback((detail: string) => {
+    const seen = ++sandboxRuntimeFailuresRef.current;
+    if (seen <= SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT) {
+      console.error(`[ScriptRunner] Script sandbox runtime failure: ${detail}`);
+    } else if (seen === SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT + 1) {
+      console.error('[ScriptRunner] Further script sandbox runtime failures this Play session are suppressed.');
+    }
+    if (seen === 1) {
+      addScriptLog({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE, timestamp: Date.now() });
+    }
+  }, [addScriptLog]);
+
+  /**
+   * End the current Play session's script side: release the worker/host and
+   * reset everything the session armed. Idempotent — a second call finds no
+   * worker and only re-resets already-empty state.
+   *
+   * Every path that stops Play from INSIDE the session (the watchdog, a sandbox
+   * boot failure) must call this before `setEngineMode('edit')`, not leave it to
+   * the edit-mode branch of the effect below. That branch is guarded on
+   * `workerRef.current`, and the play-mode branch on `!workerRef.current`: a
+   * ref left pointing at a dead host makes the next Play start nothing, and a
+   * ref nulled without the rest of this skips the rest of the teardown.
+   */
+  const endPlaySession = useCallback(() => {
+    setPlayTickCallback(null);
+    collisionEventCallbackRef.current = null;
+    gameEventCallbackRef.current = null;
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+    // Reset delta serializers
+    if (entityDeltaRef.current) {
+      entityDeltaRef.current.reset();
+      entityDeltaRef.current = null;
+    }
+    if (entityInfoDeltaRef.current) {
+      entityInfoDeltaRef.current.reset();
+      entityInfoDeltaRef.current = null;
+    }
+    // Reset async channel router
+    if (routerRef.current) {
+      routerRef.current.reset();
+      routerRef.current = null;
+    }
+    clearGroundedStates();
+    resetPlayTickBus();
+    // Any 2D raycast still awaiting an engine answer will never get one:
+    // the worker is being terminated. Dropping the slots rejects those
+    // promises now instead of leaving a restarted session inheriting the
+    // previous one's queue alignment (#9271).
+    resetRaycast2dQueue();
+    // Nulled BEFORE the worker is touched, so nothing below can leave it stale.
+    const worker = workerRef.current;
+    workerRef.current = null;
+    if (worker) {
+      worker.postMessage({ type: 'stop' });
+      worker.terminate();
+    }
+    useEditorStore.getState().setHudElements([]);
+  }, []);
+
   const dispatchCommand = useCallback(
     (command: string, payload: unknown): unknown => {
       // The one dispatch path that carries genuinely untrusted structure: a
@@ -151,16 +254,74 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     [wasmModule, reportDispatchFailure]
   );
 
+  // Sandboxed transport only: fetch the bundled worker text now, not at Play.
+  // The 5 s watchdog starts on the first tick, and a cold chunk load of ~150 KB
+  // must not be what spends it. A failure here is retried (and reported) when
+  // Play actually starts.
+  useEffect(() => {
+    if (resolveScriptTransport(getScriptIsolationMode()).transport !== 'sandboxed-origin') return;
+    loadSandboxWorkerSource().catch(() => undefined);
+  }, []);
+
   // Start worker when entering Play mode
   useEffect(() => {
     if (engineMode === 'play' && !workerRef.current && wasmModule) {
       // Fresh session, fresh dedupe: a name refused during the last run must be
       // reported again if the author hits Play without having fixed it.
       reportedFailuresRef.current.clear();
-      const worker = new Worker(
-        new URL('./scriptWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      sandboxRuntimeFailuresRef.current = 0;
+      // Transport only (#8700). Both branches run the same scriptWorker.ts and
+      // receive/emit the same messages; everything below this line is shared.
+      // NEXT_PUBLIC_SCRIPT_ISOLATION is read inside getScriptIsolationMode() as a
+      // literal member expression — see sandboxConfig.ts.
+      const { transport, notice, noticeDetail } = resolveScriptTransport(getScriptIsolationMode());
+      const worker: ScriptWorkerLike =
+        transport === 'sandboxed-origin'
+          ? createSandboxedScriptHost({
+              // The script console is read by game creators: it gets plain
+              // words, and the raw error / bundling hint goes to the devtools.
+              onError: (...report) => {
+                // Destructured from the rest tuple so `phase` narrows `reason`:
+                // past the runtime branch it is a SandboxBootFailureReason.
+                const [detail, phase, reason] = report;
+                if (phase === 'runtime') {
+                  reportSandboxRuntimeFailure(detail);
+                  return;
+                }
+                console.error(`[ScriptRunner] Script sandbox ${phase} failure (${reason}): ${detail}`);
+                // A worker the browser refused will be refused again, and a
+                // build without the bundled worker fails on every Play, so the
+                // retry advice would be a dead end for both: say what is true
+                // instead. A timeout or a failed source load may be transient.
+                const creatorMessage =
+                  reason === 'worker-error'
+                    ? SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE
+                    : reason === 'not-bundled'
+                      ? SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE
+                      : SCRIPT_SANDBOX_START_FAILED_MESSAGE;
+                // The scripts never started and never will this session. Say so
+                // ONCE and stop Play now: left running, the ticks keep arming
+                // the watchdog, and 5 s later it would tell the creator their
+                // script is a possible infinite loop — which it is not. The host
+                // reports nothing after terminate(), so this is always the live
+                // session. It is torn down HERE, not left to the edit-mode
+                // branch: until that ran, `workerRef` held this dead host, and
+                // a play-mode effect run in between saw a worker "running" and
+                // started nothing (Sentry review on #10256).
+                endPlaySession();
+                addScriptLog({ entityId: '*', level: 'error', message: creatorMessage, timestamp: Date.now() });
+                showError(creatorMessage);
+                useEditorStore.getState().setEngineMode('edit');
+              },
+            })
+          : new Worker(
+              new URL('./scriptWorker.ts', import.meta.url),
+              { type: 'module' }
+            );
+      if (notice) {
+        if (noticeDetail) console.warn(`[ScriptRunner] ${noticeDetail}`);
+        addScriptLog({ entityId: '*', level: 'warn', message: notice, timestamp: Date.now() });
+      }
 
       // Initialize async channel router
       const router = new AsyncChannelRouter();
@@ -260,7 +421,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             });
             break;
           case 'ui':
-            setHudElements(msg.elements || []);
+            setHudElements(msg.elements ?? []);
             break;
           case 'ui_screen': {
             try {
@@ -283,7 +444,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'camera_set_mode': {
             const { mode } = msg;
             const store = useEditorStore.getState();
-            const primaryId = store.activeGameCameraId || store.primaryId;
+            const primaryId = store.activeGameCameraId ?? store.primaryId;
             if (primaryId) {
               const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
               store.setGameCamera(primaryId, { ...existing, mode });
@@ -293,7 +454,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'camera_set_target': {
             const { entityId: targetEntityId } = msg;
             const store = useEditorStore.getState();
-            const primaryId = store.activeGameCameraId || store.primaryId;
+            const primaryId = store.activeGameCameraId ?? store.primaryId;
             if (primaryId) {
               const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
               store.setGameCamera(primaryId, { ...existing, targetEntity: targetEntityId });
@@ -312,7 +473,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'camera_set_property': {
             const { property, value } = msg;
             const store = useEditorStore.getState();
-            const primaryId = store.activeGameCameraId || store.primaryId;
+            const primaryId = store.activeGameCameraId ?? store.primaryId;
             if (primaryId) {
               const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
               store.setGameCamera(primaryId, { ...existing, [property]: value });
@@ -387,6 +548,17 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             }
             break;
           }
+          case 'init_done':
+            // The worker finished `init`. It exists for the sandboxed frame,
+            // which reads the worker's first message as "the scripts started"
+            // (see scriptWorker.ts). Nothing to do here beyond the watchdog
+            // clear above: it is not a command, a log, or an error.
+            break;
+          case 'tick_done':
+            // The worker finished a tick. Its whole job is the watchdog clear
+            // above: a script that never calls forge.* posts nothing else, and
+            // without this Play stopped after 5 s (#10286).
+            break;
         }
       };
 
@@ -422,6 +594,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         // above the collider of anything shorter.
         entityInfos[eid] = {
           name: node.name,
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a component name not found is unset; falls back to 'unknown'
           type: node.components.find(c => c.startsWith('EntityType')) || 'unknown',
           colliderRadius: 0.5,
           // 0 UNTIL THE ENGINE REPORTS A TRANSFORM, and deliberately not a
@@ -488,6 +661,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
 
       // Send scene info to worker
       const sceneNames = store.scenes.map(s => s.name);
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank active scene name is unset; falls back to 'Main'
       const activeScene = store.scenes.find(s => s.id === store.activeSceneId)?.name || 'Main';
       worker.postMessage({
         type: 'scene_info',
@@ -538,26 +712,24 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         });
 
         // Start watchdog — if Worker doesn't respond in 5s, terminate it
-        if (!watchdogRef.current) {
-          watchdogRef.current = setTimeout(() => {
-            console.error('[ScriptRunner] Worker timeout — possible infinite loop. Terminating.');
-            showError('Script timed out — possible infinite loop detected. Play mode stopped.');
-            addScriptLog({
-              // '*' for the same reason as above: '' matched no entity, so the
-              // one message explaining why Play stopped was never displayed.
-              entityId: '*',
-              level: 'error',
-              message: 'Script execution timed out (possible infinite loop). Play mode stopped.',
-              timestamp: Date.now(),
-            });
-            workerRef.current?.terminate();
-            workerRef.current = null;
-            watchdogRef.current = null;
-            setPlayTickCallback(null);
-            // Stop play mode via store action
-            useEditorStore.getState().setEngineMode('edit');
-          }, WATCHDOG_TIMEOUT_MS);
-        }
+        watchdogRef.current ??= setTimeout(() => {
+          console.error('[ScriptRunner] Worker timeout — possible infinite loop. Terminating.');
+          showError('Script timed out — possible infinite loop detected. Play mode stopped.');
+          addScriptLog({
+            // '*' for the same reason as above: '' matched no entity, so the
+            // one message explaining why Play stopped was never displayed.
+            entityId: '*',
+            level: 'error',
+            message: 'Script execution timed out (possible infinite loop). Play mode stopped.',
+            timestamp: Date.now(),
+          });
+          // The whole teardown, not just the worker: nulling `workerRef` makes
+          // the edit-mode branch below skip everything else it would reset.
+          watchdogRef.current = null;
+          endPlaySession();
+          // Stop play mode via store action
+          useEditorStore.getState().setEngineMode('edit');
+        }, WATCHDOG_TIMEOUT_MS);
 
         // Gather 2D state for the worker (tilemap data can change during play via setTile)
         const currentStore = useEditorStore.getState();
@@ -694,40 +866,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
 
     // Stop worker when leaving Play mode
     if (engineMode === 'edit' && workerRef.current) {
-      setPlayTickCallback(null);
-      collisionEventCallbackRef.current = null;
-      gameEventCallbackRef.current = null;
-      if (watchdogRef.current) {
-        clearTimeout(watchdogRef.current);
-        watchdogRef.current = null;
-      }
-      // Reset delta serializers
-      if (entityDeltaRef.current) {
-        entityDeltaRef.current.reset();
-        entityDeltaRef.current = null;
-      }
-      if (entityInfoDeltaRef.current) {
-        entityInfoDeltaRef.current.reset();
-        entityInfoDeltaRef.current = null;
-      }
-      // Reset async channel router
-      if (routerRef.current) {
-        routerRef.current.reset();
-        routerRef.current = null;
-      }
-      clearGroundedStates();
-      resetPlayTickBus();
-      // Any 2D raycast still awaiting an engine answer will never get one:
-      // the worker is being terminated. Dropping the slots rejects those
-      // promises now instead of leaving a restarted session inheriting the
-      // previous one's queue alignment (#9271).
-      resetRaycast2dQueue();
-      workerRef.current.postMessage({ type: 'stop' });
-      workerRef.current.terminate();
-      workerRef.current = null;
-      useEditorStore.getState().setHudElements([]);
+      endPlaySession();
     }
-  }, [engineMode, wasmModule, dispatchCommand, addScriptLog]);
+  }, [engineMode, wasmModule, dispatchCommand, addScriptLog, reportSandboxRuntimeFailure, endPlaySession]);
 
   // Export collision callback via module-level variable (not window global)
   useEffect(() => {

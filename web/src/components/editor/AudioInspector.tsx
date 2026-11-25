@@ -9,7 +9,7 @@ import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
@@ -134,7 +134,11 @@ export function AudioInspector() {
   const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
   const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
 
-  const tier = useUserStore((s) => s.tier);
+  const rawTier = useUserStore((s) => s.tier);
+  const spendableTokens = useUserStore((s) => s.spendableTokens);
+  const profileLoaded = useUserStore((s) => s.profileLoaded);
+  // A starter account with trial tokens reads as hobbyist here (#7715).
+  const tier = effectiveTier(rawTier, spendableTokens);
   // #9117: a capability NO key can enable (`unprovisionable`) is disabled here,
   // at the entry point, not two clicks later inside an empty dialog — for BOTH
   // buttons, so the next declared-unavailable capability is handled the same
@@ -150,8 +154,12 @@ export function AudioInspector() {
     useGenerationGate('voice-generation'),
   ]);
   const musicGate = useGenerationGate('music-generation');
-  const soundTierOk = canAccessPanel('generate-sound', tier);
-  const musicTierOk = canAccessPanel('generate-music', tier);
+  // Before /api/user/profile resolves, `tier`/`spendableTokens` are still
+  // defaults. The same rule every editor gate uses decides the loading
+  // window: a panel the trial can open (hobbyist tier) reads as unlocked,
+  // anything above stays locked (#7715 review round 3).
+  const soundTierOk = profileLoaded ? canAccessPanel('generate-sound', tier) : canAccessPanelBeforeProfileLoad('generate-sound');
+  const musicTierOk = profileLoaded ? canAccessPanel('generate-music', tier) : canAccessPanelBeforeProfileLoad('generate-music');
   // While the first /api/capabilities body is in flight nothing is known yet,
   // so the button must not paint as ready and then contradict itself when the
   // answer lands. Held closed for that window rather than opening a dialog

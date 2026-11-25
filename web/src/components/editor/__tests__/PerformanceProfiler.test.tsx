@@ -426,6 +426,7 @@ describe('PerformanceProfiler', () => {
       const { container } = render(<PerformanceProfiler />);
       const controls = controlsIn(container);
       expect(controls).toHaveLength(count);
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- test helper: a blank aria-label falls back to element text content for naming a control
       const nameOf = (el: HTMLElement) => el.getAttribute('aria-label') || el.textContent?.trim() || el.tagName.toLowerCase();
       expect(controls.map((el) => `${nameOf(el)}: ${el.getAttribute(PRIMITIVE_ATTR)}`)).toEqual(
         controls.map((el) => `${nameOf(el)}: ${expectedPrimitive(el)}`),

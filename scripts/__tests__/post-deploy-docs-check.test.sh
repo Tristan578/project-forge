@@ -32,7 +32,9 @@ COMMIT_MODULE="$HERE/../../apps/docs/lib/commit.ts"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "  FAIL: script not found: $SCRIPT"; echo "SUITE FAILED"; exit 1; }
 [ -f "$CD_YML" ] || { echo "  FAIL: workflow not found: $CD_YML"; echo "SUITE FAILED"; exit 1; }
@@ -100,6 +102,7 @@ chmod +x "$TMP/bin/curl"
 DEPLOYED_SHA='abcdef1234567890abcdef1234567890abcdef12'
 OTHER_SHA='0123456789abcdef0123456789abcdef01234567'
 stamp() { printf '<head><meta name="spawnforge-docs-commit" content="%s"/></head>' "$1"; }
+readonly -f stamp
 
 # The shapes the live pages render. A category tile is the ONLY thing `/mcp`
 # emits when publicCount > 0 that it does not emit when publicCount == 0.
@@ -145,8 +148,11 @@ e2e() {
     bash "$SCRIPT" "${URL:-https://docs.example.test}" 2>&1
   )
 }
+readonly -f e2e
 index_hits() { grep -cx 'https://docs.example.test/mcp' "$TMP/args" || true; }
+readonly -f index_hits
 category_hits() { grep -cx 'https://docs.example.test/mcp/scene' "$TMP/args" || true; }
+readonly -f category_hits
 
 # --- refusal: no target ---
 OUT="$(DOCS_CHECK_EXPECT_COMMIT="$DEPLOYED_SHA" bash "$SCRIPT" 2>&1)"; RC=$?
@@ -488,6 +494,7 @@ bash4_hits() {
   grep -nE "$BASH4_ONLY_RE" "$1" || true
   return 0
 }
+readonly -f bash4_hits
 
 # Self-test: the detector can fire, and does not fire on the portable idioms
 # this script legitimately uses. A scan that can only return "clean" is not a
@@ -753,6 +760,7 @@ scan_seam() {
   grep -vE ':[[:space:]]*#' <<<"$raw" || true
   return "$rc"
 }
+readonly -f scan_seam
 
 # Self-test: every arm of the scan can fire.
 SEAM_FIX="$TMP/seam"

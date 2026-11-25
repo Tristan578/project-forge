@@ -17,6 +17,12 @@
 # CONTENT of the failure (the exact path, the exact event), not merely a
 # non-zero exit, so a gate that fails for the wrong reason does not pass here.
 #
+# One case at the end is NOT part of that contract: it pins the committed
+# .mcp.json's `alwaysLoad` allowlist (#8695). That key is Claude Code only and
+# the port gate deliberately ignores it, but this is the suite that already
+# parses the real .mcp.json and runs in CI, so the pin lives here rather than
+# in a one-case suite of its own. Search for "alwaysLoad" to find it.
+#
 # Fixture hooks avoid jq on purpose: the suite must run where jq is absent.
 #
 # Assertions use explicit if/then/else (NOT `A && ok || bad`) so the suite has
@@ -38,8 +44,11 @@ done
 
 PASS=0; FAIL=0; SKIP=0
 ok()   { PASS=$((PASS + 1)); echo "  ok    $1"; }
+readonly -f ok
 bad()  { FAIL=$((FAIL + 1)); echo "  FAIL  $1"; }
+readonly -f bad
 skip() { SKIP=$((SKIP + 1)); echo "  skip  $1"; }
+readonly -f skip
 
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -49,21 +58,25 @@ gen() {
   OUT="$(CODEX_PORT_ROOT="$1" node "$GEN" "$2" 2>&1)"
   RC=$?
 }
+readonly -f gen
 
 # expect_rc <want> <label>
 expect_rc() {
   if [ "$RC" -eq "$1" ]; then ok "$2 (exit $1)"; else bad "$2 — wanted exit $1, got $RC: $OUT"; fi
 }
+readonly -f expect_rc
 
 # expect_out <fixed-string> <label> — the failure must NAME the thing.
 expect_out() {
   if grep -qF -- "$1" <<<"$OUT"; then ok "$2"; else bad "$2 — output lacks '$1': $OUT"; fi
 }
+readonly -f expect_out
 
 # expect_no_out <fixed-string> <label> — and must NOT say the wrong thing.
 expect_no_out() {
   if grep -qF -- "$1" <<<"$OUT"; then bad "$2 — output contains '$1': $OUT"; else ok "$2"; fi
 }
+readonly -f expect_no_out
 
 # mkfix — build a minimal but complete source tree; echoes its path.
 mkfix() {
@@ -76,6 +89,9 @@ mkfix() {
   # both sides) rather than borrowing one from the real manifest, whose
   # `skills.independent` is empty by design since #10131.
   json_set "$d/tools/agentic-sync/port.json" skills.independent.kanban '"fixture: exists on both sides on purpose"'
+  # The real manifest's Claude-only MCP matcher names a group the fixture's own
+  # settings.json does not have, which the generator rightly calls stale.
+  json_set "$d/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{}'
   cp "$ADAPTER" "$d/.codex/hooks/run-claude-hook.mjs"
   # The real adapter's messages send readers to this file, and the reference
   # validator resolves every path a .codex/ file names — so the fixture has one.
@@ -122,6 +138,7 @@ AGENT
 SETTINGS
   echo "$d"
 }
+readonly -f mkfix
 
 # json_get <file> <dotted.path> — jq-free JSON probe. Walks the path; prints a
 # string as-is and anything else as JSON. Two suffixes cover what the cases
@@ -139,6 +156,7 @@ json_get() {
     process.stdout.write(typeof v === "string" ? v : JSON.stringify(v) ?? "undefined");
   ' "$1" "$2"
 }
+readonly -f json_get
 
 # json_set <file> <dotted.path> <json-value> — jq-free, and evaluates no code.
 json_set() {
@@ -153,6 +171,7 @@ json_set() {
     fs.writeFileSync(file, JSON.stringify(doc));
   ' "$1" "$2" "$3"
 }
+readonly -f json_set
 
 # lock_set <fixture> <path> <json-value> — write one entry of the lock's `generated` map.
 lock_set() {
@@ -164,6 +183,7 @@ lock_set() {
     fs.writeFileSync(file, JSON.stringify(l));
   ' "$1/tools/agentic-sync/port.lock.json" "$2" "$3"
 }
+readonly -f lock_set
 
 # file_replace <file> <from> <to> — literal, first occurrence; `|` in <to> is a
 # newline. (Not sed: BSD sed has no newline in a replacement, and this suite
@@ -177,6 +197,7 @@ file_replace() {
     fs.writeFileSync(file, s.replace(from, to.split("|").join("\n")));
   ' "$1" "$2" "$3"
 }
+readonly -f file_replace
 
 echo "== generator: write, check, idempotence =="
 F="$(mkfix)"
@@ -668,6 +689,7 @@ mcp_launch() {
   printf '{"mcpServers":{"alpha":{"command":"%s","args":%s}}}\n' "$1" "$2" > "$F/.mcp.json"
   printf '[mcp_servers.alpha]\ncommand = "%s"\nargs = %s\n%sdefault_tools_approval_mode = "prompt"\n' "$1" "$2" "$cwd_line" > "$F/.codex/config.toml"
 }
+readonly -f mcp_launch
 LAUNCH_ROWS=0
 while IFS='|' read -r LABEL COMMAND ARGS CWD NEEDLE; do
   [ -n "$LABEL" ] || continue
@@ -831,6 +853,7 @@ dead_ref() {
   gen "$F" --check
   if [ "$RC" -eq 1 ] && grep -qF -- "$2" <<<"$OUT"; then ok "$3"; else bad "$3 — exit $RC, wanted '$2' in: $OUT"; fi
 }
+readonly -f dead_ref
 # live_ref <text> <label> — must NOT be reported.
 live_ref() {
   F="$(mkfix)"
@@ -839,6 +862,7 @@ live_ref() {
   gen "$F" --check
   if [ "$RC" -eq 0 ]; then ok "$2"; else bad "$2 — reported a live or non-repo path: $OUT"; fi
 }
+readonly -f live_ref
 # shellcheck disable=SC2016  # these are literal fixture text; nothing here should expand
 {
   dead_ref 'Run "$ROOT/.Codex/rules/x.md".'                                  'unresolved path .Codex/rules/x.md' 'a dead path after $ROOT/ is caught'
@@ -1235,6 +1259,33 @@ if [ "$(cat "$F/tools/agentic-sync/port.lock.json")" = '{ broken' ]; then
 else
   bad "--write rewrote an unparseable lock: $(head -c 120 "$F/tools/agentic-sync/port.lock.json")"
 fi
+# hooks.claudeOnlyMatchers (#10330): a group whose matcher names tools Codex has
+# no alias for is reported and left out, never mapped and never fatal; an
+# unlisted one still stops the generator; a stale or reasonless entry stops it.
+MCP_HOOKS='{"Stop":[{"hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}],"PreToolUse":[{"matcher":"mcp__x__(a|b)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]}'
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks "$MCP_HOOKS"
+json_set "$F/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{"mcp__x__(a|b)":"fixture: no Codex alias"}'
+gen "$F" --write; expect_rc 0 "a group listed in hooks.claudeOnlyMatchers does not stop the generator"
+expect_out "1 skipped by name" "…and is reported as skipped"
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.@keys')" = "Stop" ]; then
+  ok "…and is left out of hooks.json, while the rest is ported"
+else
+  bad "a Claude-only group reached hooks.json: $(json_get "$F/.codex/hooks.json" 'hooks.@keys')"
+fi
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks "$MCP_HOOKS"
+gen "$F" --check; expect_rc 2 "the same group NOT listed still stops the generator"
+expect_out "no entry in port.json hooks.toolAliases" "…naming the missing alias"
+F="$(mkfix)"
+json_set "$F/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{"mcp__gone__x":"fixture: stale"}'
+gen "$F" --check; expect_rc 2 "a claudeOnlyMatchers entry no group uses stops the generator"
+expect_out "remove the stale entry" "…saying it is stale"
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks "$MCP_HOOKS"
+json_set "$F/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{"mcp__x__(a|b)":""}'
+gen "$F" --check; expect_rc 2 "a claudeOnlyMatchers entry with no reason stops the generator"
+expect_out "manifest.hooks.claudeOnlyMatchers" "…naming the field"
 F="$(mkfix)"; printf '{"skills":{},"agents":{},"hooks":{}}' > "$F/tools/agentic-sync/port.json"
 gen "$F" --check; expect_rc 2 "a valid-JSON manifest missing required keys is exit 2 (it used to be a TypeError and exit 1, which the gate reads as drift)"
 expect_out "manifest.skills.source" "…naming the first missing field"
@@ -1635,6 +1686,7 @@ fi
 echo "== the wrapper: exit codes are the contract, and CI ignores the node override =="
 # The generator reads CODEX_PORT_ROOT; the wrapper locates node and the generator.
 wrap() { OUT="$(env -u CI "$@" bash "$WRAPPER" 2>&1)"; RC=$?; }
+readonly -f wrap
 F="$(mkfix)"; gen "$F" --write
 wrap CODEX_PORT_ROOT="$F"; expect_rc 0 "wrapper: an in-sync tree is exit 0"
 printf '\nedit\n' >> "$F/.claude/skills/alpha/SKILL.md"
@@ -1709,15 +1761,20 @@ adapt() {
   RC=$?
   ERR="$(cat "$ERR_FILE")"
 }
+readonly -f adapt
 # out_get <dotted.path> — read a field of the adapter's JSON stdout.
 out_get() { printf '%s' "$OUT" > "$H/out.json"; json_get "$H/out.json" "$1"; }
+readonly -f out_get
 # patch_payload <event> <patch-with-\n-escapes> — a Codex apply_patch payload.
 patch_payload() {
   printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"apply_patch","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"
 }
+readonly -f patch_payload
 # bash_payload <event> <command> — a Codex Bash payload.
 bash_payload() { printf '{"hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$2"; }
+readonly -f bash_payload
 runs() { grep -c "^$1=" "$LOG" 2>/dev/null || true; }
+readonly -f runs
 
 PATCH='*** Begin Patch\n*** Add File: web/src/new.ts\n+export const a = 1;\n*** Update File: web/src/old.ts\n@@\n-const b = 1;\n+const b = 2;\n*** Delete File: web/src/gone.ts\n*** End Patch\n'
 PAYLOAD="$(patch_payload PreToolUse "$PATCH")"
@@ -2282,8 +2339,10 @@ echo "== adapter: Codex's SECOND edit channel — a patch carried in a shell com
 # whose text has a `*** Add|Update|Delete File:` line either has every such path
 # inspected or is blocked; a command with none is ordinary. See carriedPatch().
 carried_payload() { printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"; }
+readonly -f carried_payload
 # heredoc <prefix> <patch-body-with-\n-escapes> — the plain heredoc form, behind an optional prefix.
 heredoc() { printf '%s' "${1}apply_patch <<'EOF'\n*** Begin Patch\n${2}\n*** End Patch\nEOF"; }
+readonly -f heredoc
 # Files the patches below UPDATE must exist: an update of a file that is not
 # there is how the adapter detects a base directory it cannot see.
 mkdir -p "$TMP_ROOT/protected" "$TMP_ROOT/docs" "$TMP_ROOT/web/src/lib"
@@ -2796,6 +2855,7 @@ adapt_path() {
   RC=$?
   ERR="$(cat "$ERR_FILE")"
 }
+readonly -f adapt_path
 # The control first: the same call with the PATH left alone runs the script, so a
 # block below is the missing jq and not a bash this helper failed to start.
 rm -f "$LOG"
@@ -3469,6 +3529,35 @@ if [ "$N" = "1" ]; then
 else
   bad "expected exactly 1 executable run of this suite in ci.yml, found $N — it would be linted but never executed"
 fi
+
+# -----------------------------------------------------------------------------
+# alwaysLoad stays on credential-free, read-only servers (#8695, board round 2).
+# `alwaysLoad` exempts a server from Tool Search deferral, so its tools are in
+# every context from session start, reviewer seats included, whose write block
+# covers Bash only. A server that reads credentials or can write to the
+# repository (github) must stay deferred. Codex never reads .mcp.json, so the
+# port gate above does not look at this key; this is the only pin on it.
+# The allowlist is exact: a server added to it needs the same argument made in
+# claude-platform-reference/SKILL.md. Any value other than false counts as set.
+ALWAYS_LOAD_ALLOWED="context7"
+ALWAYS_LOAD="$(node -e '
+const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).mcpServers || {};
+const names = Object.keys(m);
+if (names.length === 0) { console.log("!EMPTY"); process.exit(0); }
+for (const n of names) if (Object.prototype.hasOwnProperty.call(m[n], "alwaysLoad") && m[n].alwaysLoad !== false) console.log(n);
+' "$REPO_ROOT/.mcp.json")" || ALWAYS_LOAD="!PARSE"
+case "$ALWAYS_LOAD" in
+  '!PARSE'|'!EMPTY') bad ".mcp.json could not be read as a server map ($ALWAYS_LOAD), so the alwaysLoad pin checked nothing" ;;
+  *)
+    STRAY="$(grep -vxF "$ALWAYS_LOAD_ALLOWED" <<<"$ALWAYS_LOAD" | grep -v '^$' || true)"
+    if [ -n "$STRAY" ]; then
+      bad "alwaysLoad is set on a server outside the credential-free allowlist ($ALWAYS_LOAD_ALLOWED): $(tr '\n' ' ' <<<"$STRAY")"
+    elif [ "$ALWAYS_LOAD" != "$ALWAYS_LOAD_ALLOWED" ]; then
+      bad "the alwaysLoad allowlist names $ALWAYS_LOAD_ALLOWED but .mcp.json always-loads '$ALWAYS_LOAD' — update the allowlist and the skill together"
+    else
+      ok "only $ALWAYS_LOAD_ALLOWED sets alwaysLoad in .mcp.json (credentialed and write-capable servers stay deferred)"
+    fi ;;
+esac
 
 # =============================================================================
 echo ""

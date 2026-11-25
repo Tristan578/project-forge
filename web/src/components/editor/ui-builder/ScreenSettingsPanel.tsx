@@ -60,7 +60,7 @@ export function ScreenSettingsPanel() {
           <span className="text-zinc-400">Show on key</span>
           <input
             type="text"
-            value={activeScreen.showOnKey || ''}
+            value={activeScreen.showOnKey ?? ''}
             onChange={(e) => handleChange('showOnKey', e.target.value || null)}
             className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
             placeholder="Escape, Tab, etc."

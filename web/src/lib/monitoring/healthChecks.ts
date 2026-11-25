@@ -53,7 +53,7 @@ export interface ServiceHealth {
   status: ServiceStatus;
   latencyMs: number;
   lastChecked: string; // ISO timestamp
-  error?: string;
+  error?: string | undefined;
   /**
    * Public-safe one-liner saying WHAT is wrong (#9719). Unlike `error`, which
    * `sanitizeForPublic` replaces because it may carry env-var names or
@@ -70,7 +70,7 @@ export interface ServiceHealth {
    *
    *   - `computeOverallStatus` / `deriveOverallStatus` skip it, so the public
    *     banner and `/api/status`'s `overall` are not pinned amber forever, and
-   *   - `/api/cron/health-monitor` logs it at warn instead of paging Sentry
+   *   - `/api/cron/health-monitor` logs it at warn instead of reporting it to Sentry
    *     every 15 minutes (~96 synthetic-monitor exceptions a day) for a state
    *     the owner deliberately chose.
    *
@@ -80,7 +80,7 @@ export interface ServiceHealth {
    * never for an unreachable dependency, a rejected credential, or any `down`.
    */
   configurationOnly?: boolean;
-  details?: Record<string, unknown>;
+  details?: Record<string, unknown> | undefined;
 }
 
 export interface HealthReport {
@@ -145,6 +145,11 @@ export async function checkDatabase(): Promise<ServiceHealth> {
       withTimeout(
         (async () => {
           const { neon } = await import('@neondatabase/serverless');
+          const { applyE2eNeonEndpointOverride } = await import('@/lib/db/e2eNeonEndpoint');
+          // The CI engine-journeys job proves this probe reaches its per-run
+          // Postgres through a local Neon-protocol proxy; a no-op everywhere
+          // else (#10161).
+          applyE2eNeonEndpointOverride();
           const sql = neon(url);
           await sql`SELECT 1`;
         })(),
@@ -541,7 +546,8 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
  *               body strips both of those — in `summary`. Marked
  *               `configurationOnly` only when an explicit deployment baseline
  *               declares all the missing capabilities. Otherwise it affects
- *               overall health and synthetic-monitor paging
+ *               overall health and the synthetic health monitor's Sentry
+ *               report (there is no paging service)
  *   healthy   — chat resolves and every capability in CAPABILITY_ENV_VARS is
  *               configured
  *
@@ -838,6 +844,7 @@ export async function checkCloudflareR2(): Promise<ServiceHealth> {
   const bucketName = process.env[ASSET_STORAGE_ENV.bucketName];
 
   const allConfigured = !!(accountId && accessKeyId && secretAccessKey && bucketName);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is R2 partially configured); ?? cannot substitute this OR
   const anyConfigured = !!(accountId || accessKeyId || secretAccessKey || bucketName);
 
   const details = {
@@ -937,6 +944,9 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
         const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
         const handler = createGenerationHandler({
           route: '/api/health/factory-smoke',
+          // Never reached — the smoke test is unauthenticated and returns 401
+          // before the panel gate runs — but the field is required.
+          panel: 'ai-chat',
           provider: DB_PROVIDER.chat,
           operation: 'chat_short',
           rateLimitKey: 'health-smoke',

@@ -57,16 +57,43 @@ export default defineConfig({
   // (`dispatchCommand` returns void, so the fake-bridge integration suite can
   // never see one). Its describe block raises the cap to
   // E2E_TIMEOUT_PIPELINE_LIVE_MS.
-  // The @engine-ui set (#9586) lives across nine editor spec files, so file
+  // The @engine-ui set (#9586) lives across ten editor spec files, so file
   // matching can no longer be the primary filter -- the TAG is. Every test
   // selected here still has to carry @engine-smoke or @engine-ui, so an
   // untagged slow spec elsewhere cannot wander into this job's budget.
   //
-  // @engine-ui marks the 36 tests that assert on #game-canvas. The editor holds
-  // that canvas `invisible` until the Bevy/wgpu renderer starts, so they can
+  // @engine-ui marks the 38 tests, across ten files, that assert on
+  // #game-canvas (counted with `npx playwright test --list` against this config
+  // on 1693d6d2: 42 tests in 13 files in all; this comment said 36 across nine
+  // files before 9261e23f and 37 before 1693d6d2). The editor holds that canvas
+  // `invisible` until the Bevy/wgpu renderer starts, so they can
   // only pass where there is a real engine and a software GL context — which is
   // this job and nowhere else. They were previously excluded from the @ui job
   // and selected by nothing, i.e. they ran nowhere at all.
+  //
+  // journey-evidence-canary.spec.ts (#10157) is the third @engine-smoke spec:
+  // a /dev release journey that exists to prove the evidence pipeline on every
+  // PR.
+  // engine/inputReplay.spec.ts (#9902 → #10007) is the fourth: it replays a
+  // bounded 120-tick input trace through the real runtime input path with the
+  // engine's simulation clock PINNED (`pin_frame_rate`, one tick per rendered
+  // frame), which is what makes its moved-entity / one-collectible assertions
+  // deterministic under SwiftShader's variable frame rate, then exercises
+  // pause / cancel / restart and checks the restarted run lands within 0.01
+  // world units of the first. It raises its describe block to
+  // E2E_TIMEOUT_PIPELINE_LIVE_MS for the same reason pipeline-live-engine does:
+  // one cold boot, then three replays and two Play/Stop round-trips on top.
+  // Justification for the added minutes: docs/testing-principles.md §9.
+  // @release-journey is deliberately NOT in this grep — the account
+  // journeys planned under #9723 need a database and must not wander into this
+  // job; a journey lands here only by also carrying @engine-smoke. (Those
+  // account journeys are also refused by describeJourney() until #10266 adds
+  // trace/video redaction.)
+  //
+  // e2e/engine/referenceGames.spec.ts (#10159) is the fifth: it builds each
+  // versioned reference game through real engine commands and checks the
+  // engine's own export and scene graph against the fixture's expected-state
+  // record before pressing Play. It runs under the default cap.
   testMatch: '**/*.spec.ts',
   grep: /@engine-smoke|@engine-ui/,
   fullyParallel: true,
@@ -78,7 +105,23 @@ export default defineConfig({
   // Software rendering is CPU-bound; keep workers low so parallel WASM inits
   // don't starve each other and trip the engine-ready timeout.
   workers: 1,
-  reporter: [['github'], ['html', { open: 'never' }]],
+  // Stop after ten failed tests. `editor.load()` now really waits
+  // E2E_HYDRATION_TIMEOUT_MS (45s) for __FORGE_ENGINE_READY (it used to get
+  // actionTimeout's 10s, see #10336), so with a genuinely broken engine every
+  // test in this gate fails at ~45s, twice (retries: 1), on one worker: 42
+  // listed tests x 2 x 45s is ~63 minutes, past the job's 60-minute limit, and
+  // a job timeout skips the `!cancelled()` report upload. Ten failures cost
+  // ~15 minutes and still ship the report. A healthy engine never gets near it.
+  maxFailures: 10,
+  // The journey evidence reporter (#10157) writes web/journey-evidence/: one
+  // record per @release-journey test plus each attempt's trace and video. The
+  // CI job's post-run check (scripts/check-journey-evidence.ts) fails when a
+  // journey test has no record, so unregistering this reporter turns it red.
+  reporter: [
+    ['github'],
+    ['html', { open: 'never' }],
+    ['./e2e/lib/journeyEvidenceReporter.ts', { outputDir: 'journey-evidence' }],
+  ],
   timeout: E2E_TIMEOUT_ENGINE_FULL_MS,
   expect: { timeout: E2E_TIMEOUT_LOAD_MS },
 
@@ -86,6 +129,10 @@ export default defineConfig({
     baseURL: 'http://localhost:3000',
     actionTimeout: E2E_TIMEOUT_LOAD_MS,
     navigationTimeout: E2E_NAVIGATION_TIMEOUT_MS,
+    // Defaults for the @engine-smoke / @engine-ui tests. Release journeys
+    // override both to 'on' inside their describeJourney() block
+    // (e2e/fixtures/journey.fixture.ts), so every journey attempt keeps a trace
+    // and a video without the @engine-ui tests inflating the artifact.
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

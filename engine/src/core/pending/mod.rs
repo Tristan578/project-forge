@@ -32,6 +32,7 @@ pub mod procedural;
 pub mod query;
 pub mod resync;
 pub mod scene;
+pub mod simulation_clock;
 pub mod sprites;
 pub mod transform;
 
@@ -53,6 +54,7 @@ pub use procedural::*;
 pub use query::*;
 pub use resync::*;
 pub use scene::*;
+pub use simulation_clock::*;
 pub use sprites::*;
 pub use transform::*;
 
@@ -307,6 +309,9 @@ pub struct PendingCommands {
     pub optimize_scene_requests: Vec<OptimizeSceneRequest>,
     pub set_lod_distances_requests: Vec<SetLodDistancesRequest>,
     pub set_simplification_backend_requests: Vec<SetSimplificationBackendRequest>,
+    // simulation clock (#10007): drained in `First` by
+    // `core::simulation_clock::apply_frame_rate_pin_requests`, in BOTH builds.
+    pub frame_rate_pin_requests: Vec<crate::core::simulation_clock::FrameRatePinRequest>,
 }
 
 // === Thread-Local Bridge Access ===

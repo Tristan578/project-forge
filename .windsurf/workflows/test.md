@@ -29,7 +29,7 @@ cd web && npx vitest run
 4. Run MCP server tests:
 // turbo
 ```bash
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 ```
 
 5. Run E2E tests (requires WASM build in web/public/):

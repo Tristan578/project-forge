@@ -8,10 +8,24 @@
  * the product's headline capability had no control anywhere in the UI.
  *
  * Three states, in order: pick a game type -> describe it -> watch it build.
- * The run is started with `startQuickStart`, which auto-approves `gate_plan`
- * only — `gate_assets` / `gate_final` still stop the pipeline, so this dialog
- * renders the very same `ApprovalGateDialog` the orchestrator panel uses rather
- * than leaving a quick-start user stranded behind a gate they cannot see.
+ * "Plan my game" on the describe step calls `startQuickStart`, which only
+ * DESIGNS the game (metered by the decompose route) and stops at
+ * 'awaiting_approval'. The running view then shows the plan and its estimated
+ * token cost, and the build's tokens are reserved only when the user presses
+ * "Build it" there (owner decision on #6831: confirm the cost first). "Build
+ * it" means exactly that one action. "Discard plan" does not drop the plan:
+ * it arms, and the footer row then asks "Discard this plan?" with "Discard it"
+ * (drops the plan; it takes the place of "Build it") and "Keep plan" (backs
+ * out; it is the pressed "Discard plan" button, relabelled, and keeps focus).
+ * `useDiscardConfirm` holds the arm and is shared with OrchestratorPanel, which
+ * asks the same question in its own way. "Close" keeps the plan, and reopening
+ * the dialog returns to the review. The confirmation
+ * is the user's answer to `gate_plan`, which the slice therefore
+ * auto-approves; `gate_assets` / `gate_final` still stop the
+ * pipeline, so this dialog renders the same gate markup the orchestrator
+ * panel uses (`ApprovalGateSummary` in the body, `ApprovalGateActions` in the
+ * footer) rather than leaving a quick-start user stranded behind a gate they
+ * cannot see.
  *
  * Once the build completes the dialog offers "Play now": the status line
  * tells the user to press Play, and the only Play control lived in the
@@ -23,7 +37,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Compass, Crosshair, Gamepad2, Loader2, Puzzle, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button, Dialog, Label, Textarea } from '@spawnforge/ui';
+import { Button, Dialog, Label, Textarea, cn } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import {
@@ -31,13 +45,21 @@ import {
   type OrchestratorStatus,
 } from '@/stores/slices/orchestratorSlice';
 import {
+  DISCARD_CONFIRM_QUESTION,
+  OrchestratorErrorNotice,
+  errorReportsShortBalance,
+} from '@/components/editor/OrchestratorNotices';
+import { useDiscardConfirm } from '@/hooks/useDiscardConfirm';
+import {
   QUICK_START_GAME_TYPES,
   buildQuickStartPrompt,
   findQuickStartGameType,
   quickStartPromptMaxLength,
   type QuickStartGameType,
 } from '@/lib/game-creation/quickStart';
-import { ApprovalGateDialog } from '@/components/editor/ApprovalGateDialog';
+import type { ApprovalGate, OrchestratorPlan } from '@/lib/game-creation/types';
+import { ApprovalGateActions, ApprovalGateSummary } from '@/components/editor/ApprovalGateDialog';
+import { TokenCostBar, TokenCostTotal } from '@/components/editor/TokenCostBar';
 import { claimQuickStartGate } from '@/components/editor/quickStartGateOwner';
 
 /**
@@ -65,14 +87,48 @@ const STATUS_MESSAGES: Record<OrchestratorStatus, string> = {
 
 const GENERIC_FAILURE = 'Could not start building your game. Please try again.';
 
+/** Status line while the designed plan waits for the user's "Build it". */
+const PLAN_READY = 'Your game plan is ready. Review it, then build.';
+
+/** Status line between "Build it" and the run reporting 'executing'. */
+const STARTING_BUILD = 'Starting the build…';
+
+/** Status line for a plan whose build was refused before any step ran. */
+const BUILD_NOT_STARTED = 'The build did not start.';
+
+/** The dialog's error surface, shared by the review's refusal and a failed run. */
+const ALERT_CLASSES =
+  'rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]';
+
 /**
- * Shown when "Build it" is pressed while a run is already live. The slice
+ * Stand-in for a plan with no `gate_plan`. `planBuilder` always adds one, but
+ * the plan is caller-supplied data (`setPlan` is public), and a missing gate
+ * must not leave a designed plan with no "Build it" control at all.
+ */
+const FALLBACK_PLAN_GATE: ApprovalGate = {
+  id: 'gate_plan',
+  label: 'Review your game plan',
+  description: 'Check the plan and its cost before building starts.',
+  afterStepId: '',
+  status: 'pending',
+  displayData: {},
+};
+
+/**
+ * Shown when "Plan my game" is pressed while a run is already live. The slice
  * refuses (it would clear the live run's plan, gates and abort controller), so
  * the user has to be told why nothing new started.
  */
 const ALREADY_RUNNING = 'A build is already running. Wait for it to finish, or stop it first.';
 
 type Phase = 'pick' | 'describe' | 'running';
+
+/** Whether focus sits on an element inside any of `regions` (never on the page body). */
+function focusIsWithin(...regions: (HTMLElement | null)[]): boolean {
+  const active = document.activeElement;
+  if (!active || active === document.body) return false;
+  return regions.some((region) => region?.contains(active) ?? false);
+}
 
 export interface QuickStartDialogProps {
   open: boolean;
@@ -82,7 +138,7 @@ export interface QuickStartDialogProps {
 export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // Lazily initialised rather than a bare 'pick': the dialog can mount already
   // open while a run from a previous mount is still live, and 'pick' would put
-  // "Build it" in front of a user whose second run the slice refuses.
+  // "Plan my game" in front of a user whose second run the slice refuses.
   const [phase, setPhase] = useState<Phase>(() =>
     open && isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)
       ? 'running'
@@ -92,20 +148,62 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  // The plan whose "Build it" was pressed, from the press until that run
+  // settles: it disables the button for the whole run. The slice refuses a
+  // second start of the same plan on its own (`_inFlightPlan`, keyed on the
+  // same plan object), so this is the visible half of that guard, not the
+  // only one. It holds THAT plan only. A cancel is cooperative (the run's
+  // promise settles only when its current step does, and a step has no
+  // timeout), so a cancelled run can still be pending when a different plan
+  // reaches the review; a plain boolean held that plan's "Build it" disabled
+  // until the old step ended, or until a reload (PR #10294 board round 10).
+  // It must not drive the status line on its own; see `startingBuild`.
+  const [confirmingPlan, setConfirmingPlan] = useState<OrchestratorPlan | null>(null);
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
+  const runningRef = useRef<HTMLDivElement>(null);
   const firstCardRef = useRef<HTMLButtonElement>(null);
   const playNowRef = useRef<HTMLButtonElement>(null);
+  const reviewErrorRef = useRef<HTMLDivElement>(null);
+  // The gate's decision row (Build it / Discard plan, or Approve / Stop
+  // build). It lives in the Dialog's footer, outside `runningRef`, so "focus
+  // is already in the build view" checks both.
+  const gateActionsRef = useRef<HTMLDivElement>(null);
   const prevPhaseRef = useRef<Phase | null>(null);
 
   const status = useEditorStore((s) => s.orchestratorStatus);
   const pendingGate = useEditorStore((s) => s.pendingGate);
   const resolveGate = useEditorStore((s) => s.resolveGate);
   const cancelPipeline = useEditorStore((s) => s.cancelPipeline);
+  const currentPlan = useEditorStore((s) => s.currentPlan);
+  const tokenEstimate = useEditorStore((s) => s.tokenEstimate);
+  const runPipelineFromPlan = useEditorStore((s) => s.runPipelineFromPlan);
+  const orchestratorError = useEditorStore((s) => s.orchestratorError);
   const play = useEditorStore((s) => s.play);
 
   const runIsLive = isOrchestratorRunLive(status);
+  // 'awaiting_approval' with no pending gate is the moment between design and
+  // build: mid-run gates always set `pendingGate` (see `onGateReached`).
+  const planGate =
+    status === 'awaiting_approval' && !pendingGate && currentPlan
+      ? currentPlan.approvalGates.find((g) => g.id === 'gate_plan') ?? FALLBACK_PLAN_GATE
+      : null;
+  // "Starting the build…" covers only the gap between the click and the run
+  // reporting 'executing'. `confirmingPlan` itself stays set until the whole
+  // run settles (it guards the click), so it must not drive the status line:
+  // "Building your game…" and the mid-run gates' "Waiting on your approval…"
+  // have to show, and be announced, while the build goes on. It also gates
+  // "Build it" (`approveDisabled` below), and only for the plan on review.
+  const startingBuild =
+    confirmingPlan !== null && confirmingPlan === currentPlan && planGate !== null;
+  // A build refused before any step ran (its reservation was declined, or the
+  // engine was not ready) returns the plan to the review with the reason on
+  // the store. It is shown ON the review, so it survives the dialog closing,
+  // this component remounting, and in-app navigation (#6831). A full page load
+  // (Stripe checkout returns to the site root) drops it with the rest of the
+  // editor's in-memory state; keeping it across checkout is #10270.
+  const reviewError = planGate ? orchestratorError : null;
 
   // While this dialog is open it is the only place the user can reach a gate
   // (it is modal and covers the orchestrator panel), so it owns the gate UI.
@@ -118,7 +216,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // screen would read as state belonging to whatever is happening now.
   //
   // Unless a run is still live: this dialog can be closed mid-run, and resetting
-  // to 'pick' put "Build it" back in front of the user, whose second run the
+  // to 'pick' put "Plan my game" back in front of the user, whose second run the
   // slice now refuses. Resume the running view instead, which is also where the
   // pending gate is rendered.
   //
@@ -127,6 +225,17 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // setState synchronously in an effect body is what `set-state-in-effect`
   // rejects. React re-runs this render before committing, so nothing downstream
   // ever observes the stale values. Same shape as FeedbackDialog.
+  //
+  // `confirmingPlan` is NOT reset here: it marks a "Build it" whose start is
+  // still in flight, and closing does not stop that start. Cleared on reopen,
+  // the review re-enabled "Build it" and, with the earlier refusal still on the
+  // store until the run reports 'executing', said "The build did not start."
+  // about a build that was starting (PR #10294 board round 9). The pending
+  // call's own `finally` clears it, and because it names a plan, a different
+  // plan on the review is never held by it. (`starting` is reset, but it cannot
+  // misreport: `startDecomposition` makes the run live before its first await,
+  // so a reopen during "Plan my game" resumes the running view, and both reads
+  // of `starting` are or-ed with the live status.)
   const [prevOpen, setPrevOpen] = useState(open);
   if (prevOpen !== open) {
     setPrevOpen(open);
@@ -144,16 +253,55 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   }
 
   // Every phase change unmounts the element that was focused (the card on
-  // pick->describe, "Build it" on describe->running), which drops focus to
+  // pick->describe, "Plan my game" on describe->running), which drops focus to
   // document.body inside an aria-modal region. Move it explicitly.
+  //
+  // Except when the build view already placed focus itself: a plan review or
+  // gate that mounts in the SAME commit as the phase change focuses its own
+  // primary button first (child effects run before this parent effect), and
+  // pulling focus back to the status line would undo it. That happens whenever
+  // the design finishes before React commits the phase change.
   useEffect(() => {
     const previous = prevPhaseRef.current;
     prevPhaseRef.current = phase;
     if (previous === null || previous === phase) return;
     if (phase === 'describe') promptRef.current?.focus();
-    else if (phase === 'running') statusRef.current?.focus();
-    else firstCardRef.current?.focus();
+    else if (phase === 'running') {
+      if (!focusIsWithin(runningRef.current, gateActionsRef.current)) statusRef.current?.focus();
+    } else firstCardRef.current?.focus();
   }, [phase]);
+
+  // The plan review and the approval gates own the focused button while they
+  // are up, and each one unmounts the moment it is answered ("Build it" moves
+  // the run to 'executing', Approve resolves the gate). That drops focus to
+  // document.body inside an aria-modal region, and the phase effect above does
+  // not fire because the phase stays 'running'. Hand focus to the live status
+  // line, unless something else in the build view already took it.
+  const askingUser = planGate !== null || pendingGate !== null;
+  const wasAskingRef = useRef(false);
+  useEffect(() => {
+    const was = wasAskingRef.current;
+    wasAskingRef.current = askingUser;
+    if (!was || askingUser || phase !== 'running') return;
+    if (!focusIsWithin(runningRef.current, gateActionsRef.current)) statusRef.current?.focus();
+  }, [askingUser, phase]);
+
+  // A review that opens while its "Build it" is still starting (closed and
+  // reopened during the start) mounts with that button disabled, and a
+  // disabled button cannot take focus. Left alone, the Dialog's initial focus
+  // went to the first enabled control, "Buy tokens" or "Discard plan" (PR
+  // #10294 board round 10). Put it on the status line, which says the build
+  // is starting; the gate's own autofocus waits, and moves focus to "Build
+  // it" if the start is refused and the button is enabled again. A different
+  // plan is not held (`startingBuild`), so its "Build it" takes focus as
+  // usual. Only on opening: a "Build it" pressed in an open dialog keeps the
+  // focus handling it has (`ApprovalGateActions`' re-enable restore).
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (open && !wasOpen && startingBuild) statusRef.current?.focus();
+  }, [open, startingBuild]);
 
   // "Play now" appears when the run completes, which is the moment the user
   // has been waiting for: put focus on it so Enter plays. Declared after the
@@ -203,7 +351,8 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       }
 
       // `startDecomposition` records its failures on the store rather than
-      // throwing, and a step that fails mid-run does the same:
+      // throwing. (A step that fails mid-run does the same, which is why
+      // `handleConfirmBuild` below repeats this check after the build:
       // `runPipelineFromPlan`'s `onPlanStatusChange` callback sets
       // `orchestratorStatus: 'failed'` without ever touching
       // `orchestratorError` -- that field is reserved for a genuine throw
@@ -213,7 +362,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       // so neither "Try again" nor "Stop" rendered and only "Close" was
       // left, with no way back into the flow short of closing and reopening
       // the dialog. Read `status` instead, and fall back to a generic
-      // message when the store has no more specific one.
+      // message when the store has no more specific one.)
       const state = useEditorStore.getState();
       if (state.orchestratorStatus === 'failed') {
         const message = state.orchestratorError ?? GENERIC_FAILURE;
@@ -228,6 +377,104 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       setStarting(false);
     }
   }, [prompt, selectedId]);
+
+  // Same two-step Discard as OrchestratorPanel: the plan cost tokens to design.
+  //
+  // `open` is part of "awaiting": closing renders nothing but keeps this
+  // component, and so the arm, alive. Close, Escape and the backdrop all keep
+  // the plan, so the question they walked away from must not be waiting when
+  // the review reopens. Armed on reopen, "Discard it" stood where "Build it"
+  // usually takes focus, one Enter from dropping the plan (PR #10294 board
+  // round 9). Leaving the review clears the arm (`useDiscardConfirm`).
+  const {
+    armed: discardArmed,
+    arm: armDiscard,
+    disarm: disarmDiscard,
+    keep: keepPlan,
+    discardRef,
+  } = useDiscardConfirm(currentPlan, open && planGate !== null);
+
+  // Arming turns the pressed "Discard plan" into "Keep plan", which is meant
+  // to hold focus so a second press backs out. A mouse click does not focus a
+  // button in Safari, and a "Build it" still in flight has already dropped
+  // focus to <body> by disabling itself, so put focus there explicitly. Left
+  // on <body>, the arm re-enables the approve button (now "Discard it") and
+  // its focus restore would land on the destructive answer (PR #10294 board round 5).
+  const handleArmDiscard = useCallback(() => {
+    discardRef.current?.focus();
+    armDiscard();
+  }, [armDiscard, discardRef]);
+
+  // A refused "Build it" puts its reason (an alert, with the follow-up link
+  // when there is one) in the review, above the cost, while the button the
+  // user pressed sits in the footer, outside the Dialog body's scroll. On a
+  // short viewport, or with a long plan, that alert lands out of view and the
+  // only visible change is the status line, if that is in view at all (PR
+  // #10294 board round 4: not fully visible in 28 of 48 measured configurations).
+  // Bring it into view. Nothing is pinned inside the body any more, so
+  // `nearest` puts it exactly at the scrollport's edge, or leaves it alone
+  // when it is already visible.
+  //
+  // Only once the refusal has SETTLED (`startingBuild` false): the store
+  // reports the error a render before "Build it" settles, and that settling
+  // render swaps the Dialog's description for a longer one, which shrinks
+  // the body. Scrolling a render early left the alert 12px below the body at
+  // 375x667 (measured, board round 4). jsdom has no `scrollIntoView`, hence the
+  // optional call.
+  //
+  // `open` is a dependency too: closing renders nothing but keeps this
+  // component (and the store's refusal) alive, so on reopen the review starts
+  // at the top with the same refusal below the fold, and the effect must run
+  // again for the newly mounted alert (Devin review on #10294). The `open &&`
+  // in the condition is defensive only: while closed the alert is not mounted
+  // and the ref is null, so the call is a no-op either way and no test can
+  // tell the two apart. The dependency is what matters.
+  //
+  // A reopen during an in-flight "Build it" does not scroll: `confirmingPlan`
+  // survives the reopen, so `startingBuild` holds the stale refusal back until
+  // the start settles.
+  const settledRefusal = startingBuild ? null : reviewError;
+  useEffect(() => {
+    if (open && settledRefusal) reviewErrorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, settledRefusal]);
+
+  // The plan review's "Build it": the first point at which build tokens are
+  // spent. Failures land on the store, not as throws (same contract as
+  // `handleSubmit` above), so read the status the run left behind.
+  //
+  // Scoped to the plan it builds, which is the plan `runPipelineFromPlan`
+  // reads off the store at the same moment. A run that settles after the user
+  // has moved on to a different plan (a cancelled run whose step ended late)
+  // reports nothing, since the store's status and error now belong to the
+  // other plan, and releases only its own hold: a newer plan's "Build it" may
+  // be in flight by then.
+  const handleConfirmBuild = useCallback(async () => {
+    const plan = useEditorStore.getState().currentPlan;
+    const isThisPlan = () => useEditorStore.getState().currentPlan === plan;
+    disarmDiscard();
+    setError(null);
+    setConfirmingPlan(plan);
+    try {
+      await runPipelineFromPlan();
+      const state = useEditorStore.getState();
+      if (isThisPlan() && state.orchestratorStatus === 'failed') {
+        const message = state.orchestratorError ?? GENERIC_FAILURE;
+        setError(message);
+        toast.error(message);
+      }
+      // A refusal before any step ran returns to the review, which shows the
+      // reason in its own alert and status line; a toast as well would announce
+      // the same event three times.
+    } catch (err) {
+      if (isThisPlan()) {
+        const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
+        setError(message);
+        toast.error(message);
+      }
+    } finally {
+      setConfirmingPlan((held) => (held === plan ? null : held));
+    }
+  }, [runPipelineFromPlan, disarmDiscard]);
 
   const handleRetry = useCallback(() => {
     setError(null);
@@ -251,6 +498,70 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
 
   if (!open) return null;
 
+  // The open gate's decision row: the plan review's Build it / Discard plan,
+  // or a mid-run gate's Approve / Stop build. It is rendered in the Dialog's
+  // footer, NOT in the body with the gate's summary. The body is the one
+  // scroller here, and the footer is outside it, so the row is in view at
+  // every scroll offset without being pinned on top of anything. An earlier
+  // iteration of PR #10294 pinned it inside the body (`sticky`) instead, and that
+  // fought the scroller in every way measured: the row covered whatever
+  // scrolled under it (on a 320px-tall viewport, the very prompt it was
+  // confirming), keeping focus clear of it took the body's scroll padding,
+  // which Firefox does not honour for focus the way Chromium does, and that
+  // padding made every focus on Build it, including the one at open, scroll
+  // the review down.
+  const gateActions =
+    phase !== 'running' ? null : planGate ? (
+      <ApprovalGateActions
+        gate={planGate}
+        // Armed, the row IS the confirmation: the question takes the total's
+        // place and the two buttons answer it, beside the button the user
+        // just pressed, so no part of it can be scrolled out of view. The
+        // answers swap sides on purpose. "Keep plan" takes the place (and the
+        // focus) of the "Discard plan" just pressed, so a second press or a
+        // double click backs out instead of discarding; "Discard it" takes
+        // the place of "Build it", so a double click on Keep plan cannot
+        // land on a build. Discarding is a deliberate move to the other side.
+        approveLabel={discardArmed ? 'Discard it' : 'Build it'}
+        approveVariant={discardArmed ? 'destructive' : 'default'}
+        onApprove={discardArmed ? handleCancelRun : () => void handleConfirmBuild()}
+        // Only "Build it" is held while its start is in flight (a second press
+        // must not start a second build), and only for the plan that start
+        // belongs to (`startingBuild`). "Discard it" stays live then: it
+        // cancels the start (`cancelPipeline` covers a cancel while the
+        // reservation is pending, and releases it if it lands).
+        approveDisabled={!discardArmed && startingBuild}
+        cancelLabel={discardArmed ? 'Keep plan' : 'Discard plan'}
+        cancelVariant={discardArmed ? 'outline' : 'ghost'}
+        onCancel={discardArmed ? keepPlan : handleArmDiscard}
+        cancelRef={discardRef}
+        summary={
+          discardArmed ? (
+            <p role="status" data-testid="discard-confirm-question" className="text-xs text-[var(--sf-text)]">
+              {DISCARD_CONFIRM_QUESTION}
+            </p>
+          ) : tokenEstimate ? (
+            <TokenCostTotal estimate={tokenEstimate} />
+          ) : undefined
+        }
+        autoFocus
+      />
+    ) : pendingGate ? (
+      // Rejecting a mid-build gate ends the build (`resolveGate('rejected')`
+      // sets 'cancelled', and the runner releases the unused tokens), so the
+      // button says so. It is the footer's ONLY stop control while the gate is
+      // up: the dialog's own Stop is hidden below, and "Close" (which only
+      // hides the dialog) must not sit beside a vague "Cancel" that ends the
+      // run (PR #10294 board round 5).
+      <ApprovalGateActions
+        gate={pendingGate}
+        onApprove={() => resolveGate('approved')}
+        cancelLabel="Stop build"
+        onCancel={() => resolveGate('rejected')}
+        autoFocus
+      />
+    ) : null;
+
   const actions =
     phase === 'describe' ? (
       <>
@@ -258,11 +569,20 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           Back
         </Button>
         <Button size="sm" onClick={handleSubmit} disabled={starting || runIsLive}>
-          Build it
+          Plan my game
         </Button>
       </>
     ) : phase === 'running' ? (
-      <>
+      // One wrapping row: the gate's group takes the room it needs, and the
+      // dialog's own buttons sit at its bottom-right, or wrap below it on a
+      // narrow screen.
+      <div className="flex w-full flex-wrap items-end justify-end gap-2">
+        {gateActions && (
+          <div ref={gateActionsRef} className="min-w-0 grow basis-60">
+            {gateActions}
+          </div>
+        )}
+        <div className="flex gap-2">
         {error && (
           <Button variant="outline" size="sm" onClick={handleRetry}>
             Try again
@@ -271,7 +591,10 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         {/* Only while there is something to stop: cancelPipeline after a run
             has completed or failed flips the status to 'cancelled' and re-POSTs
             the token release. Mirrors OrchestratorPanel's footer guard. */}
-        {runIsLive && (
+        {/* An open gate carries its own way out, which does the same thing:
+            the plan review's "Discard plan", a mid-build gate's "Stop build".
+            A second one beside it would be two controls for one action. */}
+        {runIsLive && !planGate && !pendingGate && (
           <Button variant="ghost" size="sm" onClick={handleCancelRun}>
             Stop
           </Button>
@@ -286,10 +609,18 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             Play now
           </Button>
         )}
-        <Button variant={status === 'completed' ? 'ghost' : undefined} size="sm" onClick={onClose}>
+        {/* One filled button per row. Beside "Play now", or beside a gate's
+            own primary (Build it, Approve), Close steps back so the button
+            that acts is the only filled one; on its own it is the default. */}
+        <Button
+          variant={status === 'completed' ? 'ghost' : gateActions ? 'outline' : undefined}
+          size="sm"
+          onClick={onClose}
+        >
           Close
         </Button>
-      </>
+        </div>
+      </div>
     ) : (
       <Button variant="ghost" size="sm" onClick={onClose}>
         Cancel
@@ -306,7 +637,15 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           ? 'Pick a kind of game. We build a playable scene from there.'
           : phase === 'describe'
             ? 'Describe it in your own words, or leave it blank for our take.'
-            : 'Building. You can keep working while this runs.'
+            : planGate && !startingBuild
+              ? reviewError
+                ? 'No build tokens were taken. Close keeps this plan for later.'
+                : 'The build starts, and its tokens are taken, only when you press Build it. Close keeps this plan for later.'
+              : status === 'completed'
+                ? 'Your game is built.'
+                : status === 'failed' || status === 'cancelled'
+                  ? 'Nothing is running now.'
+                  : 'Building. You can keep working while this runs.'
       }
       className="max-w-lg"
       actions={actions}
@@ -374,7 +713,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       )}
 
       {phase === 'running' && (
-        <div className="space-y-3">
+        <div ref={runningRef} className="space-y-3">
           <div
             ref={statusRef}
             tabIndex={-1}
@@ -382,40 +721,62 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             aria-live="polite"
             className="flex items-center gap-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
           >
-            {(starting || status === 'decomposing' || status === 'planning' || status === 'executing') && (
+            {(starting || startingBuild || status === 'decomposing' || status === 'planning' || status === 'executing') && (
               <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" aria-hidden="true" />
             )}
-            <span>{STATUS_MESSAGES[status]}</span>
+            <span>
+              {startingBuild
+                ? STARTING_BUILD
+                : planGate
+                  ? reviewError
+                    ? BUILD_NOT_STARTED
+                    : PLAN_READY
+                  : STATUS_MESSAGES[status]}
+            </span>
           </div>
 
-          {/* A gate_assets list is as long as the plan makes it. ApprovalGateDialog
-              already bounds its own scrollable body to max-h-[50vh] and renders
-              Approve/Cancel OUTSIDE that scroll region, so those buttons are never
-              pushed off-screen. A second `max-h-[45vh] overflow-y-auto` wrapper
-              here previously clipped the WHOLE dialog (heading, description, and
-              action row included) to a bound smaller than the inner one — the
-              outer scrollbar always engaged first, the inner max-h-[50vh] region
-              could never reach its own limit, and the buttons scrolled out of
-              view again inside the outer box (round 2 review, 4/5 agreement). */}
-          {pendingGate && (
-            <ApprovalGateDialog
-              gate={pendingGate}
-              onApprove={() => resolveGate('approved')}
-              onCancel={() => resolveGate('rejected')}
-              autoFocus
-            />
+          {/* Plan review. "Build it" is where the build's tokens are reserved,
+              and the server's answer to that reservation is the real balance
+              check: `sufficientBalance` reads a cached client balance, so it
+              does not disable the button (the orchestrator panel's Start
+              Building makes the same choice). A refused reservation comes back
+              as an error here, with nothing spent. The full cost bar scrolls
+              with the plan; its total also rides in the footer's action row
+              (`gateActions`), so the number is in view whenever "Build it" is,
+              including at open, when "Build it" takes focus. */}
+          {planGate && (
+            <ApprovalGateSummary gate={planGate}>
+              {reviewError && (
+                <div ref={reviewErrorRef} className="mb-3">
+                  <OrchestratorErrorNotice error={reviewError} className={ALERT_CLASSES} />
+                </div>
+              )}
+              {tokenEstimate && (
+                // Only a short-balance refusal already carries its own Buy
+                // tokens link; for any other, the bar's warning is the only one.
+                <TokenCostBar
+                  estimate={tokenEstimate}
+                  hideBalanceWarning={errorReportsShortBalance(reviewError)}
+                />
+              )}
+            </ApprovalGateSummary>
           )}
+
+          {/* A gate_assets list is as long as the plan makes it. The Dialog body
+              is the ONE scroller here: it is capped below the viewport and turns
+              into a focusable region while it overflows. So both gates render
+              their summary unbounded (`ApprovalGateSummary`, without the panel's
+              own max-h-[50vh] box) and their buttons in the Dialog footer
+              (`gateActions`), outside that scroll. Nesting any second bounded
+              scroller in this body (the gate's own box, or the
+              `max-h-[45vh] overflow-y-auto` wrapper that the PF-1215 round 2 review removed)
+              lets the outer scroll carry the inner box out of view on a short
+              viewport. */}
+          {pendingGate && <ApprovalGateSummary gate={pendingGate} />}
         </div>
       )}
 
-      {error && (
-        <div
-          role="alert"
-          className="mt-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]"
-        >
-          {error}
-        </div>
-      )}
+      {error && <OrchestratorErrorNotice error={error} className={cn('mt-3', ALERT_CLASSES)} />}
     </Dialog>
   );
 }

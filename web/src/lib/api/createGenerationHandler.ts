@@ -20,6 +20,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
+import { panelTierGateResponse } from './panelTierGate';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
@@ -35,6 +36,7 @@ import {
 } from '@/lib/config/timeouts';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
@@ -63,12 +65,12 @@ const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try
  *   nouns, so no provider text or server internal can reach the client through
  *   it (the property that earns the exemption from GENERIC_500_MESSAGE);
  * - "the upstream provider is degraded" is what actually happened, and 503
- *   keeps it out of the generic error rate that pages someone.
+ *   keeps it out of the generic error rate that alerts the owner.
  *
  * The metrics outcome is set to `empty_artifact` by the caller rather than left
  * to derive from the 503, which would file it under `provider_unavailable`
  * alongside real outages. Both 503s mean "try later" to the user and entirely
- * different things to whoever is on call.
+ * different things to whoever is investigating.
  *
  * `refunded` is passed rather than assumed. Both call sites refund before
  * formatting, but only when a platform deduction actually happened — a BYOK
@@ -118,6 +120,24 @@ export interface GenerationHandlerConfig<TParams, TResult> {
 
   /** Provider name for API key resolution. Static or computed from validated params. */
   provider: Provider | ((params: TParams) => Provider);
+
+  /**
+   * The editor panel that fronts this route, as spelled in
+   * `PANEL_TIER_REQUIREMENTS` (`@/lib/ai/tierAccess`) — e.g. `'generate-model'`,
+   * `'generate-sound'`. Required, deliberately: before this field existed the
+   * only server-side tier check on a generation route was the resolver's
+   * starter-balance check, so a real hobbyist account (balance aside) could
+   * call a creator-gated route like `/api/generate/skybox` directly — a gap
+   * `effectiveTier`'s trial mapping widened to any $0 starter signup (#7715
+   * review round 2). Checked right after auth resolves the user, using
+   * `effectiveTier(user.tier, spendableTokensOf(user))` — the same rule
+   * `canAccessPanel` applies in the editor — and BEFORE the capability/kill
+   * switch checks, the response cache, and any token deduction, so a locked
+   * caller never spends rate-limit budget or a token on a request that was
+   * always going to be refused. Making the field required means `tsc` names
+   * any route that forgets it, rather than a gate that silently defaults open.
+   */
+  panel: string;
 
   /**
    * The capability this route serves (#9117). When it appears in
@@ -250,8 +270,24 @@ export interface GenerationHandlerConfig<TParams, TResult> {
      */
     providerJobId: (result: TResult) => string | null;
     /** Initial callback delay in seconds (defaults to DEFAULT_CALLBACK_DELAY_SECONDS). */
-    estimatedSeconds?: number;
+    estimatedSeconds?: number | undefined;
   };
+
+  /**
+   * Extract the provider job id from a successful result for ownership
+   * binding (#10262): the id is bound to the calling user, server-side,
+   * BEFORE the response is sent — so the matching `/status` route can
+   * refuse a poll from anyone else. Return null for a result that needs no
+   * polling (e.g. a synchronous completion).
+   *
+   * Defaults to `asyncJob.providerJobId` when `asyncJob` is set, since both
+   * extract the same id from the same result shape — most routes need only
+   * one of the two. Set this explicitly when the route has no `asyncJob`
+   * (e.g. pixel-art, which has no `generation_type` enum member and
+   * therefore no durable QStash callback, but still exposes a status route
+   * that accepts a caller-supplied jobId).
+   */
+  jobIdForOwnership?: (result: TResult) => string | null;
 }
 
 /**
@@ -275,6 +311,7 @@ export function createGenerationHandler<TParams, TResult>(
   const {
     route,
     provider,
+    panel,
     capability,
     operation,
     rateLimitKey,
@@ -293,6 +330,7 @@ export function createGenerationHandler<TParams, TResult>(
     maxDurationSeconds = API_MAX_DURATION_STANDARD_GEN_S,
     enforceRequestDeadline = false,
     asyncJob,
+    jobIdForOwnership = asyncJob?.providerJobId,
   } = config;
 
   /**
@@ -332,6 +370,45 @@ export function createGenerationHandler<TParams, TResult>(
       );
     } catch (err) {
       captureException(err, { route, action: 'qstash_publish' });
+    }
+  }
+
+  /**
+   * Bind a just-issued provider job id to the calling user (#10262). Awaited
+   * inline — never via `after()` — because the whole point is for the
+   * binding to exist BEFORE the response (and the job id inside it) reaches
+   * the client; a poll can arrive the instant the client has the id. No-ops
+   * when the route declared no extractor, or the result carries no pollable
+   * job id (a synchronous completion). `bindProviderJob` itself never throws.
+   */
+  async function maybeBindJobOwnership(
+    result: TResult,
+    userId: string,
+    resolvedProvider: Provider,
+  ): Promise<void> {
+    if (!jobIdForOwnership) return;
+    let providerJobId: string | null;
+    try {
+      providerJobId = jobIdForOwnership(result);
+    } catch (err) {
+      // No providerJobId here by definition — extracting it is what threw —
+      // but the user is known, and an extractor that throws leaves THEIR job
+      // unbound (so their own next poll answers 404). Report enough to find
+      // them, matching the bind-failure catch below.
+      captureException(err, { route, action: 'job_ownership_extract', userId });
+      return;
+    }
+    if (!providerJobId) return;
+    try {
+      // `bindProviderJob` already never throws on its own (it reports a write
+      // failure to Sentry and swallows it), but this call site never trusts
+      // that from the outside: a failed bind must not turn this submit into a
+      // 5xx. It does NOT save the job — with no binding row the owner's first
+      // poll gets a terminal 404 and a refund — and it is not a security gap,
+      // because an unbound id is refused to every caller.
+      await bindProviderJob(userId, resolvedProvider, providerJobId);
+    } catch (err) {
+      captureException(err, { route, action: 'job_ownership_bind', providerJobId, userId });
     }
   }
 
@@ -393,7 +470,7 @@ export function createGenerationHandler<TParams, TResult>(
       // returns 403 for a BANNED account (which the classifier would file under
       // bot_blocked, hiding ban-evasion volume inside bot traffic) and 503 when
       // the user-sync path is degraded — a Neon circuit-breaker signal that the
-      // classifier would file under provider_unavailable, paging on-call for an
+      // classifier would file under provider_unavailable, raising an alert for an
       // AI-provider incident that isn't happening. Name the real cause here; 401
       // and anything else fall through to classifyGenerationOutcome().
       if (authResult.response.status === 403) mctx.outcome = 'banned';
@@ -405,7 +482,29 @@ export function createGenerationHandler<TParams, TResult>(
     const tier = authResult.ctx.user.tier;
     mctx.tier = tier;
 
-    // 1a. Declared-unavailable capability (#9117). Static config, checked as
+    // 1a. Per-route panel tier gate (#7715 review round 2). The resolver's
+    // starter-balance check was the only server-side tier enforcement a
+    // generation route had, so a real hobbyist account (balance aside) could
+    // call a creator-gated route directly, and `effectiveTier`'s trial mapping
+    // widened that to a fresh $0 starter signup. `effectiveTier` applies the
+    // SAME rule the editor's `canAccessPanel` uses, so a caller is refused here
+    // exactly when its own panel would render `LockedPanelOverlay`. Checked
+    // right after auth resolves the user and BEFORE the capability/kill-switch
+    // checks, the response cache, and any token deduction, so a locked caller
+    // never spends rate-limit budget or a token on a request that was always
+    // going to be refused.
+    // The check itself lives in `panelTierGateResponse` (the balance-aware
+    // CREATE variant) so `voice/batch`, which resolves its key directly,
+    // applies the SAME rule and body. Status pollers run the POLL variant,
+    // `panelTierGateResponseForPoll`, which ignores the balance because the
+    // job they read was already paid for; see `./panelTierGate`.
+    const tierDenied = panelTierGateResponse(panel, authResult.ctx.user);
+    if (tierDenied) {
+      mctx.outcome = 'tier_required';
+      return tierDenied;
+    }
+
+    // 1b. Declared-unavailable capability (#9117). Static config, checked as
     // soon as the caller is known and BEFORE BotID, both rate limits, body
     // parsing and content safety: a capability with no provisionable provider
     // can never succeed, so a refusal must not spend the user's aggregate
@@ -425,7 +524,7 @@ export function createGenerationHandler<TParams, TResult>(
       );
     }
 
-    // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
+    // 1c. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.
     const botIdResponse = await checkBotIdGate();
     if (botIdResponse) {
@@ -572,7 +671,7 @@ export function createGenerationHandler<TParams, TResult>(
             // Pass the resolved capability (#9523) so gateway-routed capabilities
             // (image/embedding) resolve AI_GATEWAY_API_KEY instead of the
             // provider's PLATFORM_* var. `effectiveCapability` is the same value
-            // the unavailability gate computed above (step 1a); `?? undefined`
+            // the unavailability gate computed above (step 1b); `?? undefined`
             // keeps the direct 5-arg route for a route with no declared capability.
             const resolved = await resolveApiKey(
               userId,
@@ -589,6 +688,7 @@ export function createGenerationHandler<TParams, TResult>(
 
             try {
               const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
+              await maybeBindJobOwnership(generated, userId, resolvedProvider);
               cacheMiss = { result: generated, usageId };
               return generated;
             } catch (err) {
@@ -692,6 +792,7 @@ export function createGenerationHandler<TParams, TResult>(
 
     try {
       const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
+      await maybeBindJobOwnership(result, userId, resolvedProvider);
       // Run the durable publish post-response (see cached path). Same asyncJob +
       // QStash gate so the dormant/non-async path never touches `after()`.
       const durableSubmission = asyncJob !== undefined && isQstashConfigured();

@@ -9,6 +9,7 @@ import { resolveApiKey, resolveByokOrPlatformKey, ApiKeyError } from '@/lib/keys
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
@@ -38,6 +39,9 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 }));
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+}));
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 function makeRequest(body: unknown): NextRequest {
@@ -179,6 +183,19 @@ describe('POST /api/generate/sprite', () => {
     expect(data.jobId).toBe('task-1');
     expect(data.status).toBe('pending');
     expect(data.usageId).toBeDefined();
+  });
+
+  it('binds the returned jobId to the caller for ownership on the SDXL path (#10262)', async () => {
+    await POST(makeRequest({ prompt: 'pixel art hero', style: 'pixel-art' }));
+    // resolvedProvider is the SERVICE name ('replicate'), matching what
+    // /api/generate/sprite/status resolves via DB_PROVIDER.sprite — not the
+    // SpriteProvider enum value ('sdxl') that the extractor itself branches on.
+    expect(vi.mocked(bindProviderJob)).toHaveBeenCalledWith('user_1', 'replicate', 'task-1');
+  });
+
+  it('does not bind for a synchronous DALL-E completion (no job to poll)', async () => {
+    await POST(makeRequest({ prompt: 'a hero', style: 'hand-drawn', provider: 'dalle3', removeBackground: false }));
+    expect(vi.mocked(bindProviderJob)).not.toHaveBeenCalled();
   });
 
   describe('background removal (#9734)', () => {

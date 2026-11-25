@@ -131,8 +131,8 @@ export interface BuildReportInput {
   manifest: MeasurementManifest;
   /** Device profile key, e.g. `desktop@1`. */
   profileKey: string;
-  reportId?: string;
-  now?: () => Date;
+  reportId?: string | undefined;
+  now?: (() => Date) | undefined;
 }
 
 function newReportId(): string {

@@ -11,7 +11,7 @@ import { composeAbortSignal } from '@/lib/generate/abortComposition';
 
 export interface SpriteGenerateParams {
   prompt: string;
-  style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
+  style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic' | undefined;
   size: '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
   provider?: 'auto' | 'dalle3' | 'sdxl';
   removeBackground?: boolean;
@@ -26,23 +26,23 @@ export interface SpriteGenerateParams {
    * post to remove.bg inline. When absent, `removeBackground` is a no-op and the
    * original sprite is returned unchanged rather than failing a paid generation.
    */
-  removeBackgroundKey?: string;
-  signal?: AbortSignal;
+  removeBackgroundKey?: string | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface SpriteSheetParams {
   prompt: string;
   frameCount: number;
-  style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
+  style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic' | undefined;
   size: '32x32' | '64x64' | '128x128' | '256x256';
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 export interface TilesetParams {
   prompt: string;
   tileSize: 16 | 32 | 48 | 64;
   gridSize: '4x4' | '8x8' | '16x16';
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 export interface GenerationResult {
@@ -289,7 +289,7 @@ export class SpriteClient {
    */
   async removeBackground(
     imageUrl: string,
-    opts?: { signal?: AbortSignal; key?: string },
+    opts?: { signal?: AbortSignal | undefined; key?: string },
   ): Promise<{ resultUrl: string }> {
     // remove.bg uses its OWN key, distinct from the sprite provider key this
     // client is constructed with. `generateSprite` chains here with the key the

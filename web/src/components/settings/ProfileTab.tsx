@@ -128,6 +128,7 @@ export function ProfileTab() {
         ) : (
           <div className="flex items-center justify-between">
             <span className="text-sm text-zinc-300">
+              {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank display name is unset; falls back to a placeholder */}
               {displayName || <span className="italic text-zinc-400">Not set</span>}
             </span>
             <button

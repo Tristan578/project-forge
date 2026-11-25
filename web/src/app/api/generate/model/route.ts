@@ -17,9 +17,9 @@ const POST_impl = createGenerationHandler<
     prompt: string;
     mode: 'text-to-3d' | 'image-to-3d';
     quality: 'standard' | 'high';
-    imageBase64?: string;
-    artStyle?: string;
-    negativePrompt?: string;
+    imageBase64?: string | undefined;
+    artStyle?: string | undefined;
+    negativePrompt?: string | undefined;
   },
   {
     jobId: string;
@@ -30,6 +30,7 @@ const POST_impl = createGenerationHandler<
   }
 >({
   route: '/api/generate/model',
+  panel: 'generate-model',
   // Heavy route: matches `export const maxDuration` above so the generation
   // agent derives its step-timeout cap against the real 180s budget.
   maxDurationSeconds: 180,

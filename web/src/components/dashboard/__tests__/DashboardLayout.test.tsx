@@ -4,6 +4,7 @@ import { DashboardLayout } from '../DashboardLayout';
 
 vi.mock('lucide-react', () => ({
   Settings: (props: Record<string, unknown>) => <span data-testid="settings-icon" {...props} />,
+  BarChart3: (props: Record<string, unknown>) => <span data-testid="analytics-icon" {...props} />,
   Plus: (props: Record<string, unknown>) => <span data-testid="plus-icon" {...props} />,
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
   MoreVertical: (props: Record<string, unknown>) => <span data-testid="more-icon" {...props} />,
@@ -53,6 +54,17 @@ describe('DashboardLayout', () => {
     render(<DashboardLayout />);
     expect(screen.getByText('SpawnForge')).toBeDefined();
     expect(screen.getByText('My Projects')).toBeDefined();
+  });
+
+  it('links to creator analytics from the header (#8352)', () => {
+    render(<DashboardLayout />);
+    const analytics = screen.getByRole('button', { name: 'Analytics' });
+    // Rendered by the @spawnforge/ui Button (ghost, sm): the sm size carries the
+    // 44px mobile touch target, which a hand-rolled header button lacked.
+    expect(analytics.className).toContain('min-h-[44px]');
+    expect(analytics.className).toContain('bg-transparent');
+    fireEvent.click(analytics);
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/analytics');
   });
 
   it('shows loading state initially', () => {
