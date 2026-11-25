@@ -227,20 +227,26 @@ describe('handlers2d sprite edge cases', () => {
 describe('handlers2d project2d edge cases', () => {
   describe('set_project_type', () => {
     it('sets 2D project type', async () => {
-      const { result, store } = await invoke('set_project_type', { type: '2d' });
+      const { result, store } = await invoke('set_project_type', { projectType: '2d' });
       expect(result.success).toBe(true);
       expect(store.setProjectType).toHaveBeenCalledWith('2d');
     });
 
     it('sets 3D project type', async () => {
-      const { result, store } = await invoke('set_project_type', { type: '3d' });
+      const { result, store } = await invoke('set_project_type', { projectType: '3d' });
       expect(result.success).toBe(true);
       expect(store.setProjectType).toHaveBeenCalledWith('3d');
     });
 
     it('rejects invalid type', async () => {
-      const { result } = await invoke('set_project_type', { type: 'vr' });
+      const { result } = await invoke('set_project_type', { projectType: 'vr' });
       expect(result.success).toBe(false);
+    });
+
+    it('rejects the old project_type spelling, so the manifest and handler must agree (#10357)', async () => {
+      const { result, store } = await invoke('set_project_type', { project_type: '2d' });
+      expect(result.success).toBe(false);
+      expect(store.setProjectType).not.toHaveBeenCalled();
     });
   });
 
