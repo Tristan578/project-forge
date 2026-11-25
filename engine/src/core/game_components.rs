@@ -68,19 +68,24 @@ impl GameComponentData {
 ///   (`v = sqrt(2 * g * scale * h)`) and integrates against gravity, so the
 ///   character peaks at about the authored height whatever the gravity scale.
 ///
-/// * **Legacy direct-translation path** (2D projects, which are simulated by the
-///   separate `physics_2d_sim` pipeline, and any 3D character with no collider).
-///   That path has no gravity integrator and no vertical velocity at all — the
-///   jump is a single-frame nudge of `jump_height * 0.5 * dt`. Here the number
-///   behaves as an impulse magnitude, and no apex height is reachable because
-///   nothing ever pulls the character back down.
+/// * **2D dynamic-body path** (a 2D character on a DYNAMIC `bevy_rapier2d`
+///   body, i.e. 2D physics enabled with body type Dynamic; #10378). `jump_height`
+///   is an APEX HEIGHT here too: it is converted with
+///   [`crate::core::character_controller::jump_speed_for_apex_2d`] against the
+///   gravity the 2D simulation applies to the body (world 2D gravity times the
+///   body's own `gravityScale`), and the jump is gated on ground contact. This
+///   path does not apply the controller's `gravity_scale` — the body's is what
+///   pulls it down.
 ///
-/// Converging the two means giving the legacy path a real gravity integrator,
-/// which changes 2D jump behaviour and belongs with the 2D character controller
-/// work rather than here. Until then the tooltip in
-/// `web/src/lib/workspace/tooltipDictionary.ts` carries the same caveat, so the
-/// divergence is visible to the person typing the number and not only to the
-/// person reading the engine.
+/// * **Legacy direct-translation path** (a 2D character with no dynamic 2D
+///   body — kinematic, static, or physics never enabled — and any 3D character
+///   with no collider). That path has no gravity integrator and no vertical
+///   velocity at all — the jump is a single-frame nudge of
+///   `jump_height * 0.5 * dt`. Here the number behaves as an impulse magnitude,
+///   and no apex height is reachable because nothing pulls the character back
+///   down. The tooltip in `web/src/lib/workspace/tooltipDictionary.ts` carries
+///   the same caveat, so the remaining divergence is visible to the person
+///   typing the number and not only to the person reading the engine.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterControllerData {
@@ -1072,6 +1077,12 @@ type CharacterMovementQuery<'w, 's> = Query<
         Option<&'static mut super::character_controller::CharacterMotionState>,
         Option<&'static mut KinematicCharacterController>,
         Option<&'static KinematicCharacterControllerOutput>,
+        // The 2D dynamic-body path (#10378). `physics_2d_sim` attaches these on
+        // Edit->Play; a 2D character with no 2D body keeps the legacy path.
+        Entity,
+        Option<&'static mut bevy_rapier2d::prelude::Velocity>,
+        Option<&'static bevy_rapier2d::prelude::RigidBody>,
+        Option<&'static bevy_rapier2d::prelude::GravityScale>,
     ),
 >;
 
@@ -1086,6 +1097,8 @@ pub(crate) fn system_character_controller(
     input: Option<Res<super::input::InputState>>,
     runtime: Option<Res<GameComponentRuntime>>,
     project_type: Option<Res<super::project_type::ProjectType>>,
+    gravity_2d: Option<Res<super::physics_2d_sim::Gravity2d>>,
+    rapier_2d: bevy_rapier2d::prelude::ReadRapierContext,
     mut entities: CharacterMovementQuery,
 ) {
     let Some(input) = input else { return; };
@@ -1099,7 +1112,23 @@ pub(crate) fn system_character_controller(
         Some(super::project_type::ProjectType::TwoD)
     );
 
-    for (_eid, gc, mut transform, mut motion, mut kcc, kcc_output) in entities.iter_mut() {
+    // Read once per frame: absent in unit worlds and until the 2D plugin has
+    // spawned its context, in which case no 2D character reads as grounded.
+    let rapier_2d = rapier_2d.single().ok();
+
+    for (
+        _eid,
+        gc,
+        mut transform,
+        mut motion,
+        mut kcc,
+        kcc_output,
+        entity,
+        mut velocity_2d,
+        body_2d,
+        gravity_scale_2d,
+    ) in entities.iter_mut()
+    {
         for comp in &gc.components {
             if let GameComponentData::CharacterController(data) = comp {
                 // Movement
@@ -1246,9 +1275,96 @@ pub(crate) fn system_character_controller(
                     continue;
                 }
 
-                // Legacy direct-translation fallback: 2D projects (authored in
-                // the XY plane and simulated by `physics_2d_sim`, a separate
-                // pipeline), and any 3D character with no collider for Rapier to
+                // 2D dynamic-body path (#10378). A 2D character whose body is a
+                // DYNAMIC `bevy_rapier2d` body is moved through that body's
+                // velocity, so the 2D simulation's gravity, collision response
+                // and continuous detection all apply, and a jump is a real
+                // launch gated on ground contact. `physics_2d_sim` inserts the
+                // motion state on Edit->Play for exactly these characters.
+                if is_2d {
+                    if let (Some(state), Some(velocity), Some(bevy_rapier2d::prelude::RigidBody::Dynamic)) =
+                        (motion.as_deref_mut(), velocity_2d.as_deref_mut(), body_2d.copied())
+                    {
+                        // The gravity the simulation applies to THIS body: the
+                        // world's 2D gravity times the body's own scale. The
+                        // controller's `gravityScale` is not applied here — the
+                        // body's is — and the jump is solved against this value
+                        // so the authored `jumpHeight` is the apex.
+                        let world_gravity_y = gravity_2d.as_deref().map_or(
+                            super::physics_2d_sim::Gravity2d::default().y,
+                            |g| g.y,
+                        );
+                        let body_gravity_y =
+                            world_gravity_y * gravity_scale_2d.map_or(1.0, |s| s.0);
+                        let body_gravity_y = if body_gravity_y.is_finite() { body_gravity_y } else { 0.0 };
+                        // Gravity-free (a top-down game): both axes are steered
+                        // and there is nothing to jump against.
+                        let side_view = body_gravity_y.abs() > 1e-4;
+                        let up = if body_gravity_y > 0.0 { Vec2::NEG_Y } else { Vec2::Y };
+
+                        let contact_grounded = side_view
+                            && rapier_2d.as_ref().is_some_and(|ctx| {
+                                ctx.contact_pairs_with(entity).any(|pair| {
+                                    if !pair.has_any_active_contact() {
+                                        return false;
+                                    }
+                                    // Rapier's manifold normal points from
+                                    // collider1 to collider2; flip it so it
+                                    // always points at the character.
+                                    let sign: f32 = if pair.collider1() == Some(entity) { -1.0 } else { 1.0 };
+                                    pair.manifolds().any(|m| {
+                                        m.num_points() > 0
+                                            && super::character_controller::is_ground_normal_2d(
+                                                m.normal() * sign,
+                                                up,
+                                            )
+                                    })
+                                })
+                            });
+
+                        let launch = super::character_controller::step_character_2d(
+                            state,
+                            super::character_controller::CharacterStep2dInput {
+                                dt,
+                                contact_grounded,
+                                vertical_speed: velocity.linear.dot(up),
+                                jump_just_pressed: jump_just_pressed && side_view,
+                                jump_speed: super::character_controller::jump_speed_for_apex_2d(
+                                    data.jump_height,
+                                    body_gravity_y.abs(),
+                                ),
+                                can_double_jump: data.can_double_jump,
+                            },
+                        );
+
+                        if side_view {
+                            // Horizontal speed is the controller's; vertical is
+                            // the simulation's, except on the frame a jump
+                            // launches. Full speed for any input, as on the
+                            // kinematic path (which normalizes its direction).
+                            velocity.linear.x = if movement.x.abs() > 0.0 {
+                                movement.x.signum() * data.speed
+                            } else {
+                                0.0
+                            };
+                            if let Some(speed) = launch {
+                                velocity.linear = velocity.linear - up * velocity.linear.dot(up) + up * speed;
+                            }
+                        } else {
+                            let dir = Vec2::new(movement.x, movement.y);
+                            velocity.linear = if dir.length_squared() > 0.0 {
+                                dir.normalize() * data.speed
+                            } else {
+                                Vec2::ZERO
+                            };
+                        }
+                        continue;
+                    }
+                }
+
+                // Legacy direct-translation fallback: a 2D character with no
+                // DYNAMIC 2D body (a kinematic or static body, or physics never
+                // enabled), and any 3D character with no collider for Rapier to
                 // sweep. It has no gravity and no collision response, but it
                 // beats freezing the player in place.
                 if movement.length_squared() > 0.0 {
@@ -3308,16 +3424,12 @@ mod character_controller_axis_tests {
     /// untouched.
     ///
     /// This pins the LEGACY jump: a frame-rate-scaled instant nudge with no
-    /// velocity and no gravity. Since PF-1214 that path is no longer shared
-    /// with 3D — it is reached only by a 2D project, and by a 3D character with
-    /// no collider (i.e. physics never enabled on it, which the lifecycle now
-    /// warns about). A 3D character that got a kinematic controller takes the
-    /// `step_character` path instead, which has a real velocity-based arc gated
-    /// on ground contact.
-    ///
-    /// The assertion is still deliberately written against
-    /// `jump_height * 0.5 * dt`, so giving the 2D jump an arc of its own fails
-    /// here and has to be looked at, rather than silently changing 2D walking.
+    /// velocity and no gravity. It is reached only by a 2D character with NO
+    /// dynamic 2D body (this fixture has none: no physics at all), and by a 3D
+    /// character with no collider. A 3D character with a kinematic controller
+    /// takes `step_character`; a 2D character on a dynamic body takes the
+    /// velocity path (#10378), pinned below and end to end in
+    /// `physics_2d_sim.rs`'s `dynamic_character_jump`.
     #[test]
     fn in_2d_a_jump_adds_to_the_vertical_walk_on_the_same_axis() {
         let default_jump_height = CharacterControllerData::default().jump_height;
@@ -3342,6 +3454,67 @@ mod character_controller_axis_tests {
             (both.y - (EXPECTED_TRAVEL + jump_rise)).abs() < 1e-5,
             "walk and jump share Y in 2D and must sum, got {both:?}"
         );
+    }
+
+    /// One `TwoD` frame for a player carrying a 2D body of `body` with the
+    /// motion state `physics_2d_sim` gives a dynamic 2D character, and no Rapier
+    /// context (so nothing is grounded). Returns (translation, velocity).
+    fn run_2d_body_frame(
+        body: bevy_rapier2d::prelude::RigidBody,
+        input: InputState,
+    ) -> (Vec3, Vec2) {
+        let mut world = World::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(Duration::from_millis(TEST_DT_MS));
+        world.insert_resource(time);
+        world.insert_resource(GameComponentRuntime::default());
+        world.insert_resource(input);
+        world.insert_resource(ProjectType::TwoD);
+        let entity = world
+            .spawn((
+                player(CharacterControllerData { speed: TEST_SPEED, ..Default::default() }),
+                body,
+                bevy_rapier2d::prelude::Velocity::zero(),
+                crate::core::character_controller::CharacterMotionState::default(),
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_character_controller);
+        schedule.run(&mut world);
+        (
+            world.get::<Transform>(entity).unwrap().translation,
+            world.get::<bevy_rapier2d::prelude::Velocity>(entity).unwrap().linear,
+        )
+    }
+
+    /// #10378: on a DYNAMIC 2D body the controller moves the body through its
+    /// velocity and never writes the transform, and a jump press with no
+    /// ground contact launches nothing. The old path nudged `y` by
+    /// `jump_height * 0.5 * dt` here and left the velocity at zero.
+    #[test]
+    fn a_dynamic_2d_body_is_driven_by_velocity_not_the_transform() {
+        let mut walk_and_jump = combined(&[("move_horizontal", false, 1.0)]);
+        walk_and_jump.actions.insert(
+            "jump".to_string(),
+            ActionValue { pressed: true, just_pressed: true, just_released: false, axis_value: 0.0 },
+        );
+        let (moved, velocity) =
+            run_2d_body_frame(bevy_rapier2d::prelude::RigidBody::Dynamic, walk_and_jump);
+        assert_eq!(moved, Vec3::ZERO, "the simulation moves a dynamic body, not the controller");
+        assert_eq!(velocity.x, TEST_SPEED, "walking sets the body's horizontal speed");
+        assert_eq!(velocity.y, 0.0, "no ground contact, so the press launches nothing");
+    }
+
+    /// A KINEMATIC 2D body is not moved by its velocity, so it keeps the legacy
+    /// path — the branch condition is the body type, not merely "has a body".
+    #[test]
+    fn a_kinematic_2d_body_keeps_the_legacy_translation_path() {
+        let (moved, velocity) = run_2d_body_frame(
+            bevy_rapier2d::prelude::RigidBody::KinematicPositionBased,
+            axis("move_horizontal", 1.0),
+        );
+        assert!((moved.x - EXPECTED_TRAVEL).abs() < 1e-5, "legacy translation, got {moved:?}");
+        assert_eq!(velocity, Vec2::ZERO);
     }
 
     /// The `fps` preset — the preset every generated 3D game is now bound to —

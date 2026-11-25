@@ -240,7 +240,7 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
 
   // Game component fields
   gcSpeed: 'How fast the character moves',
-  gcJumpHeight: 'How high the character jumps — a height in metres in 3D, a rise rate in 2D, so the same number feels different in each',
+  gcJumpHeight: 'How high the character jumps, in metres. In 2D only a character on a dynamic 2D physics body jumps that high; others get a small hop',
   gcGravityScale: 'How strongly gravity pulls this character down',
   gcDoubleJump: 'Allows a second jump while already in the air',
   gcMaxHP: 'The total amount of damage this object can take before being destroyed',

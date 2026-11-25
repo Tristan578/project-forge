@@ -9,8 +9,11 @@
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 
+use super::character_controller::{has_character_controller, CharacterMotionState};
 use super::engine_mode::EngineMode;
 use super::entity_id::EntityId;
+use super::game_components::GameComponents;
+use super::project_type::ProjectType;
 use super::physics_2d::{BodyType2d, ColliderShape2d, JointType2d, Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 
 // ---------------------------------------------------------------------------
@@ -98,8 +101,12 @@ pub fn make_collider_2d(data: &Physics2dData) -> Collider {
 /// Handles Edit->Play (attach), Play->Edit (detach), and Paused states.
 fn manage_physics2d_lifecycle(
     engine_mode: Res<EngineMode>,
+    project_type: Option<Res<ProjectType>>,
     mut commands: Commands,
-    to_attach: Query<(Entity, &Physics2dData, &Transform), (With<Physics2dEnabled>, Without<RigidBody>)>,
+    to_attach: Query<
+        (Entity, &Physics2dData, &Transform, Option<&GameComponents>),
+        (With<Physics2dEnabled>, Without<RigidBody>),
+    >,
     to_detach: Query<Entity, (With<RigidBody>, With<Physics2dEnabled>)>,
     mut rapier_config: Query<&mut RapierConfiguration>,
     mut prev_mode: Local<Option<EngineMode>>,
@@ -121,7 +128,9 @@ fn manage_physics2d_lifecycle(
     let entering_play = current == EngineMode::Play
         && prev.map_or(true, |p| p == EngineMode::Edit);
     if entering_play {
-        for (entity, physics_data, _transform) in to_attach.iter() {
+        // Absent until the first `set_project_type`, and absent means 3D.
+        let is_2d = matches!(project_type.as_deref(), Some(ProjectType::TwoD));
+        for (entity, physics_data, _transform, components) in to_attach.iter() {
             let collider = make_collider_2d(physics_data);
             let rigid_body = to_rapier_body_2d(&physics_data.body_type);
 
@@ -172,6 +181,20 @@ fn manage_physics2d_lifecycle(
             if physics_data.continuous_detection {
                 ec.insert(Ccd::enabled());
             }
+
+            // A 2D character on a DYNAMIC body is moved through that body's
+            // velocity by `system_character_controller` (#10378), which keeps
+            // its jump budget, coyote time and input buffer here. Inserted
+            // fresh each Play so no fall speed or spent jump survives a Stop;
+            // `insert_if_new` because a 3D lifecycle may already own one.
+            // A kinematic or static 2D character gets none and keeps the
+            // legacy direct-translation path.
+            if is_2d
+                && matches!(physics_data.body_type, BodyType2d::Dynamic)
+                && components.is_some_and(has_character_controller)
+            {
+                ec.insert_if_new(CharacterMotionState::default());
+            }
         }
         tracing::info!("Physics2D attached: {} entities", to_attach.iter().count());
     }
@@ -196,7 +219,8 @@ fn manage_physics2d_lifecycle(
                 .remove::<ExternalImpulse>()
                 .remove::<ActiveEvents>()
                 .remove::<ActiveCollisionTypes>()
-                .remove::<ImpulseJoint>();
+                .remove::<ImpulseJoint>()
+                .remove::<CharacterMotionState>();
         }
         tracing::info!("Physics2D detached");
     }
@@ -267,6 +291,252 @@ mod kinematic_contact_types {
         assert!(world.get::<RigidBody>(entity).is_none());
         assert!(world.get::<ActiveEvents>(entity).is_none());
         assert!(world.get::<ActiveCollisionTypes>(entity).is_none());
+    }
+}
+
+#[cfg(test)]
+mod dynamic_character_jump {
+    //! #10378: a 2D character could not jump. Its body is a DYNAMIC
+    //! `bevy_rapier2d` body, and the character controller used to write the
+    //! jump straight into the transform as a one-frame nudge of
+    //! `jump_height * 0.5 * dt` (~0.03 units here), with no vertical velocity
+    //! and no ground contact, so no 2D platformer with a gap or a raised
+    //! platform could be finished.
+    //!
+    //! These run the REAL 2D simulation — `RapierPhysicsPlugin`, this module's
+    //! own lifecycle and gravity sync, and the real `system_character_controller`
+    //! — on a manual 60 Hz clock, with a player box standing on a static floor.
+    //! A contact-free unit world cannot answer the question: the grounded gate
+    //! reads Rapier's narrow phase, which only a stepped simulation fills.
+    use super::*;
+    use crate::core::game_components::{
+        system_character_controller, CharacterControllerData, GameComponentData,
+        GameComponentRuntime, GameComponents,
+    };
+    use crate::core::input::{ActionValue, InputState};
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    const FLOOR_TOP: f32 = 0.0;
+    /// The player box is 1x1, so standing on the floor its centre is here.
+    const STANDING_Y: f32 = FLOOR_TOP + 0.5;
+
+    fn sim(controller: CharacterControllerData) -> (App, Entity) {
+        let mut app = App::new();
+        // The same baseline `schedule_smoke.rs` builds by hand, minus what a
+        // physics step does not read.
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            bevy::time::TimePlugin,
+            bevy::transform::TransformPlugin,
+            RapierPhysicsPlugin::<NoUserData>::default(),
+        ));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(1.0 / 60.0)));
+        app.insert_resource(EngineMode::Play);
+        app.insert_resource(ProjectType::TwoD);
+        app.init_resource::<Gravity2d>();
+        app.insert_resource(GameComponentRuntime::default());
+        app.insert_resource(InputState::default());
+        app.add_systems(
+            Update,
+            (manage_physics2d_lifecycle, sync_gravity2d, system_character_controller).chain(),
+        );
+
+        app.world_mut().spawn((
+            EntityId::new("floor"),
+            Physics2dData {
+                body_type: BodyType2d::Static,
+                size: [40.0, 1.0],
+                ..Default::default()
+            },
+            Physics2dEnabled,
+            Transform::from_xyz(0.0, FLOOR_TOP - 0.5, 0.0),
+        ));
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::CharacterController(controller));
+        let player = app
+            .world_mut()
+            .spawn((
+                EntityId::new("player"),
+                Physics2dData {
+                    body_type: BodyType2d::Dynamic,
+                    lock_rotation: true,
+                    friction: 0.2,
+                    ..Default::default()
+                },
+                Physics2dEnabled,
+                gc,
+                Transform::from_xyz(0.0, STANDING_Y + 0.02, 0.0),
+            ))
+            .id();
+        app.finish();
+        // Let the body settle onto the floor so the contact exists.
+        for _ in 0..60 {
+            app.update();
+        }
+        (app, player)
+    }
+
+    fn input(jump_just_pressed: bool, right: bool) -> InputState {
+        let mut input = InputState::default();
+        input.actions.insert(
+            "jump".to_string(),
+            ActionValue {
+                pressed: jump_just_pressed,
+                just_pressed: jump_just_pressed,
+                just_released: false,
+                axis_value: if jump_just_pressed { 1.0 } else { 0.0 },
+            },
+        );
+        input.actions.insert(
+            "move_right".to_string(),
+            ActionValue {
+                pressed: right,
+                just_pressed: false,
+                just_released: false,
+                axis_value: if right { 1.0 } else { 0.0 },
+            },
+        );
+        input
+    }
+
+    /// One frame with the given input; returns the player's centre height.
+    fn frame(app: &mut App, player: Entity, jump: bool, right: bool) -> Vec3 {
+        app.insert_resource(input(jump, right));
+        app.update();
+        app.world().get::<Transform>(player).expect("player exists").translation
+    }
+
+    /// Highest centre height reached over `frames` frames of no input.
+    fn apex_over(app: &mut App, player: Entity, frames: usize) -> f32 {
+        let mut apex = f32::MIN;
+        for _ in 0..frames {
+            apex = apex.max(frame(app, player, false, false).y);
+        }
+        apex
+    }
+
+    fn controller(jump_height: f32, can_double_jump: bool) -> CharacterControllerData {
+        CharacterControllerData { speed: 5.0, jump_height, gravity_scale: 1.0, can_double_jump }
+    }
+
+    #[test]
+    fn the_player_settles_on_the_floor_with_a_motion_state() {
+        let (app, player) = sim(controller(2.0, false));
+        let y = app.world().get::<Transform>(player).unwrap().translation.y;
+        assert!((y - STANDING_Y).abs() < 0.05, "the fixture must start standing, got y={y}");
+        assert!(
+            app.world().get::<CharacterMotionState>(player).is_some(),
+            "a dynamic 2D character gets the motion state that gates its jump"
+        );
+    }
+
+    /// The #10378 regression: a grounded jump press reaches the authored apex.
+    /// On the old path this rose about 0.03 units.
+    #[test]
+    fn a_grounded_jump_reaches_the_authored_apex() {
+        let jump_height = 2.0;
+        let (mut app, player) = sim(controller(jump_height, false));
+        let start = app.world().get::<Transform>(player).unwrap().translation.y;
+        frame(&mut app, player, true, false);
+        let apex = apex_over(&mut app, player, 120);
+        let rise = apex - start;
+        // Discrete integration at 60 Hz undershoots the analytic apex by about
+        // one frame of launch speed (~0.1 units at 6.3 u/s).
+        assert!(
+            (rise - jump_height).abs() < 0.3,
+            "jumpHeight {jump_height} must be the apex; rose {rise}"
+        );
+    }
+
+    /// Gravity brings the player back down and it can jump again from the
+    /// floor — the landing refills the budget.
+    #[test]
+    fn the_player_lands_and_can_jump_again() {
+        let (mut app, player) = sim(controller(2.0, false));
+        frame(&mut app, player, true, false);
+        apex_over(&mut app, player, 120);
+        let landed = app.world().get::<Transform>(player).unwrap().translation.y;
+        assert!((landed - STANDING_Y).abs() < 0.05, "landed back on the floor, got y={landed}");
+
+        frame(&mut app, player, true, false);
+        let rise = apex_over(&mut app, player, 120) - landed;
+        assert!(rise > 1.5, "a second jump from the floor must launch too; rose {rise}");
+    }
+
+    /// Without `canDoubleJump` a press in mid-air does nothing: the jump is
+    /// gated on ground contact, not on the key.
+    #[test]
+    fn a_mid_air_press_does_not_jump_again_without_double_jump() {
+        let (mut app, player) = sim(controller(2.0, false));
+        frame(&mut app, player, true, false);
+        // Rise for a while, then press again while still airborne.
+        let before_second = apex_over(&mut app, player, 20);
+        frame(&mut app, player, true, false);
+        let apex = before_second.max(apex_over(&mut app, player, 120));
+        let start = STANDING_Y;
+        assert!(
+            apex - start < 2.3,
+            "a mid-air press must not add height without canDoubleJump; apex rose {}",
+            apex - start
+        );
+    }
+
+    /// `canDoubleJump` grants exactly one air jump: the second press lifts the
+    /// player above a single jump's apex, a third does not lift it further.
+    #[test]
+    fn can_double_jump_grants_exactly_one_air_jump() {
+        let single = {
+            let (mut app, player) = sim(controller(2.0, true));
+            frame(&mut app, player, true, false);
+            apex_over(&mut app, player, 120)
+        };
+
+        let (mut app, player) = sim(controller(2.0, true));
+        frame(&mut app, player, true, false);
+        apex_over(&mut app, player, 20);
+        frame(&mut app, player, true, false);
+        // 40 frames is just past the air jump's own apex (~0.64 s).
+        let double = apex_over(&mut app, player, 40);
+        assert!(
+            double > single + 0.5,
+            "the air jump must lift the player above a single jump's apex ({single}), got {double}"
+        );
+
+        frame(&mut app, player, true, false);
+        let triple = apex_over(&mut app, player, 120).max(double);
+        let double_full = {
+            let (mut app2, player2) = sim(controller(2.0, true));
+            frame(&mut app2, player2, true, false);
+            apex_over(&mut app2, player2, 20);
+            frame(&mut app2, player2, true, false);
+            apex_over(&mut app2, player2, 120)
+        };
+        assert!(
+            triple <= double_full + 0.05,
+            "a third press must not jump again: double apex {double_full}, after a third press {triple}"
+        );
+    }
+
+    /// Walking goes through the body's velocity, so the simulation (and its
+    /// collisions) moves the player at the authored speed.
+    #[test]
+    fn holding_right_drives_the_body_at_the_authored_speed() {
+        let (mut app, player) = sim(controller(2.0, false));
+        let start = app.world().get::<Transform>(player).unwrap().translation.x;
+        let mut end = start;
+        for _ in 0..60 {
+            end = frame(&mut app, player, false, true).x;
+        }
+        // Read after the step, so floor friction has shaved a little off the
+        // speed the controller wrote; the legacy path wrote no velocity at all.
+        let velocity = app.world().get::<Velocity>(player).unwrap().linear.x;
+        assert!(velocity > 4.5 && velocity <= 5.0 + 1e-4, "the controller drives vx at speed 5, got {velocity}");
+        assert!(
+            (end - start - 5.0).abs() < 0.3,
+            "one second at speed 5 covers about 5 units, covered {}",
+            end - start
+        );
     }
 }
 
