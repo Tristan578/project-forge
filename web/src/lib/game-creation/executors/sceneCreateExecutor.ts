@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { waitForEngineFrame } from './engineDispatch';
-import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { createScene, loadProjectScenes, saveProjectScenes, snapshotStoredProjectScenes } from '@/lib/scenes/sceneManager';
 import type { NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import {
   ENGINE_THREW_RELOAD_GUIDANCE,
@@ -110,12 +110,31 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // spawns real geometry, so every step reaching this executor is a real scene
     // creation (PF-1138).
     const projectId = ctx.getStore().projectId;
+    // What was stored and what the editor listed before this step, taken before
+    // anything is written (#10380). A project with no stored registry yet loads
+    // as a placeholder, so the stored bytes, not the loaded project, are what a
+    // failed step must put back.
+    const restoreStoredRegistry = snapshotStoredProjectScenes(projectId);
+    const editorScenesBefore = ctx.getStore().scenes ?? [];
+    const editorActiveSceneBefore = ctx.getStore().activeSceneId ?? null;
     const project = loadProjectScenes(projectId);
     // `ctx.projectType` is the GDD's statement of the game's dimension — the
     // scene is created FOR that game, so it states that type (#10227). The
     // store's mirror may still be at its 3D default this early in the
     // pipeline, which is why the plan's value is the right one here.
     const { project: withScene, sceneId } = createScene(project, name, ctx.projectType);
+    // The registry as it was before this step wrote to it, so a `newScene()` that
+    // throws or is refused can put it back (#10380): the engine never created the
+    // scene, so the registry must not keep an entry for it.
+    const rollbackRegistry = (): void => {
+      try {
+        restoreStoredRegistry();
+        ctx.getStore().setScenes(editorScenesBefore, editorActiveSceneBefore);
+      } catch {
+        // Best effort: the step is already failing, and its own error is the one
+        // the user needs. A refused restore must not replace it.
+      }
+    };
     saveProjectScenes({ ...withScene, activeSceneId: sceneId }, projectId);
     ctx.getStore().setScenes(
       withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
@@ -171,7 +190,11 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     try {
       cleared = store.newScene({ completionMode: ctx.gdd?.completionMode });
     } catch (error) {
+      // Only the engine's own throw says the scene was never created. Any other
+      // throw can come after the engine accepted it (a subscriber, a storage
+      // write), so the registry entry stays to match the engine (#10380).
       if (!(error instanceof EngineDispatchThrewError)) throw error;
+      rollbackRegistry();
       return failResult(
         makeStepError(
           'ENGINE_DISPATCH_THREW',
@@ -182,6 +205,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
       );
     }
     if (cleared === false) {
+      rollbackRegistry();
       return failResult(
         makeStepError(
           'COMMAND_FAILED',
