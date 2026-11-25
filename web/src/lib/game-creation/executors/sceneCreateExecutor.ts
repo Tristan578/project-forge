@@ -190,8 +190,11 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     try {
       cleared = store.newScene({ completionMode: ctx.gdd?.completionMode });
     } catch (error) {
-      rollbackRegistry();
+      // Only the engine's own throw says the scene was never created. Any other
+      // throw can come after the engine accepted it (a subscriber, a storage
+      // write), so the registry entry stays to match the engine (#10380).
       if (!(error instanceof EngineDispatchThrewError)) throw error;
+      rollbackRegistry();
       return failResult(
         makeStepError(
           'ENGINE_DISPATCH_THREW',

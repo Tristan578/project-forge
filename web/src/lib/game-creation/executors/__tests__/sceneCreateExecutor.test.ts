@@ -381,6 +381,8 @@ describe('sceneCreateExecutor', () => {
 
       await expect(sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx)).rejects.toBe(quota);
       expect(newScene).toHaveBeenCalledTimes(1);
+      // The engine may already hold the new scene, so the registry keeps it (#10380).
+      expect(loadProjectScenes().scenes.some((scene) => scene.name === 'Cave Level')).toBe(true);
     });
   });
 
