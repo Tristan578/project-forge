@@ -273,7 +273,7 @@ describe('POST /api/stripe/webhook', () => {
 
     await POST(makeRequest('{}'));
 
-    expect(mockHandleSubscriptionUpdated).toHaveBeenCalledWith('cus_upd', 'sub_123', 'creator', 'past_due');
+    expect(mockHandleSubscriptionUpdated).toHaveBeenCalledWith('cus_upd', 'sub_123', 'creator', 'past_due', { refuseUpgrade: expect.any(Function) });
   });
 
   // -------------------------------------------------------------------------

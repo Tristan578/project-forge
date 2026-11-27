@@ -121,7 +121,15 @@ export async function handleSubscriptionUpdated(
   customerId: string,
   subscriptionId: string,
   newTier: Tier,
-  subscriptionStatus: string
+  subscriptionStatus: string,
+  options: {
+    /**
+     * Called only for an upgrade (more monthly tokens than the current tier).
+     * Resolves true to refuse it: nothing changes and no tokens are granted.
+     * The webhook uses it for the sanctions policy (#9331).
+     */
+    refuseUpgrade?: () => Promise<boolean>;
+  } = {}
 ): Promise<void> {
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
@@ -167,6 +175,10 @@ export async function handleSubscriptionUpdated(
   // with neon-http (throws), so this is the first correct implementation.
   const oldAllocation = TIER_MONTHLY_TOKENS[currentTier];
   const newAllocation = TIER_MONTHLY_TOKENS[newTier];
+
+  if (newAllocation > oldAllocation && options.refuseUpgrade && (await options.refuseUpgrade())) {
+    return;
+  }
 
   if (newAllocation > oldAllocation) {
     // Upgrade: grant the difference in tokens immediately.

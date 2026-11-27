@@ -226,9 +226,12 @@ describe('POST /api/billing/checkout', () => {
     expect(res.status).toBe(200);
     const params = mockCheckoutCreate.mock.calls[0][0];
     expect(params.automatic_tax).toBeUndefined();
-    expect(params.billing_address_collection).toBeUndefined();
-    expect(params.customer_update).toBeUndefined();
     expect(params.tax_id_collection).toBeUndefined();
+    // The billing address is collected and saved whether or not tax is on: the
+    // sanctions check at fulfilment reads it (#9331). Only the tax-only `name`
+    // write-back is absent.
+    expect(params.billing_address_collection).toBe('required');
+    expect(params.customer_update).toEqual({ address: 'auto' });
   });
 
   it('enables automatic_tax + address collection when STRIPE_TAX_ENABLED=true', async () => {

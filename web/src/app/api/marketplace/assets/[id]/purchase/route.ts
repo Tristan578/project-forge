@@ -6,11 +6,18 @@ import { eq, and, sql } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { validationError, conflict, forbidden, paymentRequired, internalError } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { sanctionsPurchaseBlock } from '@/lib/security/sanctionsGeoBlock';
 
 async function POST_impl(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  // Sanctions (#9331): buying an asset issues a licence to it, so a buyer
+  // whose location is known to be in a listed jurisdiction is refused, free
+  // assets included. No Stripe payment is involved, so the IP is the signal.
+  const geoBlocked = sanctionsPurchaseBlock(req);
+  if (geoBlocked) return geoBlocked;
+
   const { id: assetId } = await context.params;
 
   try {

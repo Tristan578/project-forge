@@ -120,6 +120,28 @@ describe('subscription-lifecycle', () => {
       await handleSubscriptionUpdated('cus_abc', 'sub_new', 'hobbyist', 'active');
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
     });
+
+    // Sanctions (#9331): the webhook refuses an upgrade for a listed billing address.
+    it('applies no upgrade when refuseUpgrade resolves true', async () => {
+      const refuseUpgrade = vi.fn().mockResolvedValue(true);
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'pro', 'active', { refuseUpgrade });
+      expect(refuseUpgrade).toHaveBeenCalledOnce();
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
+      expect(mockNeonSql).not.toHaveBeenCalled();
+    });
+
+    it('applies the upgrade when refuseUpgrade resolves false', async () => {
+      const refuseUpgrade = vi.fn().mockResolvedValue(false);
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'pro', 'active', { refuseUpgrade });
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+    });
+
+    it('never asks about a downgrade, so a customer can always step down', async () => {
+      const refuseUpgrade = vi.fn().mockResolvedValue(true);
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'hobbyist', 'active', { refuseUpgrade });
+      expect(refuseUpgrade).not.toHaveBeenCalled();
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+    });
   });
 });
 

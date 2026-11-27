@@ -239,6 +239,38 @@ Leave these unchecked until exercised in a running editor.
 
 ---
 
+## Sanctions Purchase Block (#9331)
+
+Site content is open to every country; only sales and licences are refused. Run against a local production build (`cd web && npm run build && npx next start`), where nothing overwrites the Vercel geolocation headers, so they can be set by hand. The list and the rules are in `specs/2026-11-04-sanctions-geo-block.md`. The purchase routes need a signed-in session (copy the session cookie from a browser into `-H 'cookie: ...'`) to get past auth in the "allowed" cases.
+
+### Content: open to a listed country
+- [ ] `curl -si -H 'x-vercel-ip-country: IR' http://localhost:3000/pricing` → `200`, the normal page
+- [ ] `curl -si -H 'x-vercel-ip-country: RU' http://localhost:3000/play/<user>/<game>` (a published game) → the game, not `451`
+- [ ] `curl -si -H 'x-vercel-ip-country: KP' http://localhost:3000/api/community/games` → the normal JSON, not `451`
+
+### Purchases: refused up front for a listed country
+- [ ] `curl -si -X POST -H 'x-vercel-ip-country: RU' -H 'content-type: application/json' -d '{"tier":"creator"}' http://localhost:3000/api/billing/checkout` → `451`, `{"error":"Purchases are not available in your region.","code":"SANCTIONS_GEO_BLOCK"}`, `Cache-Control: private, no-store`; no Stripe Checkout session is created
+- [ ] Repeat for `/api/tokens/purchase` (`{"package":"spark"}`) and `/api/marketplace/assets/<id>/purchase` → `451` each
+- [ ] `curl -si -X POST -H 'x-vercel-ip-country: RU' http://localhost:3000/api/billing/portal` → `451` (the portal can switch plans)
+- [ ] Signed in as a subscriber: `curl -si -X POST -H 'x-vercel-ip-country: RU' -H 'cookie: ...' 'http://localhost:3000/api/billing/portal?flow=cancel'` → `200` with a portal URL that opens on the cancel page
+- [ ] `-H 'x-vercel-ip-country: UA' -H 'x-vercel-ip-country-region: 43'` on checkout → `451`; region `30` (Kyiv) → not `451`
+
+### Purchases: unknown country is not refused
+- [ ] Signed in, no geo header: `curl -si -X POST -H 'cookie: ...' -H 'content-type: application/json' -d '{"tier":"creator"}' http://localhost:3000/api/billing/checkout` → `200` with a Checkout URL
+- [ ] Open that URL: Checkout asks for a billing address (required)
+
+### Fulfilment: refused by billing address (Stripe test mode, `stripe listen --forward-to localhost:3000/api/stripe/webhook`)
+- [ ] Buy a token pack with test card `4242 4242 4242 4242` and billing country **Iran** (or Russia) → the webhook logs `Sanctions: payment not fulfilled; refunding`; the addon token balance is unchanged; the payment shows as refunded in the Stripe test Dashboard; the following `charge.refunded` takes no tokens away
+- [ ] Subscribe to Creator with billing country **Cuba** → the subscription is cancelled and its first payment refunded; the user stays on the free tier
+- [ ] Buy a token pack with billing country **United States** → tokens credited, no refund
+- [ ] Resend the refused `checkout.session.completed` from the Dashboard → no second refund, no error
+
+### Bypass paths
+- [ ] `curl -si -H 'x-vercel-ip-country: IR' http://localhost:3000/api/health` → not `451`
+- [ ] `curl -si -X POST -H 'x-vercel-ip-country: IR' http://localhost:3000/api/stripe/webhook` → not `451` (signature check answers instead)
+
+---
+
 ## Production Smoke
 
 ### Sign-in Page Rendering

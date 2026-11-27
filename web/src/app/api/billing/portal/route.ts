@@ -4,9 +4,10 @@ import { requireStepUp } from '@/lib/auth/step-up';
 import { STEP_UP_ROUTES } from '@/lib/auth/security-policy';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
-import { buildPortalSessionParams } from '@/lib/billing/portal-config';
+import { buildPortalSessionParams, isCancelFlow } from '@/lib/billing/portal-config';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { sanctionsPurchaseBlock } from '@/lib/security/sanctionsGeoBlock';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
@@ -21,6 +22,15 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * cancellation/retention flow. See `buildPortalSessionParams`.
  */
 async function POST_impl(req: NextRequest) {
+  // Sanctions (#9331): the portal can switch plans (an upgrade is a sale), so
+  // a customer whose location is known to be in a listed jurisdiction is
+  // refused it. The cancel flow (`?flow=cancel`) stays open to everyone, so an
+  // existing customer can always cancel; it is checked again below once we
+  // know the deep link will really be applied.
+  const flow = req.nextUrl.searchParams.get('flow');
+  const geoBlocked = sanctionsPurchaseBlock(req);
+  if (geoBlocked && !isCancelFlow(flow)) return geoBlocked;
+
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -42,7 +52,9 @@ async function POST_impl(req: NextRequest) {
     );
   }
 
-  const flow = req.nextUrl.searchParams.get('flow');
+  // Without a subscription id the cancel deep link is dropped and the portal
+  // opens on its home page, where plans can be switched: refuse that too.
+  if (geoBlocked && !user.stripeSubscriptionId?.trim()) return geoBlocked;
 
   try {
     const session = await getStripe().billingPortal.sessions.create(
