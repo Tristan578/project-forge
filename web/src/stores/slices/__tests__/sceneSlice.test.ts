@@ -19,6 +19,7 @@ import type { SceneLoadError } from '../sceneSlice';
 vi.mock('@/lib/toast', () => ({
   showError: vi.fn(),
   showPersistentError: vi.fn(),
+  dismissToast: vi.fn(),
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
 }));
@@ -311,6 +312,92 @@ describe('sceneSlice', () => {
         setSceneDispatcher(vi.fn(() => { throw new Error('engine trapped'); }));
         expect(() => store.getState().newScene()).toThrow(EngineDispatchThrewError);
         expect(store.getState().newSceneRefusal()).toBeNull();
+      });
+    });
+
+    // A caller that passes `rejectionStrandsEditor: false` gets no
+    // `sceneLoadError`, so `sceneLoadRefusal()` is its only way to name the
+    // cause (the engine's bounded reason, or the prefab data) instead of a guess.
+    describe('sceneLoadRefusal() names why the last loadScene() answered false', () => {
+      it('is engine_refused with the bounded, worded engine reason, recorded even when saving is not locked', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'invalid type: null, expected f32 at line 1 column 120' })));
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')), { rejectionStrandsEditor: false })).toBe(false);
+
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(store.getState().sceneLoadRefusal()).toEqual({
+          kind: 'engine_refused',
+          details: 'Invalid type: null, expected f32.',
+        });
+      });
+
+      it('carries the same reason the lockout shows when saving IS locked', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'missing field `entities`' })));
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')))).toBe(false);
+
+        const refusal = store.getState().sceneLoadRefusal();
+        expect(refusal).toEqual({ kind: 'engine_refused', details: 'Missing field `entities`.' });
+        expect(store.getState().sceneLoadError?.reason).toContain('Details: Missing field `entities`.');
+      });
+
+      it('is engine_refused with null details when the engine gave no reason', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false })));
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')), { rejectionStrandsEditor: false })).toBe(false);
+        expect(store.getState().sceneLoadRefusal()).toEqual({ kind: 'engine_refused', details: null });
+      });
+
+      // A reason that is only the `Invalid scene file:` prefix words as
+      // ENGINE_GAVE_NO_DETAIL; quoting that as "details" would read as
+      // "The engine refused it: The engine gave no further detail."
+      it('records an empty engine reason as no reason, not as the no-detail sentence', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Invalid scene file: ' })));
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')), { rejectionStrandsEditor: false })).toBe(false);
+        expect(store.getState().sceneLoadRefusal()).toEqual({ kind: 'engine_refused', details: null });
+      });
+
+      it('is prefab_invalid when the embedded prefab data is refused, and the engine was never asked', () => {
+        const bad = JSON.stringify({ ...sceneFixture('Bad prefabs'), prefabDefinitions: {} });
+
+        expect(store.getState().loadScene(bad, { rejectionStrandsEditor: false })).toBe(false);
+
+        expect(store.getState().sceneLoadRefusal()).toEqual({ kind: 'prefab_invalid' });
+        expect(mockDispatch).not.toHaveBeenCalledWith('load_scene', expect.anything());
+      });
+
+      it('is prefab_invalid when saving IS locked, too', () => {
+        const bad = JSON.stringify({ ...sceneFixture('Bad prefabs'), prefabDefinitions: {} });
+
+        expect(store.getState().loadScene(bad)).toBe(false);
+
+        expect(store.getState().sceneLoadRefusal()).toEqual({ kind: 'prefab_invalid' });
+        expect(store.getState().sceneLoadError?.reason).toContain('prefab data is invalid');
+      });
+
+      it('is null when no engine is attached', () => {
+        setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+        expect(store.getState().loadScene(JSON.stringify(sceneFixture('Cold open')), { rejectionStrandsEditor: false })).toBe(false);
+        expect(store.getState().sceneLoadRefusal()).toBeNull();
+      });
+
+      it('is cleared by an accepted load and by a throw, which is not a refusal', () => {
+        const json = JSON.stringify(sceneFixture('Level'));
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(false);
+        expect(store.getState().sceneLoadRefusal()).not.toBeNull();
+
+        setSceneDispatcher(mockDispatch);
+        expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(true);
+        expect(store.getState().sceneLoadRefusal()).toBeNull();
+
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(false);
+        setSceneDispatcher(vi.fn(() => { throw new Error('engine trapped'); }));
+        expect(() => store.getState().loadScene(json, { rejectionStrandsEditor: false })).toThrow(EngineDispatchThrewError);
+        expect(store.getState().sceneLoadRefusal()).toBeNull();
       });
     });
 
@@ -1581,6 +1668,115 @@ describe('sceneSlice', () => {
       expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
     });
 
+    // The Scene Browser's switch loads with `rejectionStrandsEditor: false`, so
+    // no `sceneLoadError` carries the reason: the toast must name it from the
+    // recorded refusal, or from `newSceneRefusal()` on the fallback branch.
+    it('names the engine reason in a persistent toast when the switch target is refused', async () => {
+      store.getState().createNewScene('Second');
+      const before = store.getState().activeSceneId;
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      vi.mocked(toastModule.showPersistentError).mockClear();
+      setSceneDispatcher((command, payload) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(
+            new CustomEvent('forge:scene-exported', {
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
+            })
+          );
+        }
+        if (command === 'load_scene') return { success: false, error: 'missing field `entities` at line 1 column 2' };
+        return { success: true };
+      });
+
+      await store.getState().switchScene(target!.id);
+
+      expect(store.getState().activeSceneId).toBe(before);
+      expect(store.getState().sceneLoadError).toBeNull();
+      expect(toastModule.showPersistentError).toHaveBeenCalledExactlyOnceWith(
+        'The scene could not be opened, so the switch was cancelled. The engine refused it: Missing field `entities`. You are still on the current scene, which is unchanged.',
+        { id: 'scene-load-refused' },
+      );
+    });
+
+    // The refusal toast says "the current scene is unchanged". Any later
+    // successful load or new scene makes that false, whichever caller ran it
+    // (a chat tool included), so the slice clears it, not the callers.
+    it('closes a raised refusal toast when any later loadScene or newScene succeeds, and only then', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const refuseLoads = (command: string, payload: unknown) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(new CustomEvent('forge:scene-exported', { detail: { json: JSON.stringify(sceneFixture('Live')) } }));
+        }
+        if (command === 'load_scene') return { success: false, error: 'missing field `entities`' };
+        return { success: true };
+      };
+      const json = JSON.stringify(sceneFixture('Level'));
+
+      // Settle any toast an earlier test left raised, then start clean.
+      setSceneDispatcher(mockDispatch);
+      store.getState().loadScene(json, { rejectionStrandsEditor: false });
+      vi.mocked(toastModule.dismissToast).mockClear();
+
+      // A plain success with nothing raised does not touch the toast system.
+      expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(true);
+      expect(toastModule.dismissToast).not.toHaveBeenCalled();
+
+      // Refused Scene Browser switch raises it; a later load (as a chat tool would) closes it.
+      setSceneDispatcher(refuseLoads);
+      await store.getState().switchScene(target!.id);
+      expect(toastModule.showPersistentError).toHaveBeenCalledWith(expect.any(String), { id: 'scene-load-refused' });
+      setSceneDispatcher(mockDispatch);
+      expect(store.getState().loadScene(json, { rejectionStrandsEditor: false })).toBe(true);
+      expect(toastModule.dismissToast).toHaveBeenCalledExactlyOnceWith('scene-load-refused');
+
+      // Raised again; an accepted newScene closes it too.
+      vi.mocked(toastModule.dismissToast).mockClear();
+      setSceneDispatcher(refuseLoads);
+      await store.getState().switchScene(target!.id);
+      setSceneDispatcher(mockDispatch);
+      expect(store.getState().newScene()).toBe(true);
+      expect(toastModule.dismissToast).toHaveBeenCalledExactlyOnceWith('scene-load-refused');
+    });
+
+    it('names the newScene() refusal when the fallback for a data-less target is refused', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const project = loadProjectScenes(store.getState().projectId);
+      saveProjectScenes(
+        { ...project, scenes: project.scenes.map((s) => (s.id === target!.id ? { ...s, data: null } : s)) },
+        store.getState().projectId
+      );
+      vi.mocked(toastModule.showPersistentError).mockClear();
+      setSceneDispatcher((command, payload) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(
+            new CustomEvent('forge:scene-exported', {
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
+            })
+          );
+        }
+        if (command === 'new_scene') return { success: false, error: 'busy' };
+        return { success: true };
+      });
+
+      vi.mocked(toastModule.showError).mockClear();
+      await store.getState().switchScene(target!.id);
+
+      expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+      // The same ordinary toast the toolbar's New Scene shows for this refusal.
+      expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(
+        'The scene could not be opened, so the switch was cancelled. The engine did not accept a new scene. You are still on the current scene, which is unchanged.',
+      );
+      expect(toastModule.showPersistentError).not.toHaveBeenCalled();
+    });
+
     // Sentry (#10079 follow-up): when the TARGET scene's stored `data` is
     // null, `switchSceneIn` returns `sceneToLoad: null` and `switchScene`
     // falls back to `newScene()` instead of `loadScene()`. The catch block
@@ -1675,6 +1871,7 @@ describe('sceneSlice', () => {
         store.getState().projectId
       );
       vi.mocked(toastModule.showError).mockClear();
+      vi.mocked(toastModule.showPersistentError).mockClear();
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
       const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
         .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
@@ -1683,8 +1880,12 @@ describe('sceneSlice', () => {
 
         expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
         expect(store.getState().sceneLoadError).toBeNull();
-        expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('unchanged'));
+        expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining('the browser refused to update its local storage'),
+        );
+        expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining('unchanged'));
         expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('engine error'));
+        expect(toastModule.showPersistentError).not.toHaveBeenCalled();
       } finally {
         write.mockRestore();
         errorLog.mockRestore();

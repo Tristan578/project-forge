@@ -1,7 +1,6 @@
 import { blogPosts } from '@/lib/blog';
 import { withEgressGuard } from '@/lib/security/egressGuard';
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
+import { SITE_URL } from '@/lib/constants';
 
 function escapeXml(str: string): string {
   return str

@@ -8,6 +8,41 @@ Fingerprinting must be enabled first — see
 `web/src/lib/monitoring/sentryConfig.ts`. The rules below reference the
 fingerprint groups and tags set by that module.
 
+## What exists in Sentry (read 2026-11-04)
+
+Everything below this section is a recommendation unless it is listed here.
+Project `spawnforge-ai`, org `tristan-nolan`. Notifications go to the one
+existing destination: the issue alert "Send a notification for high priority
+issues" (id 3110296), which emails issue owners and falls back to active
+members. No Slack integration, channel or paging service was configured or
+inspected, and none was created.
+
+| Kind | Name | Rule |
+|------|------|------|
+| Cron monitor | `spawnforge-health-monitor` | every 15 min, see `docs/guides/health-monitor-cron.md` |
+| Uptime monitor | SpawnForge homepage (id 10853267) | `GET https://www.spawnforge.ai/`, 60 s, 10 s timeout, down after 2 failures, recovered after 2 |
+| Uptime monitor | SpawnForge health endpoint (id 10853268) | `GET https://www.spawnforge.ai/api/health`, same cadence. It returns 503 when a critical service is down, 200 when only a non-critical one is degraded |
+| Metric monitor | Generation Error Rate (count proxy) (id 10853301) | `generation.request` `outcome:error` sum > 5 in 5 min |
+| Metric monitor | Generation Latency Regression (id 10853304) | p95 `generation.duration` > 60000 ms over 15 min |
+| Metric monitor | Generation Provider Outage (id 10853305) | `generation.request` `outcome:provider_unavailable` sum > 20 in 5 min |
+| Metric monitor | Generation Ban Evasion / Bot Spike (id 10853306) | `generation.request` `outcome:banned` sum > 10 in 5 min, warning level, no alert attached |
+| Issue alerts | "high priority issues", "pull requests are ready" | pre-existing |
+
+The metric monitors implement #9090. Known gaps against that issue:
+
+- The error-rate monitor counts errors instead of dividing by total requests;
+  a monitor cannot divide two series here. It is not the approved ">5% of
+  requests" rule and will be noisy or blind at the wrong volumes.
+- The ban monitor's threshold of 10 is a placeholder; #9090 gave none.
+- None of the four has been shown to fire. #9090 asks for synthetic
+  threshold-crossing samples and for the group-by to be read back without
+  `[Filtered]` values. On 2026-11-04 the only outcome present in 30 days of
+  `generation.request` was `signed_out`, so `error`, `provider_unavailable` and
+  `banned` have never been observed.
+- Whether a metric issue at critical level matches the high-priority email
+  alert depends on how Sentry assigns issue priority; unverified.
+- The eight issue-alert rules below (fingerprint rules 1 to 8) do not exist.
+
 ---
 
 ## Alert Priority Levels

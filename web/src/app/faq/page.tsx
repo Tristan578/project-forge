@@ -8,6 +8,7 @@ import {
 } from '@/lib/billing/tierPlans';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
+import { SITE_URL } from '@/lib/constants';
 
 export const metadata: Metadata = {
   title: 'FAQ — SpawnForge',
@@ -18,8 +19,6 @@ export const metadata: Metadata = {
     description: 'Frequently asked questions about SpawnForge.',
   },
 };
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
 // The pricing answer is generated, not written. Hand-written, it named plans by
 // their internal billing keys ("Hobbyist", "Pro"), quoted a $99 top tier the
